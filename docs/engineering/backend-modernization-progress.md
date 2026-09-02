@@ -10,12 +10,19 @@ recorded commands have passed.
 - Starting commit: `c94ac8631419`
 - Started: 2026-08-30
 - Coordinator: principal implementation agent
-- Working-tree note: the branch was created while unrelated, pre-existing changes were
-  present under `docs/core/`, `src/ava/agent/`, `src/ava/app/`, and existing tests.
-  Those changes were preserved separately on `primary-agent-selection`; they are not
-  owned by this project and are not included in its milestone commits.
-- Dependency policy: no new production dependency without the review required by the
-  project brief.
+- Historical working-tree note: the branch was created while unrelated primary-agent
+  work was preserved separately. That feature later arrived through the prioritized
+  upstream lineage and is now part of the integrated base rather than an M0/M1 commit.
+- Prioritized upstream base: `origin/develop` at `3924ef03` was statically audited and
+  made an ancestor of this branch on 2026-09-02; the 33 modernization commits were
+  replayed above it. The original M0 hashes remain the evidence identity for the
+  pre-upstream `c94ac8631419` cohort and are not reinterpreted as measurements of the
+  rebased runtime.
+- Dependency policy: upstream added the pinned MIT `memory` submodule at
+  `4ddb41469f323e32c170637aa413a132e83727be`. Its source, license, build/runtime
+  integration, and static security properties were reviewed; it is attributed in
+  `THIRD_PARTY_NOTICES.md`. Submodule bootstrap was restored to exact-gitlink checkout
+  and rejects mismatches rather than following mutable branches.
 
 ## Status legend
 
@@ -30,10 +37,10 @@ recorded commands have passed.
 | M0.3 | Establish honest machine-recorded baseline and calibrated budgets | Performance Engineer + coordinator | completed | `docs/engineering/performance-baseline.md`; `docs/engineering/backend-performance-baseline-2026-08-30.json` | Release baseline, 5 runs, exact artifacts/hashes/source/build/host identity, raw RSS snapshots, median/p95/max | `6999441f` | Same-host 20% investigation trigger is non-gating; provenance is best-effort and cold-cache control unavailable |
 | M0.4 | Add lightweight CI performance/reliability smoke | Performance Engineer + coordinator | completed | `tests/CMakeLists.txt`; harness smoke checks | Default CTest registration; Release and BetaTest smoke pass; helper omission has a negative test | `8fab13fe`, `971327fb` | Coarse catastrophic ceilings intentionally do not gate microbenchmark deltas |
 | M1.1 | Define process ownership identifiers and supervisor API | Process Lifecycle Architect + coordinator | completed | [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md) | Accepted ADR; source Markdown links, documentation structure, and textual diff checks passed | `44f28d1a` | Implementation evidence remains in M1.2–M1.5 |
-| M1.2 | Implement managed Linux/POSIX process groups and tree cleanup; retain the future Windows contract without a support claim | Process Lifecycle Engineer | active | Design: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md) | Reservation/gate/group/reap contract accepted; implementation and platform tests active | pending | `setsid` escape and unkillable-process limits are explicit; Windows Job Objects remain deferred |
-| M1.3 | Migrate every process-spawning subsystem | Process Lifecycle Engineer + subsystem owners | not started | Migration matrix: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#api-and-authority-contract) | Five-wave migration and compatibility plan accepted; implementation evidence pending | pending | Browser/editor and secure bash/Mermaid adoption require dedicated migration tests |
-| M1.4 | Add bounded, secret-safe process diagnostics | Process Lifecycle Engineer | not started | Diagnostic contract: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#diagnostics-output-and-deadline-ownership) | Closed content-free schema and bounds accepted; implementation evidence pending | pending | Trace adaptation must preserve aliases and aggregate-only support export |
-| M1.5 | Add leak, cancellation, timeout, descendant, and shutdown tests | Process Test Engineer | active | Verification plan: [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#migration-and-verification) | Exact-reap, descendant, environment-canary, PTY, platform, and benchmark plan accepted; fixtures/tests active | pending | POSIX CI and PTY coverage remain required; Windows tests follow future support |
+| M1.2 | Implement managed Linux/POSIX process groups and tree cleanup; retain the future Windows contract without a support claim | Process Lifecycle Engineer | active | `src/ava/process/`; [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md) | Reservation-before-fork, gated exec/adoption, exact environments, readiness, pidfd/adaptive monitor, immutable deadlines, exact reap, scopes, and shutdown are implemented; process suites, repeated runs, ASan/UBSan, and process benchmark smoke pass | `09312277`–`dcf9a569` | Anchored executable/cwd capability implementation remains the next foundation wave; `setsid` escape, unkillable-process limits, and unsupported Windows execution remain explicit |
+| M1.3 | Migrate every process-spawning subsystem | Process Lifecycle Engineer + subsystem owners | active | Curl transport and clipboard helpers; migration matrix in [`docs/engineering/process-supervisor-adr.md`](process-supervisor-adr.md#api-and-authority-contract) | Curl and clipboard now use explicit application/session Supervisor scopes, exact role environments, bounded output/deadlines, managed-group cleanup, and static no-legacy-authority contracts; focused/repeated/full/sanitizer tests and process smoke pass | `d33c1be5`, `a6e6465c`, `f135c476`, `ffda314f`, `93d991c7` | Plugin, MCP, LSP, Bash, Mermaid, browser opener, and external editor remain legacy-local; no mixed ownership or runtime fallback is permitted |
+| M1.4 | Add bounded, secret-safe process diagnostics | Process Lifecycle Engineer | active | Process snapshots, launch framing, readiness, benchmark redaction | Closed content-free process reasons/snapshots and benchmark redaction are implemented and tested | M1 foundation commits | Application trace/support-export adaptation remains incomplete; no raw PID/PGID/fd/path/argv/environment content may be added |
+| M1.5 | Add leak, cancellation, timeout, descendant, and shutdown tests | Process Test Engineer | active | Process, Curl, clipboard, static-contract, and schema-v3 benchmark suites | Exact settlement/reap, leader-first descendants, refusal escalation, race gates, environment canaries, deadline cleanup, pidfd/fallback, Curl, clipboard, repeated races, ASan/UBSan, TSan for integrated concurrency, and full 164-test BetaTest pass | M1 foundation and migration commits | Real PTY gates remain for editor migration; POSIX CI and future Windows tests remain required |
 | M2.1 | Document and compatibility-test existing plugin protocol | Plugin Runtime Engineer | not started | pending | pending | Legacy protocol ambiguity |
 | M2.2 | Implement lazy, persistent, scoped plugin worker manager | Plugin Runtime Engineer | not started | pending | pending | Concurrency, restart, and trust-scope isolation |
 | M2.3 | Preserve one-shot plugin compatibility | Plugin Runtime Engineer | not started | pending | pending | Legacy behavior parity |
@@ -104,6 +111,18 @@ IDs and one of: `open`, `fixed`, `rejected`, or `deferred`.
 | M1-GATE-001 | M1 | fixed | [Foreground editor job control](process-supervisor-adr.md#m1-gate-001) is accepted: verified private group, RAII foreground-terminal transfer/restoration, bounded unsupported suspension, and real PTY gates. |
 | M1-GATE-002 | M1 | fixed | [Environment and credential inheritance](process-supervisor-adr.md#m1-gate-002) is accepted: exact profiles, ambient proxy/CA only for curl, explicit MCP env authority, minimal plugin env, and positive/negative canary tests. |
 | M1-GATE-003 | M1 | fixed | [Dependency enforcement](process-supervisor-adr.md#m1-gate-003) is accepted: `process` is scanned, may depend only on core, consumers may depend on it, and the exception fixture remains empty. |
+| UPSTREAM-SEC-001 | Integration | fixed | Static audit found no embedded malware, binary payload, obfuscation, persistence, credential exfiltration, or unexplained network behavior in `c94ac8631419..3924ef03` or the exact aicxx/utils/memory pins. The mutable maintainer-bootstrap path found during that audit was removed; `.gitmodules` is checkout-only and `autogen.sh` initializes exact gitlinks and rejects `+`/`U` states. |
+| UPSTREAM-SEC-002 | Integration | fixed | Project-primary provenance is typed, effective untrusted transitions are serialized across one manager/workspace, active runs/appends/jobs/deliveries block persistence, old controllers retire irreversibly, stale capsules are purged, and session construction/refresh holds a navigation reservation from before trust resolution through publication. Deterministic both-order races and the severe security re-review passed. Separate AVA processes/managers observe persisted trust only at their own open/reload boundary. |
+| UPSTREAM-DEP-001 | Integration | fixed | The new pinned MIT `memory` source was reviewed as a compiled production dependency, attributed in `THIRD_PARTY_NOTICES.md`, and included in release provenance. Its application pool is currently constructed but unused; no performance improvement is claimed. |
+
+## Prioritized upstream integration evidence
+
+- Audited top-level range: `c94ac863141975806bbab52e950a2f2499108b65..3924ef03a81ae991f5116c9321b05bc7d2f016b4` (24 commits, 89 net-changed files).
+- Audited dependency changes: aicxx `411eae31..15c31e10`, utils `5ed11a17..07c67a53`, and new memory pin `4ddb41469f323e32c170637aa413a132e83727be`. All commits were unsigned; unsigned status was recorded as provenance, not treated as evidence of malware.
+- Integration shape: `3924ef03` is the exact ancestor of the replayed modernization chain. Range comparison found one manual conflict in `tests/CMakeLists.txt`; its union retains Carlo's process-gate/timing tests and the modernization benchmark/process registrations.
+- Integrated BetaTest build passed after regenerating stale build-tree print-member output. Focused integration/security/process tests passed, four concurrency suites passed 20 repetitions, and the complete 164-test CTest run passed with only documented opt-in skips.
+- Focused ASan/UBSan passed 9/9 for runtime authority and process/Curl/clipboard paths. Focused TSan passed 4/4 for the session controller, subagent coordinator/delivery manager, and runtime trust races.
+- `ava_benchmark.smoke` and `ava_benchmark.process_smoke` passed. These are reliability checks, not latency or memory improvement claims; a fresh paired Release cohort is still required before making performance claims against the historical M0 source.
 
 ## M0 validation evidence
 
@@ -127,7 +146,8 @@ IDs and one of: `open`, `fixed`, `rejected`, or `deferred`.
 | Milestone | Commit | Scope |
 |---|---|---|
 | M0 | `3d4349ef`, `8fab13fe`, `971327fb`, `6999441f` | Current-state map, benchmark harness/smoke, review fixes, baseline evidence, and reliability-test fix |
-| M1 | pending | Accepted process-supervisor ADR; implementation and migration evidence pending |
+| M1 | `09312277`–`dcf9a569`, `d33c1be5`, `a6e6465c`, `f135c476`, `ffda314f`, `93d991c7` | Supervisor foundation plus Curl and clipboard authority migrations; seven production spawn families remain |
+| Integration | `ac29b0ef`, `bb99f5c4`, `544898be`, `7fc1c201`, `6ff6499e` | Pinned dependency bootstrap/notice and process-local workspace trust-revocation linearization above prioritized `3924ef03` |
 | M2 | pending | Persistent plugin workers |
 | M3 | pending | Selective tool catalog and router |
 | M4 | pending | Bounded sessions, index, payloads, receipts |

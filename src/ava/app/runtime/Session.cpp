@@ -434,25 +434,13 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
     reasoning = latest_persisted_reasoning(*loaded_entries, model);
 
   auto project_trust = load_project_trust_state(context.paths, workspace_dir);
-  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
-  if (context.requested_primary_agent)
-  {
-    auto global_agent_dirs = ava::agent::default_global_subagent_dirs();
-    if (global_agent_dirs.size() >= 2)
-    {
-      global_agent_dirs[0] = context.paths.ava_config_dir / "agents";
-      global_agent_dirs[1] = context.paths.ava_config_dir / "agent";
-    }
-    auto loaded_agents = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir,
-                                                                                    .global_agent_dirs = std::move(global_agent_dirs),
-                                                                                    .include_project_agents = project_resources_trusted(project_trust)});
-    auto resolved = ava::agent::resolve_primary_agent(loaded_agents, *context.requested_primary_agent);
-    if (!resolved)
-      return std::unexpected(std::move(resolved.error()));
-    selected_primary_agent = std::move(*resolved);
-  }
+  auto selected_primary_agent = resolve_runtime_primary_agent(
+      context.paths, workspace_dir, project_resources_trusted(project_trust), context.requested_primary_agent,
+      context.allow_unavailable_primary_agent ? PrimaryAgentResolutionPolicy::AllowUnavailable : PrimaryAgentResolutionPolicy::RequireAvailable);
+  if (!selected_primary_agent)
+    return std::unexpected(std::move(selected_primary_agent.error()));
   auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_resources_trusted(project_trust),
-                                                context.prompt_overrides, selected_primary_agent);
+                                                context.prompt_overrides, *selected_primary_agent);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
 
@@ -592,14 +580,15 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   }
 
   auto effective_tool_visibility = context.tool_visibility;
-  if (selected_primary_agent && selected_primary_agent->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
+  if (*selected_primary_agent && (*selected_primary_agent)->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
     effective_tool_visibility = ava::agent::narrow_tool_visibility_to_read_only(std::move(effective_tool_visibility));
 
   InvocationInputs invocation_inputs{.workspace_dir = workspace_dir,
                                      .current_dir = current_dir,
                                      .requested_tool_visibility = context.tool_visibility,
                                      .tool_visibility = std::move(effective_tool_visibility),
-                                     .selected_primary_agent = std::move(selected_primary_agent),
+                                     .requested_primary_agent = context.requested_primary_agent,
+                                     .selected_primary_agent = std::move(*selected_primary_agent),
                                      .paths = context.paths,
                                      .sessionless = sessionless,
                                      .is_offline_ = context.offline,
@@ -842,7 +831,8 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.current_dir = current_dir();
   context.mode = mode();
   context.tool_visibility = invocation_inputs().requested_tool_visibility;
-  context.requested_primary_agent = selected_primary_agent() ? std::optional<std::string>(selected_primary_agent()->name) : std::nullopt;
+  context.requested_primary_agent = requested_primary_agent();
+  context.allow_unavailable_primary_agent = true;
   context.paths = paths();
   context.offline = is_offline();
   context.additional_writable_dirs = additional_writable_dirs();
@@ -936,6 +926,32 @@ ava::core::VoidResult Session::apply_prompt_state_and_refresh(session_ts& unlock
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_prompt_state_and_refresh");
   CRITICAL_AREA_BEGIN_W(session);
+  auto applied = session_w->apply_prompt_state(std::move(prompt_state));
+  CRITICAL_AREA_END_W(session);
+  if (!applied)
+    return applied;
+  return refresh_parent_configuration(unlocked_session);
+}
+
+//static
+ava::core::VoidResult Session::apply_trust_prompt_state_and_refresh(session_ts& unlocked_session, ProjectTrustState project_trust,
+                                                                    std::optional<ava::agent::SubagentDefinition> selected_primary_agent,
+                                                                    PromptState prompt_state)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_trust_prompt_state_and_refresh");
+  bool const selected_primary_agent_is_non_project =
+      selected_primary_agent && (selected_primary_agent->provenance == ava::agent::SubagentDefinitionProvenance::Builtin ||
+                                 selected_primary_agent->provenance == ava::agent::SubagentDefinitionProvenance::Global);
+  if (selected_primary_agent && !project_resources_trusted(project_trust) && !selected_primary_agent_is_non_project)
+    selected_primary_agent.reset();
+
+  CRITICAL_AREA_BEGIN_W(session);
+  auto effective_tool_visibility = session_w->tool_visibility();
+  if (selected_primary_agent && selected_primary_agent->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
+    effective_tool_visibility = ava::agent::narrow_tool_visibility_to_read_only(std::move(effective_tool_visibility));
+  session_w->trust_state().project_trust = std::move(project_trust);
+  session_w->invocation_inputs().tool_visibility = std::move(effective_tool_visibility);
+  session_w->invocation_inputs().selected_primary_agent = std::move(selected_primary_agent);
   auto applied = session_w->apply_prompt_state(std::move(prompt_state));
   CRITICAL_AREA_END_W(session);
   if (!applied)

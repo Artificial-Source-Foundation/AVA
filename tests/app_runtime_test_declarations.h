@@ -34,6 +34,7 @@ void test_app_runtime_plugin_install_remove_commands();
 void test_app_context_reports_lsp_config_load_errors();
 void test_debug_session_mutex_tracks_current_thread();
 void test_app_run_prompt_isolates_ambient_extensions();
+void test_project_primary_revocation_removes_authority_without_broadening_tools();
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation();
 void test_app_run_prompt_emits_events();
 void test_app_run_prompt_expands_file_references();

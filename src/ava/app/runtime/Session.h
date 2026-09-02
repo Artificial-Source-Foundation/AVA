@@ -58,6 +58,8 @@ struct InvocationInputs
   // Invocation-requested visibility is retained separately so a replacement can re-resolve primary policy from the original CLI boundary.
   ava::agent::ToolVisibilityOptions requested_tool_visibility = {};
   ava::agent::ToolVisibilityOptions tool_visibility = {};
+  // Keep bounded selection intent separately from the currently permitted, provenance-carrying definition.
+  std::optional<std::string> requested_primary_agent = std::nullopt;
   std::optional<ava::agent::SubagentDefinition> selected_primary_agent = std::nullopt;
   ava::config::XdgPaths paths;
   bool sessionless;
@@ -311,6 +313,7 @@ class Session : protected Session_aggregate_base
   std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
   std::filesystem::path const& current_dir() const noexcept { return invocation_inputs_.current_dir; }
   ava::agent::ToolVisibilityOptions const& tool_visibility() const { return invocation_inputs_.tool_visibility; }
+  std::optional<std::string> const& requested_primary_agent() const { return invocation_inputs_.requested_primary_agent; }
   std::optional<ava::agent::SubagentDefinition> const& selected_primary_agent() const { return invocation_inputs_.selected_primary_agent; }
   ava::config::XdgPaths const& paths() const { return invocation_inputs_.paths; }
   bool sessionless() const { return invocation_inputs_.sessionless; }
@@ -460,6 +463,12 @@ class Session : protected Session_aggregate_base
 
   // Apply prompt_state to unlocked_session, release its write lock, then synchronously refresh retained parent configuration.
   [[nodiscard]] static ava::core::VoidResult apply_prompt_state_and_refresh(session_ts& unlocked_session, PromptState prompt_state);
+
+  // Atomically publish a trust transition with its permitted primary definition, sticky effective tool visibility, and reconstructed prompt state, then
+  // refresh retained parent configuration after releasing the session lock.
+  [[nodiscard]] static ava::core::VoidResult apply_trust_prompt_state_and_refresh(session_ts& unlocked_session, ProjectTrustState project_trust,
+                                                                                  std::optional<ava::agent::SubagentDefinition> selected_primary_agent,
+                                                                                  PromptState prompt_state);
 
   // Switch the active model to `model`, re-deriving the prompt state for the
   // current mode and clearing any active reasoning selection.

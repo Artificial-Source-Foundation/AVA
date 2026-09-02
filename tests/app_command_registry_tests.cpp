@@ -544,10 +544,10 @@ void test_project_trust_gates_project_resource_commands()
     auto failed_reload = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/reload trust"});
     expect(failed_reload && failed_reload->handled && !failed_reload->output.empty() && failed_reload->output[0].find("trust: error") != std::string::npos &&
                failed_reload->output[0].find("freshness source is not a regular file") != std::string::npos &&
-                project_trust().decision == ava::app::ProjectTrustDecision::Trusted,
-            "/reload trust keeps the old trust state if dependent prompt reload fails");
-    expect(system_prompt().find("Project system replacement") != std::string::npos && system_prompt().find("Project append instruction") != std::string::npos,
-            "/reload trust keeps the old prompt state if dependent prompt reload fails");
+               failed_reload->output[0].find("authority_state: project authority removed with fail-closed empty prompt") != std::string::npos &&
+               project_trust().decision == ava::app::ProjectTrustDecision::Denied,
+           "/reload trust applies an untrusted authority state even when dependent prompt reconstruction fails");
+    expect(system_prompt().empty(), "/reload trust removes all prior project prompt authority when untrusted reconstruction needs a fail-closed fallback");
     std::error_code restore_error;
     std::filesystem::remove(global_append, restore_error);
     write_app_test_file(global_append, "Global append instruction.\n");

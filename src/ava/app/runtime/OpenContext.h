@@ -45,6 +45,8 @@ struct OpenContext
   ava::agent::ToolVisibilityOptions tool_visibility;
   // Invocation-local configured primary agent name. Resolved after project trust is loaded.
   std::optional<std::string> requested_primary_agent = std::nullopt;
+  // Fresh explicit selections require a match. Replacement sessions preserve the request but tolerate its absence under their current trust catalog.
+  bool allow_unavailable_primary_agent = false;
   ava::config::XdgPaths paths = ava::config::xdg_paths();
   bool offline = false;
 

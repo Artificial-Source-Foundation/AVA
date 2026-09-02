@@ -7,8 +7,10 @@
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/commands.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/onboarding.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenContext.h"
@@ -353,6 +355,172 @@ void test_app_run_prompt_isolates_ambient_extensions()
          "exact isolated composition allocates an empty immutable MCP config when the session config is null");
   expect(ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt() == ordinary_prompt,
          "isolated runtime requests leave the ordinary session system prompt unchanged");
+}
+
+void test_project_primary_revocation_removes_authority_without_broadening_tools()
+{
+  constexpr std::string_view kAgentName = "layered-security-primary";
+  constexpr std::string_view kGlobalCanary = "GLOBAL_PRIMARY_SURVIVAL_CANARY_58cc";
+  constexpr std::string_view kInitialProjectCanary = "PROJECT_PRIMARY_REVOKE_CANARY_47e1";
+  constexpr std::string_view kReselectedProjectCanary = "PROJECT_PRIMARY_RESELECT_CANARY_715b";
+  constexpr std::string_view kReloadedProjectCanary = "PROJECT_PRIMARY_RELOAD_CANARY_a92d";
+
+  auto const root = create_empty_root("app-runtime-project-primary-revocation");
+  auto const workspace = root / "workspace";
+  auto const home = root / "home";
+  auto const paths = app_test_paths(root);
+  auto const global_primary_path = paths.ava_config_dir / "agents" / "layered-security-primary.md";
+  auto const project_primary_path = workspace / ".ava" / "agents" / "layered-security-primary.md";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(home);
+
+  ScopedEnvVar home_env("HOME", home.string());
+  ScopedEnvVar config_env("XDG_CONFIG_HOME", paths.config_home.string());
+  ScopedEnvVar state_env("XDG_STATE_HOME", paths.state_home.string());
+  ScopedEnvVar data_env("XDG_DATA_HOME", paths.data_home.string());
+
+  auto write_global_primary = [&] {
+    write_app_test_file(global_primary_path,
+                        "---\nname: layered-security-primary\ndescription: Global fallback primary.\nmode: primary\ntools: inherit\n---\n"
+                        "GLOBAL_PRIMARY_SURVIVAL_CANARY_58cc\n");
+  };
+  auto write_project_primary = [&](std::string_view canary, std::string_view tools) {
+    write_app_test_file(project_primary_path, "---\nname: layered-security-primary\ndescription: Project authority canary.\nmode: primary\ntools: " +
+                                                  std::string(tools) + "\n---\n" + std::string(canary) + "\n");
+  };
+  write_global_primary();
+  write_project_primary(kInitialProjectCanary, "read-only");
+  auto initially_trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(initially_trusted.has_value(), "project-primary revocation fixture starts trusted");
+
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  open_context.requested_primary_agent = std::string(kAgentName);
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), unlocked_session_result
+                                                  ? "trusted runtime selects the project primary"
+                                                  : "trusted runtime selects the project primary: " + unlocked_session_result.error().format());
+  if (!unlocked_session_result)
+    return;
+  auto& unlocked_session = *unlocked_session_result;
+
+  auto restricted_tools_are_retained = [](ava::agent::ToolVisibilityOptions const& visibility) {
+    return visibility.mode == ava::agent::ToolVisibilityMode::Default &&
+           visibility.included_tools == std::vector<std::string>({"read_file", "list_directory", "glob", "grep"}) && visibility.excluded_tools.empty();
+  };
+  auto expect_project_selection = [&](std::string_view canary, ava::agent::SubagentToolPreset preset, std::string_view label) {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    auto const& selected = session_r->selected_primary_agent();
+    expect(selected && selected->provenance == ava::agent::SubagentDefinitionProvenance::Project && selected->tool_preset == preset &&
+               selected->system_prompt.find(canary) != std::string::npos && session_r->requested_primary_agent() == std::optional<std::string>(kAgentName) &&
+               session_r->system_prompt().find(canary) != std::string::npos &&
+               session_r->ambient_extension_free_system_prompt().find(canary) != std::string::npos &&
+               session_r->system_prompt().find(kGlobalCanary) == std::string::npos && restricted_tools_are_retained(session_r->tool_visibility()),
+           std::string(label));
+  };
+  auto expect_project_authority_absent = [&](bool expect_global_fallback, std::string_view label) {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    auto const& selected = session_r->selected_primary_agent();
+    bool const selection_safe = expect_global_fallback ? selected && selected->provenance == ava::agent::SubagentDefinitionProvenance::Global &&
+                                                             selected->system_prompt.find(kGlobalCanary) != std::string::npos
+                                                       : !selected;
+    auto const prompts_safe = [&](std::string const& prompt) {
+      return prompt.find(kInitialProjectCanary) == std::string::npos && prompt.find(kReselectedProjectCanary) == std::string::npos &&
+             prompt.find(kReloadedProjectCanary) == std::string::npos &&
+             (expect_global_fallback ? prompt.find(kGlobalCanary) != std::string::npos : prompt.find(kGlobalCanary) == std::string::npos);
+    };
+    expect(selection_safe && session_r->requested_primary_agent() == std::optional<std::string>(kAgentName) && prompts_safe(session_r->system_prompt()) &&
+               prompts_safe(session_r->ambient_extension_free_system_prompt()) && restricted_tools_are_retained(session_r->tool_visibility()),
+           std::string(label));
+  };
+  auto run_trust = [&](std::string command, std::string_view label) {
+    auto result = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = std::move(command)});
+    expect(result && result->handled && !result->output.empty(), std::string(label));
+    return result;
+  };
+
+  expect_project_selection(kInitialProjectCanary, ava::agent::SubagentToolPreset::ReadOnly,
+                           "trusted startup records project provenance and applies its closed read-only visibility");
+
+  auto denied = run_trust("/trust deny", "/trust deny succeeds when replacing a project primary with the permitted global definition");
+  expect(denied && denied->output[0].find("decision=denied") != std::string::npos, "/trust deny reports the applied denied decision");
+  expect_project_authority_absent(true, "/trust deny removes both project-primary prompt variants and preserves the prior effective tool restriction");
+
+  write_project_primary(kReselectedProjectCanary, "inherit");
+  auto reenabled = run_trust("/trust project", "/trust project re-enables and re-resolves the requested primary");
+  expect(reenabled && reenabled->output[0].find("decision=trusted") != std::string::npos, "/trust project reports the re-enabled trust decision");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "trust re-enable uses the current permitted project definition without broadening the previous read-only visibility");
+
+  std::error_code remove_global_error;
+  std::filesystem::remove(global_primary_path, remove_global_error);
+  expect(!remove_global_error, "project-primary revocation fixture removes its global fallback before clear");
+  auto cleared = run_trust("/trust clear", "/trust clear succeeds when the requested project-only primary becomes unavailable");
+  expect(cleared && cleared->output[0].find("decision=unknown") != std::string::npos, "/trust clear reports the applied unknown decision");
+  expect_project_authority_absent(false, "/trust clear falls back to no primary while retaining the previous effective tool restriction");
+
+  auto replacement_result = ava::app::runtime::Session::create_like(unlocked_session, {});
+  expect(replacement_result.has_value(),
+         replacement_result
+             ? "replacement session tolerates an inherited requested primary that is unavailable while untrusted"
+             : "replacement session tolerates an inherited requested primary that is unavailable while untrusted: " + replacement_result.error().format());
+  if (replacement_result)
+  {
+    SCOPED_CRITICAL_AREA_R(replacement_r, *replacement_result);
+    expect(!replacement_r->selected_primary_agent() && replacement_r->requested_primary_agent() == std::optional<std::string>(kAgentName) &&
+               replacement_r->system_prompt().find(kInitialProjectCanary) == std::string::npos &&
+               replacement_r->system_prompt().find(kReselectedProjectCanary) == std::string::npos &&
+               replacement_r->tool_visibility().mode == ava::agent::ToolVisibilityMode::Default && replacement_r->tool_visibility().included_tools.empty(),
+           "a new replacement session preserves selection intent but resets the prior session's sticky tool restriction at the session boundary");
+  }
+
+  write_global_primary();
+  run_trust("/trust project", "/trust project re-enables the project primary after clear");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "project primary is reselected after clear when trust is explicitly enabled again");
+  run_trust("/trust untrust", "/trust untrust revokes a reselected project primary");
+  expect_project_authority_absent(true, "/trust untrust removes project authority and preserves the valid global primary");
+
+  auto externally_trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(externally_trusted.has_value(), "project-primary fixture externally re-enables trust for reload coverage");
+  run_trust("/reload trust", "/reload trust applies external trust enablement");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "/reload trust re-resolves the requested primary from the newly permitted project catalog");
+
+  write_project_primary(kReloadedProjectCanary, "inherit");
+  run_trust("/reload trust", "/reload trust refreshes a trusted primary definition");
+  expect_project_selection(kReloadedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "/reload trust never accepts the cached project definition across a trust reload");
+
+  auto externally_denied = ava::app::set_project_trust_decision(paths, workspace, false);
+  expect(externally_denied.has_value(), "project-primary fixture externally denies trust for reload coverage");
+  run_trust("/reload trust", "/reload trust applies external denial");
+  expect_project_authority_absent(true, "/reload trust to untrusted atomically replaces project authority with the permitted global primary");
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"revoked authority absent\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  auto provider_result = ava::app::run_prompt(unlocked_session, "verify revoked primary", provider, transport, run_options);
+  expect(provider_result && provider_result->final_text == "revoked authority absent" && transport.requests().size() == 1,
+         "a provider request runs after project-primary revocation");
+  if (transport.requests().size() == 1)
+  {
+    auto const& request = transport.requests().front().body;
+    expect(request.find(kInitialProjectCanary) == std::string::npos && request.find(kReselectedProjectCanary) == std::string::npos &&
+               request.find(kReloadedProjectCanary) == std::string::npos && request.find(kGlobalCanary) != std::string::npos,
+           "the next provider request cannot observe any revoked project-primary prompt content and retains the global primary");
+    expect(request.find("\"name\":\"read_file\"") != std::string::npos && request.find("\"name\":\"write_file\"") == std::string::npos &&
+               request.find("\"name\":\"bash\"") == std::string::npos,
+           "the next provider request retains read tools without silently restoring broader mutation or shell tools");
+  }
 }
 
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation()

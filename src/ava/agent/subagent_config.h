@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <filesystem>
 #include <optional>
+#include <ostream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,6 +19,16 @@ enum class SubagentToolPreset
   ReadOnly,
 };
 
+enum class SubagentDefinitionProvenance
+{
+  Unknown,
+  Builtin,
+  Global,
+  Project,
+};
+
+[[nodiscard]] std::string_view to_string(SubagentDefinitionProvenance provenance) noexcept;
+
 struct SubagentDefinition
 {
   std::string name;
@@ -25,10 +36,17 @@ struct SubagentDefinition
   std::string system_prompt;
   SubagentToolPreset tool_preset = SubagentToolPreset::Inherit;
   bool hidden = false;
-  bool builtin = false;
+  SubagentDefinitionProvenance provenance = SubagentDefinitionProvenance::Unknown;
   std::filesystem::path path = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Primary definitions retain prompt text and a source path. Keep generated diagnostics from printing either; expose only bounded selection metadata.
+  void print_on(std::ostream& os) const
+  {
+    os << "{name_bytes:" << name.size() << ",tool_preset:" << (tool_preset == SubagentToolPreset::ReadOnly ? "read-only" : "inherit") << ",hidden:" << hidden
+       << ",provenance:" << to_string(provenance) << '}';
+  }
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct SubagentDiagnostic

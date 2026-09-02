@@ -11,8 +11,10 @@
 #include "ava/session/compaction.h"
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -171,26 +173,50 @@ ReloadReportRow reload_trust_settings(runtime::session_ts& unlocked_session)
                       session_r->workspace_dir(),
                       session_r->current_dir(),
                       session_r->prompt_overrides(),
-                      session_r->selected_primary_agent()};
+                      session_r->requested_primary_agent(),
+                      session_r->run_controller()};
   }();
-  auto& [paths, model, mode, workspace_dir, current_dir, prompt_overrides, selected_primary_agent] = snapshot;
+  auto& [paths, model, mode, workspace_dir, current_dir, prompt_overrides, requested_primary_agent, run_controller] = snapshot;
+  if (!run_controller)
+    return reload_error_row("trust", ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  // Exclude provider admission until the reloaded trust catalog and prompt authority are published together.
+  auto maintenance = run_controller->reserve_maintenance();
+  if (!maintenance)
+    return reload_error_row("trust", maintenance.error());
+
   auto next_trust = load_project_trust_state(paths, workspace_dir);
+  auto selected_primary_agent = runtime::resolve_runtime_primary_agent(paths, workspace_dir, project_resources_trusted(next_trust), requested_primary_agent,
+                                                                       runtime::PrimaryAgentResolutionPolicy::AllowUnavailable);
+  if (!selected_primary_agent)
+    return reload_error_row("trust", selected_primary_agent.error());
   auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust),
-                                                         prompt_overrides, selected_primary_agent);
+                                                         prompt_overrides, *selected_primary_agent);
   if (!prompt_state)
   {
     auto row = reload_error_row("trust", prompt_state.error());
     append_reload_detail(row, "trust_file", next_trust.trust_file.string());
+    if (!project_resources_trusted(next_trust))
+    {
+      // External revocation still takes effect when unrelated non-project prompt reconstruction fails.
+      runtime::PromptState fail_closed_prompt;
+      fail_closed_prompt.mode = mode;
+      if (auto secured =
+              runtime::Session::apply_trust_prompt_state_and_refresh(unlocked_session, std::move(next_trust), std::nullopt, std::move(fail_closed_prompt));
+          !secured)
+      {
+        return reload_error_row("trust", secured.error());
+      }
+      append_reload_detail(row, "authority_state", "project authority removed with fail-closed empty prompt");
+    }
     return row;
   }
-  ProjectTrustState applied_trust;
+  if (auto refreshed = runtime::Session::apply_trust_prompt_state_and_refresh(unlocked_session, std::move(next_trust), std::move(*selected_primary_agent),
+                                                                              std::move(*prompt_state));
+      !refreshed)
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    session_w->trust_state().project_trust = std::move(next_trust);
-  }
-  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
     return reload_error_row("trust", refreshed.error());
-  applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
+  }
+  auto const applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
   ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
   append_reload_detail(row, "trust_file", applied_trust.trust_file.string());
   append_reload_detail(row, "decision", std::string(to_string(applied_trust.decision)));

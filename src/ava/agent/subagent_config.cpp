@@ -124,7 +124,7 @@ void add_or_replace_definition(std::vector<SubagentDefinition>& definitions, std
       add_diagnostic(diagnostics, definition.path, "too many agent definitions; entry ignored");
     return;
   }
-  if (protect_builtins && existing->builtin)
+  if (protect_builtins && existing->provenance == SubagentDefinitionProvenance::Builtin)
   {
     add_diagnostic(diagnostics, definition.path, "subagent name collides with a builtin: " + definition.name);
     return;
@@ -144,7 +144,7 @@ void invalidate_primary(std::vector<SubagentDefinition>& primary_agents, std::ve
 
 void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<SubagentDefinition>& primary_agents,
                         std::vector<std::string>& invalid_primary_agents, std::vector<SubagentDiagnostic>& diagnostics, std::filesystem::path const& path,
-                        std::size_t max_file_bytes)
+                        SubagentDefinitionProvenance provenance, std::size_t max_file_bytes)
 {
   auto content = context::read_resource_file(path, {.max_bytes = max_file_bytes, .resource_description = "subagent file"});
   if (!content)
@@ -208,7 +208,7 @@ void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<
                                 .system_prompt = std::move(parsed.body),
                                 .tool_preset = *tools,
                                 .hidden = hidden_field(parsed.frontmatter),
-                                .builtin = false,
+                                .provenance = provenance,
                                 .path = path};
   if (mode == "subagent" || mode == "all")
     add_or_replace_definition(subagents, diagnostics, definition, true);
@@ -223,7 +223,7 @@ void load_subagent_file(std::vector<SubagentDefinition>& subagents, std::vector<
 
 void discover_from_root(std::vector<SubagentDefinition>& subagents, std::vector<SubagentDefinition>& primary_agents,
                         std::vector<std::string>& invalid_primary_agents, std::vector<SubagentDiagnostic>& diagnostics, std::filesystem::path const& root,
-                        std::size_t max_file_bytes)
+                        SubagentDefinitionProvenance provenance, std::size_t max_file_bytes)
 {
   if (root.empty())
     return;
@@ -253,10 +253,26 @@ void discover_from_root(std::vector<SubagentDefinition>& subagents, std::vector<
     add_diagnostic(diagnostics, root, "failed to iterate agent directory");
   std::ranges::sort(definition_paths);
   for (auto const& path : definition_paths)
-    load_subagent_file(subagents, primary_agents, invalid_primary_agents, diagnostics, path, max_file_bytes);
+    load_subagent_file(subagents, primary_agents, invalid_primary_agents, diagnostics, path, provenance, max_file_bytes);
 }
 
 }  // namespace
+
+std::string_view to_string(SubagentDefinitionProvenance provenance) noexcept
+{
+  switch (provenance)
+  {
+    case SubagentDefinitionProvenance::Unknown:
+      return "unknown";
+    case SubagentDefinitionProvenance::Builtin:
+      return "builtin";
+    case SubagentDefinitionProvenance::Global:
+      return "global";
+    case SubagentDefinitionProvenance::Project:
+      return "project";
+  }
+  return "unknown";
+}
 
 bool valid_subagent_name(std::string_view name)
 {
@@ -284,12 +300,12 @@ std::vector<SubagentDefinition> builtin_subagents()
                          .description = "General-purpose subagent for delegated coding, analysis, and verification tasks.",
                          .system_prompt = "You are AVA's general subagent. Complete the delegated task and return only the result needed by the parent agent.",
                          .tool_preset = SubagentToolPreset::Inherit,
-                         .builtin = true},
+                         .provenance = SubagentDefinitionProvenance::Builtin},
       SubagentDefinition{.name = "explore",
                          .description = "Read-only subagent for fast codebase exploration and concise findings.",
                          .system_prompt = "You are AVA's explore subagent. Read, list, and search files only. Return concise findings to the parent agent.",
                          .tool_preset = SubagentToolPreset::ReadOnly,
-                         .builtin = true}};
+                         .provenance = SubagentDefinitionProvenance::Builtin}};
 }
 
 std::vector<std::filesystem::path> default_global_subagent_dirs()
@@ -326,11 +342,13 @@ SubagentLoadResult load_subagents(SubagentLoadOptions options)
   SubagentLoadResult result;
   result.subagents = builtin_subagents();
   for (auto const& dir : options.global_agent_dirs)
-    discover_from_root(result.subagents, result.primary_agents, result.invalid_primary_agents, result.diagnostics, dir, options.max_file_bytes);
+    discover_from_root(result.subagents, result.primary_agents, result.invalid_primary_agents, result.diagnostics, dir, SubagentDefinitionProvenance::Global,
+                       options.max_file_bytes);
   if (options.include_project_agents)
   {
     for (auto const& dir : options.project_agent_dirs)
-      discover_from_root(result.subagents, result.primary_agents, result.invalid_primary_agents, result.diagnostics, dir, options.max_file_bytes);
+      discover_from_root(result.subagents, result.primary_agents, result.invalid_primary_agents, result.diagnostics, dir, SubagentDefinitionProvenance::Project,
+                         options.max_file_bytes);
   }
   auto by_name = [](SubagentDefinition const& left, SubagentDefinition const& right) { return left.name < right.name; };
   std::ranges::sort(result.subagents, by_name);

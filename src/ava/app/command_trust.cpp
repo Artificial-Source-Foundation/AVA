@@ -7,6 +7,8 @@
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_prompt.h"
 
+#include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -48,7 +50,7 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts&
   std::filesystem::path workspace_dir;
   std::filesystem::path current_dir;
   runtime::PromptOverrides prompt_overrides;
-  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
+  std::optional<std::string> requested_primary_agent;
   {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     paths = session_r->paths();
@@ -57,21 +59,39 @@ ava::core::Result<CommandResult> reload_project_trust_state(runtime::session_ts&
     workspace_dir = session_r->workspace_dir();
     current_dir = session_r->current_dir();
     prompt_overrides = session_r->prompt_overrides();
-    selected_primary_agent = session_r->selected_primary_agent();
+    requested_primary_agent = session_r->requested_primary_agent();
   }
   auto next_trust = load_project_trust_state(paths, workspace_dir);
+  auto selected_primary_agent = runtime::resolve_runtime_primary_agent(paths, workspace_dir, project_resources_trusted(next_trust), requested_primary_agent,
+                                                                       runtime::PrimaryAgentResolutionPolicy::AllowUnavailable);
+  if (!selected_primary_agent)
+    return std::unexpected(std::move(selected_primary_agent.error()));
   auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust),
-                                                         prompt_overrides, selected_primary_agent);
+                                                         prompt_overrides, *selected_primary_agent);
   if (!prompt_state)
-    return std::unexpected(std::move(prompt_state.error()));
-  ProjectTrustState applied_trust;
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    session_w->trust_state().project_trust = std::move(next_trust);
+    auto error = std::move(prompt_state.error());
+    if (!project_resources_trusted(next_trust))
+    {
+      // A persisted revocation must not leave the old project prompt live merely because unrelated non-project prompt reconstruction failed.
+      runtime::PromptState fail_closed_prompt;
+      fail_closed_prompt.mode = mode;
+      if (auto secured =
+              runtime::Session::apply_trust_prompt_state_and_refresh(unlocked_session, std::move(next_trust), std::nullopt, std::move(fail_closed_prompt));
+          !secured)
+      {
+        return std::unexpected(std::move(secured.error()));
+      }
+    }
+    return std::unexpected(std::move(error));
   }
-  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
+  if (auto refreshed = runtime::Session::apply_trust_prompt_state_and_refresh(unlocked_session, std::move(next_trust), std::move(*selected_primary_agent),
+                                                                              std::move(*prompt_state));
+      !refreshed)
+  {
     return std::unexpected(std::move(refreshed.error()));
-  applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
+  }
+  auto const applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
   return handled_text(std::move(prefix) + "\n" + project_trust_summary(applied_trust));
 }
 
@@ -84,35 +104,47 @@ ava::core::Result<CommandResult> run_trust_command(runtime::session_ts& unlocked
   if (action == "status")
     return handled_text(project_trust_summary(runtime::session_ts::rat(unlocked_session)->project_trust()));
 
+  bool const enables_trust = action == "project" || action == "trust" || action == "approve";
+  bool const denies_trust = action == "deny" || action == "untrust";
+  bool const clears_trust = action == "clear";
+  if (!enables_trust && !denies_trust && !clears_trust)
+    return handled_text("unsupported trust action: " + action + "\nsupported: status, project, deny, clear");
+
   ava::config::XdgPaths paths;
   std::filesystem::path workspace_dir;
+  std::shared_ptr<SessionRunController> run_controller;
   {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
     paths = session_r->paths();
     workspace_dir = session_r->workspace_dir();
+    run_controller = session_r->run_controller();
   }
-  if (action == "project" || action == "trust" || action == "approve")
+  if (!run_controller)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "runtime session controller is unavailable"));
+  // Exclude provider admission from the persisted trust write through the atomic in-memory authority publication.
+  auto maintenance = run_controller->reserve_maintenance();
+  if (!maintenance)
+    return std::unexpected(std::move(maintenance.error()));
+
+  if (enables_trust)
   {
     auto saved = set_project_trust_decision(paths, workspace_dir, true);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
     return reload_project_trust_state(unlocked_session, "trusted project resources");
   }
-  if (action == "deny" || action == "untrust")
+  if (denies_trust)
   {
     auto saved = set_project_trust_decision(paths, workspace_dir, false);
     if (!saved)
       return std::unexpected(std::move(saved.error()));
     return reload_project_trust_state(unlocked_session, "denied project resources");
   }
-  if (action == "clear")
-  {
-    auto cleared = clear_project_trust_decision(paths, workspace_dir);
-    if (!cleared)
-      return std::unexpected(std::move(cleared.error()));
-    return reload_project_trust_state(unlocked_session, "cleared project trust decision");
-  }
-  return handled_text("unsupported trust action: " + action + "\nsupported: status, project, deny, clear");
+
+  auto cleared = clear_project_trust_decision(paths, workspace_dir);
+  if (!cleared)
+    return std::unexpected(std::move(cleared.error()));
+  return reload_project_trust_state(unlocked_session, "cleared project trust decision");
 }
 
 }  // namespace ava::app

@@ -42,6 +42,7 @@ void run_app_runtime_tests()
   test_clear_trust_retires_only_for_effective_untrusted_state();
   test_untrusted_mutation_rejects_active_run_and_append_before_write();
   test_post_persistence_publication_failure_leaves_reopen_required();
+  test_session_construction_linearizes_with_workspace_revocation();
   test_workspace_revocation_retires_retained_sessions_transactionally();
   test_app_run_prompt_sources_private_launch_display_from_runtime_invocation();
   test_app_run_prompt_emits_events();

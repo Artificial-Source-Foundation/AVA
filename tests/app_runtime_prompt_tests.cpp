@@ -731,6 +731,209 @@ void test_post_persistence_publication_failure_leaves_reopen_required()
   (*manager)->shutdown();
 }
 
+void test_session_construction_linearizes_with_workspace_revocation()
+{
+  constexpr std::string_view kProjectCanary = "CONSTRUCTION_RACE_PROJECT_CANARY_14b7";
+  auto const root = create_empty_root("app-runtime-construction-revocation-race");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  write_app_test_file(workspace / ".ava" / "APPEND_SYSTEM.md", std::string(kProjectCanary) + "\n");
+  expect(ava::app::set_project_trust_decision(paths, workspace, true).has_value(), "construction race fixture starts trusted");
+
+  struct RaceBarrier
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool construction_armed = false;
+    bool construction_reached = false;
+    bool release_construction = false;
+    bool revocation_armed = false;
+    bool revocation_reached = false;
+    bool release_revocation = false;
+  };
+  auto barrier = std::make_shared<RaceBarrier>();
+  auto coordinator = ava::agent::SubagentCoordinator::create();
+  if (!coordinator)
+  {
+    expect(false, "construction race fixture creates a coordinator");
+    return;
+  }
+  auto manager = ava::app::SubagentDeliveryManager::create({.coordinator = *coordinator,
+                                                            .construction_after_trusted_prompt_resolution_for_test =
+                                                                [barrier] {
+                                                                  std::unique_lock lock(barrier->mutex);
+                                                                  if (!barrier->construction_armed)
+                                                                    return;
+                                                                  barrier->construction_reached = true;
+                                                                  barrier->changed.notify_all();
+                                                                  barrier->changed.wait(lock, [&] { return barrier->release_construction; });
+                                                                  barrier->construction_armed = false;
+                                                                },
+                                                            .revocation_after_retirement_for_test =
+                                                                [barrier] {
+                                                                  std::unique_lock lock(barrier->mutex);
+                                                                  if (!barrier->revocation_armed)
+                                                                    return;
+                                                                  barrier->revocation_reached = true;
+                                                                  barrier->changed.notify_all();
+                                                                  barrier->changed.wait(lock, [&] { return barrier->release_revocation; });
+                                                                  barrier->revocation_armed = false;
+                                                                }});
+  if (!manager)
+  {
+    expect(false, "construction race fixture creates a delivery manager");
+    return;
+  }
+
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  context.subagent_coordinator = *coordinator;
+  context.subagent_delivery_manager = *manager;
+  auto opened = ava::app::runtime::Session::open(context);
+  if (!opened)
+  {
+    expect(false, "construction race fixture opens the revoking session");
+    return;
+  }
+  auto& session = *opened;
+  auto trust_file_contents = [&] {
+    std::ifstream file(ava::app::project_trust_file(paths), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  };
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->construction_armed = true;
+    barrier->construction_reached = false;
+    barrier->release_construction = false;
+  }
+  using SessionResult = ava::core::Result<ava::app::runtime::session_ts>;
+  std::optional<SessionResult> opening;
+  std::jthread opener([&] { opening.emplace(ava::app::runtime::Session::create_like(session, {})); });
+  bool construction_reached = false;
+  {
+    std::unique_lock lock(barrier->mutex);
+    construction_reached = barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return barrier->construction_reached; });
+  }
+  expect(construction_reached, "create_like pauses after trusted prompt resolution while holding construction authority");
+  if (!construction_reached)
+  {
+    {
+      std::lock_guard lock(barrier->mutex);
+      barrier->release_construction = true;
+    }
+    barrier->changed.notify_all();
+    opener.join();
+    return;
+  }
+
+  auto const trust_before_conflict = trust_file_contents();
+  auto conflicting_denial = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto const trust_after_conflict = trust_file_contents();
+  auto const disk_after_conflict = ava::app::load_project_trust_state(paths, workspace);
+  bool const conflict_is_redacted = !conflicting_denial && conflicting_denial.error().format().find(workspace.string()) == std::string::npos &&
+                                    conflicting_denial.error().format().find(kProjectCanary) == std::string::npos;
+  expect(!conflicting_denial && conflict_is_redacted && trust_before_conflict == trust_after_conflict &&
+             disk_after_conflict.decision == ava::app::ProjectTrustDecision::Trusted,
+         "construction wins the workspace barrier and revocation fails retryably before changing trusted disk");
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->release_construction = true;
+  }
+  barrier->changed.notify_all();
+  opener.join();
+  expect(opening && opening->has_value(), "create_like publishes its trusted Session after the construction barrier releases");
+  if (!opening || !*opening)
+    return;
+
+  auto& constructed = **opening;
+  std::shared_ptr<ava::app::SessionRunController> constructed_controller;
+  bool constructed_is_trusted = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, constructed);
+    constructed_controller = session_r->run_controller();
+    constructed_is_trusted = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Trusted &&
+                             session_r->system_prompt().find(kProjectCanary) != std::string::npos &&
+                             session_r->ambient_extension_free_system_prompt().find(kProjectCanary) != std::string::npos;
+  }
+  expect(constructed_is_trusted, "the construction winner returns both trusted prompt variants");
+
+  auto retried_denial = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport stale_transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  auto stale_run = ava::app::run_prompt(constructed, "must not reach transport", provider, stale_transport, run_options);
+  expect(retried_denial && constructed_controller && constructed_controller->authority_retired() && !stale_run && stale_transport.requests().empty(),
+         "retrying revocation captures and retires the newly registered opener before any stale provider request");
+
+  auto restored = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+  auto owned_store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
+  auto owned_lease = owned_store ? ava::session::SessionLease::create_and_acquire(owned_store->session_path())
+                                 : ava::core::Result<ava::session::SessionLease>(std::unexpected(owned_store.error()));
+  if (!restored || !owned_store || !owned_lease)
+  {
+    expect(false, "inverse construction race restores trust and creates owned session inputs");
+    return;
+  }
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->revocation_armed = true;
+    barrier->revocation_reached = false;
+    barrier->release_revocation = false;
+  }
+  std::optional<ava::core::Result<ava::app::CommandResult>> inverse_denial;
+  std::jthread revoker([&] { inverse_denial.emplace(ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"})); });
+  bool revocation_reached = false;
+  {
+    std::unique_lock lock(barrier->mutex);
+    revocation_reached = barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return barrier->revocation_reached; });
+  }
+  expect(revocation_reached, "inverse revocation pauses with workspace maintenance reserved");
+  if (!revocation_reached)
+  {
+    {
+      std::lock_guard lock(barrier->mutex);
+      barrier->release_revocation = true;
+    }
+    barrier->changed.notify_all();
+    revoker.join();
+    return;
+  }
+
+  auto inverse_open = ava::app::runtime::Session::open_owned(context, *owned_store, *owned_lease, true);
+  bool const inverse_error_is_redacted = !inverse_open && inverse_open.error().format().find(workspace.string()) == std::string::npos &&
+                                         inverse_open.error().format().find(kProjectCanary) == std::string::npos;
+  expect(!inverse_open && inverse_error_is_redacted && !owned_lease->canonical_path().empty(),
+         "maintenance wins the inverse race and open_owned fails retryably before reading or consuming owned authority");
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->release_revocation = true;
+  }
+  barrier->changed.notify_all();
+  revoker.join();
+  expect(inverse_denial && *inverse_denial && ava::app::load_project_trust_state(paths, workspace).decision == ava::app::ProjectTrustDecision::Denied,
+         "the inverse revocation completes its denied persistence and publication");
+
+  auto inverse_retry = ava::app::runtime::Session::open_owned(context, *owned_store, *owned_lease, true);
+  bool inverse_retry_is_denied = false;
+  if (inverse_retry)
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *inverse_retry);
+    inverse_retry_is_denied = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Denied &&
+                              session_r->system_prompt().find(kProjectCanary) == std::string::npos &&
+                              session_r->ambient_extension_free_system_prompt().find(kProjectCanary) == std::string::npos;
+  }
+  expect(inverse_retry_is_denied, "retrying open_owned after revocation reads denied disk and excludes the project canary from both prompt variants");
+  (*manager)->shutdown();
+}
+
 void test_workspace_revocation_retires_retained_sessions_transactionally()
 {
   constexpr std::string_view kProjectCanary = "RETAINED_WORKSPACE_PROJECT_CANARY_5d72";

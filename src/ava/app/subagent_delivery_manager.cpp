@@ -530,6 +530,21 @@ ava::core::VoidResult SubagentDeliveryManager::WorkspaceMaintenanceReservation::
   }
 }
 
+ava::core::VoidResult SubagentDeliveryManager::run_construction_after_trusted_prompt_resolution_test_hook()
+{
+  if (!options_.construction_after_trusted_prompt_resolution_for_test)
+    return {};
+  try
+  {
+    options_.construction_after_trusted_prompt_resolution_for_test();
+    return {};
+  }
+  catch (...)
+  {
+    return std::unexpected(workspace_transaction_error("construction_hook_failed"));
+  }
+}
+
 ava::core::VoidResult SubagentDeliveryManager::register_workspace_controller(std::filesystem::path const& workspace_identity, std::string_view session_id,
                                                                              std::shared_ptr<SessionRunController> const& controller)
 {
@@ -806,8 +821,19 @@ ava::core::Result<SubagentDeliveryManager::CapsuleGeneration> SubagentDeliveryMa
   auto&& f = at_scope_end([] { Dout(dc::notice, "Leaving SubagentDeliveryManager::refresh_parent()"); });
 #endif
 
+  std::filesystem::path reserved_workspace;
+  {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    reserved_workspace = session_r->workspace_dir();
+  }
+  auto navigation = reserve_workspace_navigation(reserved_workspace);
+  if (!navigation)
+    return std::unexpected(std::move(navigation.error()));
+
   CRITICAL_AREA_BEGIN_CR(session);
 
+  if (normalized_workspace_identity(session_r->workspace_dir()) != normalized_workspace_identity(reserved_workspace))
+    return std::unexpected(workspace_transaction_error("session_changed"));
   if (!session_r->run_controller())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot retain a parent without a run controller"));
   auto authority = session_r->read_authority_1();
@@ -879,7 +905,18 @@ ava::core::VoidResult SubagentDeliveryManager::refresh_parent_configuration(runt
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling SubagentDeliveryManager::refresh_parent_configuration");
 
+  std::filesystem::path reserved_workspace;
+  {
+    SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
+    reserved_workspace = session_r->workspace_dir();
+  }
+  auto navigation = reserve_workspace_navigation(reserved_workspace);
+  if (!navigation)
+    return std::unexpected(std::move(navigation.error()));
+
   CRITICAL_AREA_BEGIN_CR(session);
+  if (normalized_workspace_identity(session_r->workspace_dir()) != normalized_workspace_identity(reserved_workspace))
+    return std::unexpected(workspace_transaction_error("session_changed"));
   auto const session_id = session_r->store.session_id();
   auto const workspace_key = normalized_workspace_key(session_r->workspace_dir());
   CRITICAL_AREA_END_R(session);

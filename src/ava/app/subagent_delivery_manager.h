@@ -41,9 +41,11 @@ struct SubagentDeliveryManagerOptions
   // controller locks after an idle controller is observed but before delivery
   // attempt recording or admission. It must unblock when stop is requested.
   std::function<void(std::stop_token)> admission_preflight = nullptr;
-  // Deterministic test-only revocation seams. Production leaves these empty.
-  // Both run without manager/session/controller locks while workspace
-  // maintenance remains reserved. Hooks must not issue manager I/O.
+  // Deterministic test-only construction/revocation seams. Production leaves
+  // these empty. They run without manager/session/controller locks while the
+  // corresponding workspace reservation remains held. Hooks must not issue
+  // manager I/O.
+  std::function<void()> construction_after_trusted_prompt_resolution_for_test = nullptr;
   std::function<ava::core::VoidResult()> revocation_before_publication_for_test = nullptr;
   std::function<void()> revocation_after_retirement_for_test = nullptr;
 
@@ -53,7 +55,9 @@ struct SubagentDeliveryManagerOptions
 // Application-owned automatic summary delivery. It retains only detached,
 // callback-free parent runtime capsules and never references frontend/RPC
 // state. The coordinator remains protocol-neutral and emits process-local
-// terminal notifications into this manager's bounded advisory queue.
+// terminal notifications into this manager's bounded advisory queue. Workspace
+// serialization covers only sessions sharing this manager; separate managers
+// and processes remain independent.
 class SubagentDeliveryManager final : public std::enable_shared_from_this<SubagentDeliveryManager>
 {
  public:
@@ -153,6 +157,7 @@ class SubagentDeliveryManager final : public std::enable_shared_from_this<Subage
       TrustMutationReservation const& trust_reservation, std::filesystem::path const& workspace_identity, std::string_view current_session_id,
       std::shared_ptr<SessionRunController> const& current_controller);
   [[nodiscard]] ava::core::Result<WorkspaceNavigationReservation> reserve_workspace_navigation(std::filesystem::path const& workspace_identity);
+  [[nodiscard]] ava::core::VoidResult run_construction_after_trusted_prompt_resolution_test_hook();
 
   // Refreshes the exact parent capsule before each ordinary user prompt.
   // Callback-bearing fields are intentionally not copied.

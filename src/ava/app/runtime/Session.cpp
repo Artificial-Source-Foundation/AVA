@@ -433,16 +433,38 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   if (loaded_entries)
     reasoning = latest_persisted_reasoning(*loaded_entries, model);
 
+  if (!delivery_manager)
+  {
+    auto created_manager = delivery_manager_for_context(context);
+    if (!created_manager)
+      return std::unexpected(std::move(created_manager.error()));
+    delivery_manager = std::move(*created_manager);
+  }
+  // This manager normalizes the workspace key. Holding the move-only
+  // reservation across authority resolution, controller registration, and the
+  // returned Session publication linearizes construction's trust read against
+  // revocation persistence.
+  auto reserved_construction = delivery_manager->reserve_workspace_navigation(workspace_dir);
+  if (!reserved_construction)
+    return std::unexpected(std::move(reserved_construction.error()));
+  auto construction_reservation = std::move(*reserved_construction);
+
   auto project_trust = load_project_trust_state(context.paths, workspace_dir);
+  bool const project_trusted = project_resources_trusted(project_trust);
   auto selected_primary_agent = resolve_runtime_primary_agent(
-      context.paths, workspace_dir, project_resources_trusted(project_trust), context.requested_primary_agent,
+      context.paths, workspace_dir, project_trusted, context.requested_primary_agent,
       context.allow_unavailable_primary_agent ? PrimaryAgentResolutionPolicy::AllowUnavailable : PrimaryAgentResolutionPolicy::RequireAvailable);
   if (!selected_primary_agent)
     return std::unexpected(std::move(selected_primary_agent.error()));
-  auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_resources_trusted(project_trust),
-                                                context.prompt_overrides, *selected_primary_agent);
+  auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_trusted, context.prompt_overrides,
+                                                *selected_primary_agent);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
+  if (project_trusted)
+  {
+    if (auto hooked = delivery_manager->run_construction_after_trusted_prompt_resolution_test_hook(); !hooked)
+      return std::unexpected(std::move(hooked.error()));
+  }
 
   if (should_append_session_start)
   {
@@ -564,13 +586,6 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
       return std::unexpected(std::move(bound.error()));
   }
 
-  if (!delivery_manager)
-  {
-    auto created_manager = delivery_manager_for_context(context);
-    if (!created_manager)
-      return std::unexpected(std::move(created_manager.error()));
-    delivery_manager = std::move(*created_manager);
-  }
   if (!title_coordinator)
   {
     auto created_coordinator = title_coordinator_for_context(context, anchor_set);

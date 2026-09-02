@@ -104,7 +104,7 @@ A build that contains the M1 process target but omits its fake child cannot pass
 
 ### Pinned-harness paired baseline recipe
 
-A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `cf8c9987924f077092bfadc181181a1017e83610`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
+A comparison uses three independent, clean worktrees: one pinned harness and two measured source cohorts. The harness for this contract is exactly `169b9525ee9b3123a0494a45c645c754b33db8b7`. Run **both** cohorts with `harness_src/scripts/benchmark-backend.py`; a family migration commit may predate `--measured-source-root` or another evidence-integrity check and is never the harness authority merely because it supplies a measured binary.
 
 For the current Plugin migration, the reviewed pair is:
 
@@ -115,16 +115,16 @@ export AVA_FAMILY_BEFORE_AUTHORITIES='curl=supervised,plugin=legacy_local,mcp=le
 export AVA_FAMILY_AFTER_AUTHORITIES='curl=supervised,plugin=supervised,mcp=legacy_local,lsp=legacy_local,bash=legacy_local'
 ```
 
-The before anchor already has supervised Curl and legacy Plugin. The after anchor has supervised Curl and Plugin. Consequently, this pair isolates the Plugin transition; MCP, LSP, and Bash stay legacy in both cohorts.
+The before anchor already has supervised Curl and legacy Plugin. The after anchor has supervised Curl and Plugin. Consequently, this pair isolates the Plugin transition; MCP, LSP, and Bash stay legacy in both cohorts. Its recursive Plugin scope changes, the Bash pathspec scope is identical, and the separately recorded shared process-plumbing scope changes. A qualified comparison reports those facts in `source_attribution` and reaches `measured`.
 
-For a later family, set `AVA_FAMILY_BEFORE_COMMIT` and `AVA_FAMILY_MIGRATION_COMMIT` to separately reviewed full commit IDs and set both expected authority maps explicitly. The before commit must be the immediate reviewed baseline for that family, not an all-legacy historical carrier. The two commits may differ elsewhere only after review; the comparator requires exactly one `legacy_local` to `supervised` authority transition and attributes tracked family-source changes to that family.
+For a later family, set `AVA_FAMILY_BEFORE_COMMIT` and `AVA_FAMILY_MIGRATION_COMMIT` to separately reviewed full commit IDs and set both expected authority maps explicitly. The before commit must be the immediate reviewed baseline for that family, not an all-legacy historical carrier. The two commits may differ elsewhere only after review; the comparator requires exactly one `legacy_local` to `supervised` authority transition, isolates changes in the family-owned scopes, and records shared process-plumbing changes separately.
 
 #### Create and verify the three worktrees
 
 Run from a clean repository that contains all three pinned objects:
 
 ```sh
-harness_commit=cf8c9987924f077092bfadc181181a1017e83610
+harness_commit=169b9525ee9b3123a0494a45c645c754b33db8b7
 : "${AVA_FAMILY_BEFORE_COMMIT:?set the reviewed full before commit ID}"
 : "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full migration commit ID}"
 : "${AVA_FAMILY_BEFORE_AUTHORITIES:?set the reviewed before authority map}"
@@ -345,16 +345,31 @@ Keep evidence JSON/Markdown as needed. First prove every linked worktree is stil
 ```sh
 for source in "$after_src" "$before_src" "$harness_src"
 do
-  test -z "$(git -C "$source" status --porcelain --untracked-files=normal)"
+  if ! status=$(git -C "$source" status --porcelain --untracked-files=normal); then
+    printf 'cannot verify worktree status: %s\n' "$source" >&2
+    exit 1
+  fi
+  if test -n "$status"; then
+    printf 'refusing to remove non-clean worktree: %s\n%s\n' "$source" "$status" >&2
+    exit 1
+  fi
 done
 
+# All three status commands succeeded and all three worktrees are clean before
+# any removal begins.
 for source in "$after_src" "$before_src" "$harness_src"
 do
-  git worktree remove --force "$source"
+  if ! git worktree remove --force "$source"; then
+    printf 'cannot remove worktree: %s\n' "$source" >&2
+    exit 1
+  fi
 done
 
 # These are external build trees, not worktree paths; remove them separately.
-rm -rf "$harness_build" "$before_build" "$after_build"
+if ! rm -rf "$harness_build" "$before_build" "$after_build"; then
+  printf 'cannot remove external benchmark build trees\n' >&2
+  exit 1
+fi
 ```
 
 Do not run `git submodule deinit` from these linked worktrees, raw-remove their paths, or otherwise edit the primary checkout's shared submodule configuration during cleanup.
@@ -378,14 +393,18 @@ The fixed family boundaries are one stdlib-Python loopback Curl request; todo sa
 
 ### Provenance, redaction, and comparison
 
-V3 records the measured source root and checkout commit/tree/dirty state; runtime reference and production-path equality; the independent harness repository, commit/tree/dirty state, contract, and script hash; every complete scoped family tree object plus selected-blob diagnostics from the measured root; the exact source-owned authority file object/hash/map; and independent nearest-cache build provenance for both measured AVA and the benchmark helper. Each build record includes CMake generator/version/cache hash/source root/build type/features, compiler path/hash/ID/version/flags, and relevant CMake/C++ flags. Every used binary/script/fixture/plugin retains hash, size, mode, and mtime alongside OS/kernel/machine/CPU/count/RAM/page/Python, hashed boot ID, limits, monotonic resolution, start/end load, and exact driver commands and scale parameters. Paths occur only under provenance or artifacts.
+V3 records the measured source root and checkout commit/tree/dirty state; runtime reference and production-path equality; the independent harness repository, commit/tree/dirty state, contract, and script hash; and non-overlapping source ownership scopes from the measured root. Each scope records its kind, canonical paths and Git pathspecs, every recursively resolved entry's mode/type/object/path, entry count, and a deterministic SHA-256 digest over the complete declaration and entry set. Plugin, MCP, and LSP own their complete dedicated module trees. Curl owns every `src/ava/http/curl_transport*` entry, and Bash owns every entry selected by `:(glob)src/ava/tools/bash_tool*`, so newly split files are included automatically while shared `src/ava/tools/CMakeLists.txt` and `ToolContext` plumbing are not attributed to Bash.
+
+The remaining production source paths form a separately declared shared process-plumbing scope. It includes the agent, app, process, and non-Bash tools paths (as well as top-level CMake/configuration paths) while excluding every family-owned scope. Generation fails if the family and shared scopes overlap or do not completely cover `src`, `CMakeLists.txt`, `cmake`, and `config.h.in`. V3 also records the exact source-owned authority file object/hash/map and independent nearest-cache build provenance for both measured AVA and the benchmark helper. Each build record includes CMake generator/version/cache hash/source root/build type/features, compiler path/hash/ID/version/flags, and relevant CMake/C++ flags. Every used binary/script/fixture/plugin retains hash, size, mode, and mtime alongside OS/kernel/machine/CPU/count/RAM/page/Python, hashed boot ID, limits, monotonic resolution, start/end load, and exact driver commands and scale parameters. Paths occur only under provenance or artifacts.
 
 Build provenance remains best effort: **neither AVA nor the benchmark helper embeds a verified source commit**. Comparison nevertheless requires both identities to resolve, each binary to be inside its recorded CMake tree, both source roots to match the measured root, and the helper's cache recipe, generator, build type, compiler, flags, and features to equal AVA's recorded configuration (the same cache used below is the strongest simple case; a separately recorded equivalent configuration is also accepted). A helper from another checkout or an inconsistent cache yields structured `comparison_provenance_required`, never a measurement.
 
-Historical V3 documents without the independent measured/harness split or the newer additive authority/helper-build binding remain valid standalone V3 artifacts. Comparison still returns structured `provenance_split_required` for the former and `comparison_provenance_required` for unresolved or absent comparison-only binding; partial provenance groups are invalid.
+Historical V3 documents without the independent measured/harness split, the newer additive authority/helper-build binding, or the complete source-scope format remain valid standalone V3 artifacts. Comparison still returns structured `provenance_split_required` for the missing split and `comparison_provenance_required` for unresolved or absent comparison-only binding or ownership scopes; partial provenance groups are invalid.
 
 Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Redaction checks tokenize composite sample keys, so names such as `child_pid`, `request_url`, and `command_argv` are rejected without rejecting closed aggregates such as `pidfd_successes`, `stdout_bytes`, `record_count`, and `endpoint_eof`. Primary samples must be non-negative. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
 
-Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may retain a developer-dirty source or harness tree, including `null` when a Git status command fails; cleanliness is a comparison gate, not a smoke usability gate. Unknown status is never recorded as false-clean. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, valid full family tree/blob IDs, qualified AVA/helper build binding, and a clean resolved harness whose recorded script hash matches the script artifact. Failures return stable structured provenance reasons and mismatches rather than a measured result.
+Optional comparison output uses `ava.backend-benchmark-comparison.v1`. Standalone process smoke may retain a developer-dirty source or harness tree, including `null` when a Git status command fails; cleanliness is a comparison gate, not a smoke usability gate. Unknown status is never recorded as false-clean. Before comparing, each cohort must have resolved full measured checkout and runtime-reference identities, clean measured production paths, exact runtime production-path equality, structurally valid complete family/shared scope identities and digests, qualified AVA/helper build binding, and a clean resolved harness whose recorded script hash matches the script artifact. Failures return stable structured provenance reasons and mismatches rather than a measured result.
 
-The comparator recomputes summaries from raw samples and also refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, pinned harness identity, and every common fixture hash match. Common fixtures include the benchmark and memory scripts, Python executable, process child, optional fake provider, fake MCP/LSP servers, Curl/direct-argv executables, and sample-plugin manifest/entrypoint; measured AVA and authority-bearing helper bytes are expected to differ. Exactly one source-owned authority may change, and it must be `legacy_local` to `supervised`. The complete tree path/object for exactly that transitioned family must change, while every other scoped family tree must match; selected blob IDs remain validation and diagnostics rather than the attribution boundary. Multiple or reverse/unexpected transitions, a capability/build/result authority attributed to the wrong source map, or another family-tree change are unsupported. A family result is comparable only when both cohorts contain every required compatibility check and every check is true. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; after any trigger, a repeatable claim requires the fresh reversed-order pair described above.
+The comparator recomputes summaries from raw samples and also refuses cohorts unless host and hashed boot, build recipe, compiler, non-authority features, units/boundaries, pinned harness identity, and every common fixture hash match. Common fixtures include the benchmark and memory scripts, Python executable, process child, optional fake provider, fake MCP/LSP servers, Curl/direct-argv executables, and sample-plugin manifest/entrypoint; measured AVA and authority-bearing helper bytes are expected to differ. Exactly one source-owned authority may change, and it must be `legacy_local` to `supervised`. The complete scope signature for exactly that transitioned family must change, while every other family-owned scope must match. Multiple or reverse/unexpected transitions, a capability/build/result authority attributed to the wrong source map, or another family-owned scope change are unsupported.
+
+The shared process-plumbing signature is not assigned to any family and is not an isolation failure. Comparison records whether it changed as `source_attribution.shared_process_scope_changed`; it may change to support the one transitioned family. A family result is comparable only when both cohorts contain every required compatibility check and every check is true. Reports never require M1 to be faster. Investigation triggers are latency greater than both 20% and 100 microseconds, RSS greater than both 20% and 4 MiB, and monitor CPU greater than both 25% and 5 ms/s. They are non-gating; after any trigger, a repeatable claim requires the fresh reversed-order pair described above.

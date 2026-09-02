@@ -2760,8 +2760,12 @@ def validate_process_document(document: dict[str, Any]) -> None:
             raise ValueError(f"process artifact {key} lacks mode")
     if _has_process_provenance_split(provenance):
         if _is_resolved_text(harness["repository"]):
-            expected_script_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
-            if Path(artifacts["benchmark_script"]["path"]).resolve() != expected_script_path:
+            expected_script_path = str(
+                Path(harness["repository"]) / "scripts" / "benchmark-backend.py"
+            )
+            if not _resolved_paths_equal(
+                artifacts["benchmark_script"]["path"], expected_script_path
+            ):
                 raise ValueError("process benchmark script artifact is not from the harness repository")
         if _is_full_sha256(harness["benchmark_script_sha256"]):
             if artifacts["benchmark_script"]["sha256"] != harness["benchmark_script_sha256"]:
@@ -2868,6 +2872,15 @@ def _resolved_artifact_identity(identity: Any) -> bool:
     )
 
 
+def _resolved_paths_equal(first: Any, second: Any) -> bool:
+    if not _is_resolved_text(first) or not _is_resolved_text(second):
+        return False
+    try:
+        return Path(first).resolve() == Path(second).resolve()
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _path_is_within(path: Any, directory: Any) -> bool:
     if not _is_resolved_text(path) or not _is_resolved_text(directory):
         return False
@@ -2891,9 +2904,8 @@ def _build_record_mismatches(
     source_root = build.get("cmake_source_root")
     if not _is_resolved_text(source_root):
         mismatches.append(f"{prefix}.cmake_source_root")
-    elif (
-        _is_resolved_text(measured_repository)
-        and Path(source_root).resolve() != Path(measured_repository).resolve()
+    elif _is_resolved_text(measured_repository) and not _resolved_paths_equal(
+        source_root, measured_repository
     ):
         mismatches.append(f"{prefix}.cmake_source_root")
 
@@ -3123,7 +3135,7 @@ def _live_comparison_provenance_mismatches(
             regenerated_families, regenerated_shared = process_source_scope_identities(
                 repository, measured_revision[0]
             )
-        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+        except Exception:
             mismatch("source_ownership_scopes.regeneration")
         else:
             recorded_families = provenance["family_sources"]
@@ -3141,7 +3153,7 @@ def _live_comparison_provenance_mismatches(
             regenerated_authority = family_authority_source_identity(
                 repository, measured_revision[0]
             )
-        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+        except Exception:
             mismatch("family_authorities.source_identity")
         else:
             if not _exact_json_identity_equal(
@@ -3223,7 +3235,7 @@ def _live_comparison_provenance_mismatches(
     harness_script = harness_repository / "scripts" / "benchmark-backend.py"
     try:
         current_script_hash = sha256_file(harness_script)
-    except (OSError, RuntimeError, ValueError):
+    except Exception:
         mismatch("harness.current_benchmark_script_sha256")
     else:
         if current_script_hash != harness.get("benchmark_script_sha256"):
@@ -3294,8 +3306,10 @@ def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> 
     script_artifact = document["artifacts"].get("benchmark_script")
     if isinstance(script_artifact, dict):
         if _is_resolved_text(harness.get("repository")):
-            expected_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
-            if Path(script_artifact.get("path", "")).resolve() != expected_path:
+            expected_path = str(
+                Path(harness["repository"]) / "scripts" / "benchmark-backend.py"
+            )
+            if not _resolved_paths_equal(script_artifact.get("path"), expected_path):
                 mismatch("harness.benchmark_script_artifact_path")
         if script_artifact.get("sha256") != harness.get("benchmark_script_sha256"):
             mismatch("harness.benchmark_script_artifact_sha256")
@@ -3410,75 +3424,107 @@ def _shared_process_scope_signature(document: dict[str, Any]) -> str:
 
 
 def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
+    def provenance_required(mismatches: Sequence[str]) -> dict[str, Any]:
+        return comparison_unsupported(
+            "comparison_provenance_required",
+            "Each cohort requires clean, resolved, internally consistent comparison provenance.",
+            mismatches,
+        )
+
     validation_mismatches: list[str] = []
     for cohort, document in (("before", before), ("after", after)):
         try:
             validate_process_document(document)
-        except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+        except Exception:
             validation_mismatches.append(f"{cohort}.document_validation")
     if validation_mismatches:
-        return comparison_unsupported(
-            "comparison_provenance_required",
-            "Each cohort requires clean, resolved, internally consistent comparison provenance.",
-            validation_mismatches,
-        )
-    split_mismatches = [
-        f"{cohort}.provenance_split"
-        for cohort, document in (("before", before), ("after", after))
-        if not _has_process_provenance_split(document["provenance"])
-    ]
+        return provenance_required(validation_mismatches)
+
+    split_mismatches: list[str] = []
+    for cohort, document in (("before", before), ("after", after)):
+        try:
+            has_split = _has_process_provenance_split(document["provenance"])
+        except Exception:
+            return provenance_required(
+                [*split_mismatches, f"{cohort}.static_provenance_evaluation"]
+            )
+        if not has_split:
+            split_mismatches.append(f"{cohort}.provenance_split")
     if split_mismatches:
         return comparison_unsupported(
             "provenance_split_required",
             "Comparison requires v3 provenance with independent measured-source and harness identities.",
             split_mismatches,
         )
-    provenance_mismatches = [
-        *(_comparison_provenance_mismatches(before, "before")),
-        *(_comparison_provenance_mismatches(after, "after")),
-    ]
+
+    provenance_mismatches: list[str] = []
+    for cohort, document in (("before", before), ("after", after)):
+        try:
+            provenance_mismatches.extend(
+                _comparison_provenance_mismatches(document, cohort)
+            )
+        except Exception:
+            provenance_mismatches.append(f"{cohort}.static_provenance_evaluation")
+            return provenance_required(provenance_mismatches)
     if not provenance_mismatches:
-        provenance_mismatches.extend(
-            _live_comparison_provenance_mismatches(before, "before")
-        )
-        provenance_mismatches.extend(
-            _live_comparison_provenance_mismatches(after, "after")
-        )
+        for cohort, document in (("before", before), ("after", after)):
+            try:
+                provenance_mismatches.extend(
+                    _live_comparison_provenance_mismatches(document, cohort)
+                )
+            except Exception:
+                provenance_mismatches.append(f"{cohort}.live_provenance_evaluation")
+                return provenance_required(provenance_mismatches)
     if provenance_mismatches:
-        return comparison_unsupported(
-            "comparison_provenance_required",
-            "Each cohort requires clean, resolved, internally consistent comparison provenance.",
-            provenance_mismatches,
-        )
-    before_identity = _comparison_identity(before)
-    after_identity = _comparison_identity(after)
-    mismatch_names = [name for name in before_identity if before_identity[name] != after_identity[name]]
+        return provenance_required(provenance_mismatches)
+
+    try:
+        before_identity = _comparison_identity(before)
+        after_identity = _comparison_identity(after)
+        mismatch_names = [
+            name
+            for name in before_identity
+            if before_identity[name] != after_identity[name]
+        ]
+    except Exception:
+        return provenance_required(["identity_evaluation"])
     if mismatch_names:
         return comparison_unsupported(
             "incomparable_cohorts",
             "The cohorts differ in required host, boot, build, compiler, feature, fixture, boundary, or contract identity.",
             mismatch_names,
         )
-    authority_mismatches = [
-        *(_family_authority_mismatches(before, "before")),
-        *(_family_authority_mismatches(after, "after")),
-    ]
+
+    try:
+        authority_mismatches = [
+            *(_family_authority_mismatches(before, "before")),
+            *(_family_authority_mismatches(after, "after")),
+        ]
+    except Exception:
+        return provenance_required(["identity_evaluation"])
     if authority_mismatches:
         return comparison_unsupported(
             "authority_attribution_mismatch",
             "Family result authority must match the source-owned capability map in each cohort.",
             authority_mismatches,
         )
-    before_authorities = before["provenance"]["family_authorities"]["authorities"]
-    after_authorities = after["provenance"]["family_authorities"]["authorities"]
-    changed_authorities = [
-        family for family in PROCESS_FAMILY_NAMES if before_authorities[family] != after_authorities[family]
-    ]
-    unexpected_transitions = [
-        family
-        for family in changed_authorities
-        if (before_authorities[family], after_authorities[family]) != ("legacy_local", "supervised")
-    ]
+
+    try:
+        before_authorities = before["provenance"]["family_authorities"]["authorities"]
+        after_authorities = after["provenance"]["family_authorities"]["authorities"]
+        changed_authorities = [
+            family
+            for family in PROCESS_FAMILY_NAMES
+            if before_authorities[family] != after_authorities[family]
+        ]
+        unexpected_transitions = [
+            family
+            for family in changed_authorities
+            if (before_authorities[family], after_authorities[family])
+            != ("legacy_local", "supervised")
+        ]
+    except Exception:
+        return provenance_required(["identity_evaluation"])
     if unexpected_transitions:
         return comparison_unsupported(
             "unexpected_authority_transition",
@@ -3497,19 +3543,24 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             [f"family_authorities.{family}" for family in changed_authorities],
         )
     transitioned_family = changed_authorities[0]
-    changed_family_scopes = [
-        family
-        for family in PROCESS_FAMILY_NAMES
-        if _family_scope_signature(before, family) != _family_scope_signature(after, family)
-    ]
-    shared_process_scope_changed = (
-        _shared_process_scope_signature(before) != _shared_process_scope_signature(after)
-    )
-    source_attribution = {
-        "transitioned_family": transitioned_family,
-        "changed_family_scopes": changed_family_scopes,
-        "shared_process_scope_changed": shared_process_scope_changed,
-    }
+    try:
+        changed_family_scopes = [
+            family
+            for family in PROCESS_FAMILY_NAMES
+            if _family_scope_signature(before, family)
+            != _family_scope_signature(after, family)
+        ]
+        shared_process_scope_changed = (
+            _shared_process_scope_signature(before)
+            != _shared_process_scope_signature(after)
+        )
+        source_attribution = {
+            "transitioned_family": transitioned_family,
+            "changed_family_scopes": changed_family_scopes,
+            "shared_process_scope_changed": shared_process_scope_changed,
+        }
+    except Exception:
+        return provenance_required(["identity_evaluation"])
     if changed_family_scopes != [transitioned_family]:
         attribution_mismatches = [
             f"family_sources.{family}"

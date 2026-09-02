@@ -1403,6 +1403,87 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["mismatches"], mismatches)
         self.assertEqual(comparison["comparisons"], [])
 
+    def assert_closed_comparison_failure(self, comparison, secret: str) -> None:
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(comparison["comparisons"], [])
+        self.assertNotIn(secret, self.module.json.dumps(comparison, sort_keys=True))
+
+    def test_comparison_rejects_hostile_recorded_path_symlink_loops(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            secret = "CANARY_HOSTILE_RECORDED_PATH"
+            loop = pathlib.Path(temporary) / secret
+            loop.symlink_to(loop.name)
+
+            def replace_measured(document):
+                document["provenance"]["measured_checkout"]["repository"] = str(loop)
+
+            def replace_build(document):
+                document["provenance"]["build"]["cmake_source_root"] = str(loop)
+
+            def replace_harness(document):
+                document["provenance"]["harness"]["repository"] = str(loop)
+                document["artifacts"]["benchmark_script"]["path"] = str(
+                    loop / "scripts" / "benchmark-backend.py"
+                )
+
+            for name, replace in (
+                ("measured", replace_measured),
+                ("build", replace_build),
+                ("harness", replace_harness),
+            ):
+                with self.subTest(path=name):
+                    before, after = self.comparison_documents()
+                    replace(before)
+                    comparison = self.module.compare_process_documents(before, after)
+                    self.assert_closed_comparison_failure(comparison, secret)
+
+    def test_comparison_rejects_non_object_build_without_throwing(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["build"] = []
+        comparison = self.module.compare_process_documents(before, after)
+        self.assert_closed_comparison_failure(comparison, "CANARY")
+        self.assertEqual(comparison["mismatches"], ["before.document_validation"])
+
+    def test_comparison_rejects_malformed_nested_provenance_without_leaking(self) -> None:
+        secret = "CANARY_MALFORMED_PROVENANCE"
+
+        def replace_helper(document):
+            document["provenance"]["benchmark_helper_build"] = [secret]
+
+        def replace_compiler(document):
+            document["provenance"]["build"]["compiler"] = [secret]
+
+        def replace_features(document):
+            document["provenance"]["build"]["features"] = [secret]
+
+        def replace_family_scope(document):
+            document["provenance"]["family_sources"]["plugin"]["entries"] = [
+                [secret]
+            ]
+
+        for name, replace in (
+            ("helper", replace_helper),
+            ("compiler", replace_compiler),
+            ("features", replace_features),
+            ("family_scope", replace_family_scope),
+        ):
+            with self.subTest(value=name):
+                before, after = self.comparison_documents()
+                replace(before)
+                comparison = self.module.compare_process_documents(before, after)
+                self.assert_closed_comparison_failure(comparison, secret)
+
+    def test_comparison_qualification_boundaries_do_not_catch_system_exit(self) -> None:
+        before, after = self.comparison_documents()
+        with mock.patch.object(
+            self.module,
+            "validate_process_document",
+            side_effect=SystemExit("CANARY_SYSTEM_EXIT"),
+        ):
+            with self.assertRaises(SystemExit):
+                self.module.compare_process_documents(before, after)
+
     def test_comparison_rejects_dirty_measured_source(self) -> None:
         before, after = self.comparison_documents()
         before["provenance"]["measured_checkout"]["dirty"] = True
@@ -1706,6 +1787,88 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 "after.measured_checkout.repository_worktree",
             ],
         )
+
+    def test_comparison_rejects_repository_removed_between_static_and_live_checks(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            before, after, before_root = live_documents[:3]
+            repository = pathlib.Path(self.script).resolve().parents[1]
+            static_validator = self.module._comparison_provenance_mismatches
+
+            def remove_after_static(document, cohort):
+                mismatches = static_validator(document, cohort)
+                if cohort == "after":
+                    subprocess.run(
+                        [
+                            "git",
+                            "-C",
+                            str(repository),
+                            "worktree",
+                            "remove",
+                            "--force",
+                            str(before_root),
+                        ],
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                        check=True,
+                    )
+                return mismatches
+
+            with mock.patch.object(
+                self.module,
+                "_comparison_provenance_mismatches",
+                side_effect=remove_after_static,
+            ):
+                comparison = self.compare_with_live_provenance(before, after)
+
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(
+            comparison["mismatches"],
+            ["before.measured_checkout.repository_worktree"],
+        )
+
+    def test_comparison_regeneration_exceptions_are_closed_unsupported(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            before, after = live_documents[:2]
+            for exception_type in (RuntimeError, AttributeError, OSError):
+                with self.subTest(exception=exception_type.__name__):
+                    secret = f"CANARY_{exception_type.__name__}"
+                    with mock.patch.object(
+                        self.module,
+                        "process_source_scope_identities",
+                        side_effect=exception_type(secret),
+                    ):
+                        comparison = self.compare_with_live_provenance(before, after)
+                    self.assert_closed_comparison_failure(comparison, secret)
+                    self.assertEqual(
+                        comparison["mismatches"],
+                        [
+                            "before.source_ownership_scopes.regeneration",
+                            "after.source_ownership_scopes.regeneration",
+                        ],
+                    )
+
+    def test_comparison_qualification_phase_exceptions_are_closed_unsupported(self) -> None:
+        secret = "CANARY_QUALIFICATION_EXCEPTION"
+        phases = (
+            ("_comparison_provenance_mismatches", "before.static_provenance_evaluation"),
+            ("_live_comparison_provenance_mismatches", "before.live_provenance_evaluation"),
+            ("_comparison_identity", "identity_evaluation"),
+            ("_family_authority_mismatches", "identity_evaluation"),
+            ("_family_scope_signature", "identity_evaluation"),
+        )
+        for function_name, mismatch in phases:
+            with self.subTest(phase=function_name):
+                before, after = self.comparison_documents()
+                with mock.patch.object(
+                    self.module,
+                    function_name,
+                    side_effect=AttributeError(secret),
+                ):
+                    comparison = self.module.compare_process_documents(before, after)
+                self.assert_closed_comparison_failure(comparison, secret)
+                self.assertEqual(comparison["mismatches"], [mismatch])
 
     def test_comparison_requires_present_pinned_clean_harness_worktree(self) -> None:
         with self.live_plugin_comparison_documents() as live_documents:

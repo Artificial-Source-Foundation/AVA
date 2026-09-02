@@ -114,6 +114,8 @@ PROCESS_FAMILY_SOURCE_PATHS = {
     "lsp": ("src/ava/lsp", ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h")),
     "bash": ("src/ava/tools", ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h")),
 }
+PROCESS_FAMILY_NAMES = tuple(PROCESS_FAMILY_SOURCE_PATHS)
+PROCESS_AUTHORITY_SOURCE_PATH = "tests/backend_benchmark_authorities.cmake"
 PROCESS_PROVENANCE_SPLIT_FIELDS = (
     ("measured_checkout", "repository"),
     ("harness", "repository"),
@@ -540,14 +542,17 @@ def not_selected(result_id: str, family: str, suite: str, closest: str | None = 
 
 def git_identity(repository: Path) -> dict[str, Any]:
     def git(*arguments: str) -> str:
-        completed = subprocess.run(
-            ["git", "-C", str(repository), *arguments],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            timeout=10,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *arguments],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                timeout=10,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return "unknown"
         if completed.returncode != 0:
             return "unknown"
         return completed.stdout.strip()
@@ -555,13 +560,17 @@ def git_identity(repository: Path) -> dict[str, Any]:
     commit = git("rev-parse", "HEAD")
     tree = git("rev-parse", "HEAD^{tree}")
     status = git("status", "--porcelain", "--untracked-files=normal")
-    dirty = status not in ("", "unknown")
+    dirty = None if status == "unknown" else bool(status)
+    if dirty is None:
+        commit_with_state = f"{commit}-state-unknown"
+    else:
+        commit_with_state = f"{commit}{'-dirty' if dirty else ''}"
     return {
         "repository": str(repository.resolve()),
         "commit": commit,
         "tree": tree,
         "dirty": dirty,
-        "commit_with_state": f"{commit}{'-dirty' if dirty else ''}",
+        "commit_with_state": commit_with_state,
     }
 
 
@@ -1660,14 +1669,17 @@ def run_application_idle_rss_v3(
 
 
 def _git(repository: Path, *arguments: str) -> str:
-    completed = subprocess.run(
-        ["git", "-C", str(repository), *arguments],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        timeout=15,
-        check=False,
-    )
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(repository), *arguments],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return "unknown"
     if completed.returncode != 0:
         return "unknown"
     return completed.stdout.strip()
@@ -1689,15 +1701,20 @@ def process_source_provenance(
     if reference_commit == "unknown":
         production_equal: bool | None = None
     else:
-        compared = subprocess.run(
-            ["git", "-C", str(measured_source_root), "diff", "--quiet", reference_commit, "--", *production_paths],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            timeout=15,
-            check=False,
-        )
-        production_equal = compared.returncode == 0 if compared.returncode in (0, 1) else None
+        try:
+            compared = subprocess.run(
+                ["git", "-C", str(measured_source_root), "diff", "--quiet", reference_commit, "--", *production_paths],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=15,
+                check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            production_equal = None
+        else:
+            production_equal = compared.returncode == 0 if compared.returncode in (0, 1) else None
     production_status = _git(measured_source_root, "status", "--porcelain", "--", *production_paths)
+    production_dirty = None if production_status == "unknown" else bool(production_status)
     return {
         "measured_checkout": checkout,
         "runtime_reference": {
@@ -1706,7 +1723,7 @@ def process_source_provenance(
             "tree": reference_tree,
             "production_paths": list(production_paths),
             "exact_production_path_equality": production_equal,
-            "measured_production_paths_dirty": production_status not in ("", "unknown"),
+            "measured_production_paths_dirty": production_dirty,
         },
         "harness": {
             "repository": harness["repository"],
@@ -1730,6 +1747,25 @@ def family_source_identities(repository: Path) -> dict[str, Any]:
             ],
         }
     return identities
+
+
+def family_authority_source_identity(repository: Path) -> dict[str, Any]:
+    source = repository / PROCESS_AUTHORITY_SOURCE_PATH
+    text = source.read_text(encoding="utf-8")
+    matches = re.findall(
+        r"^set\(AVA_BENCHMARK_(CURL|PLUGIN|MCP|LSP|BASH)_AUTHORITY +(legacy_local|supervised)\)$",
+        text,
+        re.MULTILINE,
+    )
+    expected_names = tuple(name.upper() for name in PROCESS_FAMILY_NAMES)
+    if tuple(name for name, _authority in matches) != expected_names:
+        raise RuntimeError("benchmark family authority source must declare each family exactly once in canonical order")
+    return {
+        "path": PROCESS_AUTHORITY_SOURCE_PATH,
+        "object": _git(repository, "rev-parse", f"HEAD:{PROCESS_AUTHORITY_SOURCE_PATH}"),
+        "sha256": sha256_file(source),
+        "authorities": {name.lower(): authority for name, authority in matches},
+    }
 
 
 def file_identity_v3(path: Path) -> dict[str, Any]:
@@ -1786,7 +1822,12 @@ def _command_first_line(command: Sequence[str]) -> str:
     return completed.stdout.splitlines()[0] if completed.stdout else "unknown"
 
 
-def process_build_provenance(binary: Path, repository: Path, capabilities: dict[str, Any]) -> dict[str, Any]:
+def process_build_provenance(
+    binary: Path,
+    repository: Path,
+    capabilities: dict[str, Any],
+    family_authorities: dict[str, str],
+) -> dict[str, Any]:
     base = build_metadata(binary, repository)
     cache = find_cmake_cache(binary)
     values = read_cmake_cache(cache) if cache is not None else {}
@@ -1795,10 +1836,13 @@ def process_build_provenance(binary: Path, repository: Path, capabilities: dict[
     compiler_artifact = None
     if compiler_path is not None and compiler_path.is_file():
         compiler_artifact = file_identity_v3(compiler_path)
-    cmake_path_text = shutil.which("cmake", path=TRUSTED_PATH)
+    configured_cmake = values.get("CMAKE_COMMAND")
+    cmake_path_text = configured_cmake if configured_cmake and Path(configured_cmake).is_file() else shutil.which(
+        "cmake", path=TRUSTED_PATH
+    )
     cmake_artifact = file_identity_v3(Path(cmake_path_text)) if cmake_path_text else None
     authority_features = {
-        name: capabilities.get(f"{name}_authority", "unknown") for name in ("curl", "plugin", "mcp", "lsp", "bash")
+        name: family_authorities.get(name, "unknown") for name in PROCESS_FAMILY_NAMES
     }
     features = dict(base["features"])
     features.update(
@@ -1836,12 +1880,64 @@ def process_build_provenance(binary: Path, repository: Path, capabilities: dict[
         "recipe": recipe,
         "best_effort_provenance": {
             "assessment": "best_effort_unverified",
-            "statement": "Binaries do not embed a verified source commit; cache, source-root, byte identity, and timestamps are evidence only.",
+            "statement": "This binary does not embed a verified source commit; cache, source-root, byte identity, and timestamps are evidence only.",
             "git_commit_embedding_verified": False,
             "cmake_source_root_matches_recorded_source": base["provenance"]["cmake_source_root_matches_recorded_source"],
             "binary_is_within_cmake_build_tree": base["provenance"]["binary_is_within_cmake_build_tree"],
             "binary_not_older_than_cmake_cache": base["provenance"]["binary_not_older_than_cmake_cache"],
         },
+    }
+
+
+def _build_configuration_identity(build: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "generator": build.get("generator"),
+        "cmake_version": build.get("cmake_version"),
+        "cmake_sha256": _artifact_hash(build.get("cmake")),
+        "build_type": build.get("build_type"),
+        "features": build.get("features"),
+        "recipe": build.get("recipe"),
+        "compiler": {
+            "path": build.get("compiler", {}).get("path"),
+            "sha256": _artifact_hash(build.get("compiler", {}).get("artifact")),
+            "id": build.get("compiler", {}).get("id"),
+            "configured_version": build.get("compiler", {}).get("configured_version"),
+            "version_output": build.get("compiler", {}).get("version_output"),
+            "flags": build.get("compiler", {}).get("flags"),
+        },
+    }
+
+
+def process_binary_build_binding(
+    measured_ava_build: dict[str, Any], benchmark_helper_build: dict[str, Any]
+) -> dict[str, Any]:
+    ava_cache = measured_ava_build.get("cmake_cache")
+    helper_cache = benchmark_helper_build.get("cmake_cache")
+    same_cache = (
+        isinstance(ava_cache, dict)
+        and isinstance(helper_cache, dict)
+        and ava_cache.get("path") == helper_cache.get("path")
+        and ava_cache.get("sha256") == helper_cache.get("sha256")
+    )
+    equivalent = _build_configuration_identity(measured_ava_build) == _build_configuration_identity(
+        benchmark_helper_build
+    )
+    if same_cache:
+        relationship = "same_cmake_cache"
+    elif equivalent:
+        relationship = "equivalent_recorded_configuration"
+    else:
+        relationship = "inconsistent"
+    return {
+        "assessment": "best_effort_unverified",
+        "statement": (
+            "Neither the measured AVA binary nor the benchmark helper embeds a verified source commit; "
+            "their independent cache and artifact provenance is best-effort evidence only."
+        ),
+        "relationship": relationship,
+        "recorded_configuration_equivalent": equivalent,
+        "measured_ava_git_commit_embedding_verified": False,
+        "benchmark_helper_git_commit_embedding_verified": False,
     }
 
 
@@ -2119,7 +2215,17 @@ def execute_process(args: argparse.Namespace) -> dict[str, Any]:
             host["load_at_end"] = [0.0, 0.0, 0.0]
         source = process_source_provenance(measured_source_root, harness_repository, args.runtime_reference)
         source["family_sources"] = family_source_identities(measured_source_root)
-        source["build"] = process_build_provenance(args.ava, measured_source_root, capabilities)
+        authority_source = family_authority_source_identity(measured_source_root)
+        source["family_authorities"] = authority_source
+        source["build"] = process_build_provenance(
+            args.ava, measured_source_root, capabilities, authority_source["authorities"]
+        )
+        source["benchmark_helper_build"] = process_build_provenance(
+            args.benchmark_helper, measured_source_root, capabilities, authority_source["authorities"]
+        )
+        source["binary_build_binding"] = process_binary_build_binding(
+            source["build"], source["benchmark_helper_build"]
+        )
         source["host"] = host
         source["driver"] = {
             "exact_command": list(args._exact_command),
@@ -2222,6 +2328,45 @@ def validate_process_document(document: dict[str, Any]) -> None:
         raise ValueError("process harness provenance has the wrong contract")
     if provenance["build"].get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
         raise ValueError("process build provenance must not claim verified source embedding")
+
+    build_binding_fields = ("family_authorities", "benchmark_helper_build", "binary_build_binding")
+    build_binding_presence = [field in provenance for field in build_binding_fields]
+    if any(build_binding_presence) and not all(build_binding_presence):
+        raise ValueError("process helper build-binding fields must be present atomically")
+    if all(build_binding_presence):
+        authority_source = provenance["family_authorities"]
+        if not isinstance(authority_source, dict):
+            raise ValueError("process family authority source identity must be an object")
+        if authority_source.get("path") != PROCESS_AUTHORITY_SOURCE_PATH:
+            raise ValueError("process family authority source has the wrong path")
+        if not isinstance(authority_source.get("object"), str):
+            raise ValueError("process family authority source has an invalid object")
+        if not _is_full_sha256(authority_source.get("sha256")):
+            raise ValueError("process family authority source has an invalid SHA-256")
+        authorities = authority_source.get("authorities")
+        if not isinstance(authorities, dict) or set(authorities) != set(PROCESS_FAMILY_NAMES):
+            raise ValueError("process family authority source has an invalid map")
+        if any(authority not in ("legacy_local", "supervised") for authority in authorities.values()):
+            raise ValueError("process family authority source has an invalid authority")
+        helper_build = provenance["benchmark_helper_build"]
+        if not isinstance(helper_build, dict):
+            raise ValueError("process benchmark helper build provenance must be an object")
+        if helper_build.get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
+            raise ValueError("process benchmark helper build must not claim verified source embedding")
+        binding = provenance["binary_build_binding"]
+        if not isinstance(binding, dict) or not isinstance(binding.get("recorded_configuration_equivalent"), bool):
+            raise ValueError("process binary build binding is invalid")
+        if binding.get("relationship") not in (
+            "same_cmake_cache",
+            "equivalent_recorded_configuration",
+            "inconsistent",
+        ):
+            raise ValueError("process binary build binding has an invalid relationship")
+        if (
+            binding.get("measured_ava_git_commit_embedding_verified") is not False
+            or binding.get("benchmark_helper_git_commit_embedding_verified") is not False
+        ):
+            raise ValueError("process binary build binding must not claim verified source embedding")
     host = provenance["host"]
     for key in (
         "os",
@@ -2344,6 +2489,138 @@ def _artifact_hash(identity: Any) -> str | None:
     return identity.get("sha256") if isinstance(identity, dict) else None
 
 
+def _resolved_artifact_identity(identity: Any) -> bool:
+    return (
+        isinstance(identity, dict)
+        and _is_resolved_text(identity.get("path"))
+        and _is_full_sha256(identity.get("sha256"))
+        and isinstance(identity.get("size_bytes"), int)
+        and isinstance(identity.get("mtime_ns"), int)
+        and isinstance(identity.get("mode"), int)
+    )
+
+
+def _path_is_within(path: Any, directory: Any) -> bool:
+    if not _is_resolved_text(path) or not _is_resolved_text(directory):
+        return False
+    try:
+        Path(path).resolve().relative_to(Path(directory).resolve())
+    except (OSError, RuntimeError, ValueError):
+        return False
+    return True
+
+
+def _build_record_mismatches(
+    document: dict[str, Any], cohort: str, provenance_key: str, artifact_key: str
+) -> list[str]:
+    provenance = document["provenance"]
+    build = provenance.get(provenance_key)
+    prefix = f"{cohort}.{provenance_key}"
+    if not isinstance(build, dict):
+        return [prefix]
+    mismatches: list[str] = []
+    measured_repository = provenance["measured_checkout"].get("repository")
+    source_root = build.get("cmake_source_root")
+    if not _is_resolved_text(source_root):
+        mismatches.append(f"{prefix}.cmake_source_root")
+    elif (
+        _is_resolved_text(measured_repository)
+        and Path(source_root).resolve() != Path(measured_repository).resolve()
+    ):
+        mismatches.append(f"{prefix}.cmake_source_root")
+
+    for field in ("generator", "cmake_version", "build_type"):
+        if not _is_resolved_text(build.get(field)):
+            mismatches.append(f"{prefix}.{field}")
+    for field in ("cmake", "cmake_cache"):
+        if not _resolved_artifact_identity(build.get(field)):
+            mismatches.append(f"{prefix}.{field}")
+
+    compiler = build.get("compiler")
+    if not isinstance(compiler, dict):
+        mismatches.append(f"{prefix}.compiler")
+    else:
+        for field in ("path", "id", "configured_version", "version_output"):
+            if not _is_resolved_text(compiler.get(field)):
+                mismatches.append(f"{prefix}.compiler.{field}")
+        if not _resolved_artifact_identity(compiler.get("artifact")):
+            mismatches.append(f"{prefix}.compiler.artifact")
+        if not isinstance(compiler.get("flags"), dict):
+            mismatches.append(f"{prefix}.compiler.flags")
+
+    recipe = build.get("recipe")
+    if not isinstance(recipe, dict):
+        mismatches.append(f"{prefix}.recipe")
+    else:
+        recipe_consistent = (
+            recipe.get("generator") == build.get("generator")
+            and recipe.get("cmake_version") == build.get("cmake_version")
+            and recipe.get("build_type") == build.get("build_type")
+            and isinstance(recipe.get("cmake_flags"), dict)
+            and isinstance(recipe.get("cxx_flags"), dict)
+            and isinstance(compiler, dict)
+            and compiler.get("flags") == recipe.get("cxx_flags")
+        )
+        if not recipe_consistent:
+            mismatches.append(f"{prefix}.recipe_internal_consistency")
+
+    features = build.get("features")
+    if not isinstance(features, dict):
+        mismatches.append(f"{prefix}.features")
+    else:
+        boolean_features = ("sanitizers", "tsan", "debug", "libcwd", "process_supervisor", "process_fixture")
+        if any(not isinstance(features.get(name), bool) for name in boolean_features) or not _is_resolved_text(
+            features.get("platform_backend")
+        ):
+            mismatches.append(f"{prefix}.features")
+        authorities = features.get("family_authorities")
+        if (
+            not isinstance(authorities, dict)
+            or set(authorities) != set(PROCESS_FAMILY_NAMES)
+            or any(authority not in ("legacy_local", "supervised") for authority in authorities.values())
+        ):
+            mismatches.append(f"{prefix}.features.family_authorities")
+
+    best_effort = build.get("best_effort_provenance")
+    if not isinstance(best_effort, dict):
+        mismatches.append(f"{prefix}.best_effort_provenance")
+    else:
+        if best_effort.get("cmake_source_root_matches_recorded_source") is not True:
+            mismatches.append(f"{prefix}.best_effort_provenance.cmake_source_root_matches_recorded_source")
+        if best_effort.get("binary_is_within_cmake_build_tree") is not True:
+            mismatches.append(f"{prefix}.best_effort_provenance.binary_is_within_cmake_build_tree")
+        if best_effort.get("git_commit_embedding_verified") is not False:
+            mismatches.append(f"{prefix}.best_effort_provenance.git_commit_embedding_verified")
+
+    cache = build.get("cmake_cache")
+    binary = document["artifacts"].get(artifact_key)
+    if _resolved_artifact_identity(cache) and _resolved_artifact_identity(binary):
+        if not _path_is_within(binary["path"], str(Path(cache["path"]).parent)):
+            mismatch = f"{prefix}.binary_path_within_cmake_build_tree"
+            if mismatch not in mismatches:
+                mismatches.append(mismatch)
+    return mismatches
+
+
+def _helper_build_binding_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
+    provenance = document["provenance"]
+    helper_build = provenance.get("benchmark_helper_build")
+    binding = provenance.get("binary_build_binding")
+    if not isinstance(helper_build, dict):
+        return [f"{cohort}.benchmark_helper_build"]
+    mismatches = _build_record_mismatches(document, cohort, "benchmark_helper_build", "benchmark_helper")
+    if not isinstance(binding, dict):
+        mismatches.append(f"{cohort}.binary_build_binding")
+        return mismatches
+    equivalent = _build_configuration_identity(provenance["build"]) == _build_configuration_identity(helper_build)
+    expected_binding = process_binary_build_binding(provenance["build"], helper_build)
+    if not equivalent or binding.get("recorded_configuration_equivalent") is not True:
+        mismatches.append(f"{cohort}.binary_build_binding.recorded_configuration_equivalent")
+    if binding.get("relationship") != expected_binding["relationship"]:
+        mismatches.append(f"{cohort}.binary_build_binding.relationship")
+    return mismatches
+
+
 def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
     provenance = document["provenance"]
     mismatches: list[str] = []
@@ -2392,9 +2669,26 @@ def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> 
             if not _is_full_git_object_id(blob.get("object")):
                 mismatch(f"family_sources.{family}.blobs[{index}].object")
 
-    best_effort = provenance["build"].get("best_effort_provenance", {})
-    if best_effort.get("cmake_source_root_matches_recorded_source") is not True:
-        mismatch("build.best_effort_provenance.cmake_source_root_matches_recorded_source")
+    authority_source = provenance.get("family_authorities")
+    if not isinstance(authority_source, dict):
+        mismatch("family_authorities")
+    else:
+        if authority_source.get("path") != PROCESS_AUTHORITY_SOURCE_PATH:
+            mismatch("family_authorities.path")
+        if not _is_full_git_object_id(authority_source.get("object")):
+            mismatch("family_authorities.object")
+        if not _is_full_sha256(authority_source.get("sha256")):
+            mismatch("family_authorities.sha256")
+        authorities = authority_source.get("authorities")
+        if (
+            not isinstance(authorities, dict)
+            or set(authorities) != set(PROCESS_FAMILY_NAMES)
+            or any(authority not in ("legacy_local", "supervised") for authority in authorities.values())
+        ):
+            mismatch("family_authorities.authorities")
+
+    mismatches.extend(_build_record_mismatches(document, cohort, "build", "ava"))
+    mismatches.extend(_helper_build_binding_mismatches(document, cohort))
 
     harness = provenance["harness"]
     if not _is_resolved_text(harness.get("repository")):
@@ -2432,8 +2726,11 @@ def _comparison_identity(document: dict[str, Any]) -> dict[str, Any]:
     fixture_hashes = {
         "benchmark_script": _artifact_hash(artifacts["benchmark_script"]),
         "memory_helper": _artifact_hash(artifacts["memory_helper"]),
+        "python": _artifact_hash(artifacts["python"]),
+        "fake_process_child": _artifact_hash(artifacts.get("fake_process_child")),
         "fake_mcp_server": _artifact_hash(artifacts.get("fake_mcp_server")),
         "fake_lsp_server": _artifact_hash(artifacts.get("fake_lsp_server")),
+        "fake_provider": _artifact_hash(artifacts.get("fake_provider")),
         "curl": _artifact_hash(artifacts.get("curl")),
         "bash_direct_argv_executable": _artifact_hash(artifacts.get("bash_direct_argv_executable")),
         "sample_plugin_manifest": _artifact_hash(plugin["manifest"]),
@@ -2485,17 +2782,23 @@ def comparison_unsupported(reason_code: str, reason: str, mismatches: Sequence[s
 
 
 def _family_authority_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
-    families = tuple(PROCESS_FAMILY_SOURCE_PATHS)
-    source_authorities = document["provenance"]["build"].get("features", {}).get("family_authorities")
-    if not isinstance(source_authorities, dict) or set(source_authorities) != set(families):
+    provenance = document["provenance"]
+    source_authorities = provenance.get("family_authorities", {}).get("authorities")
+    build_authorities = provenance["build"].get("features", {}).get("family_authorities")
+    helper_authorities = provenance.get("benchmark_helper_build", {}).get("features", {}).get("family_authorities")
+    if not isinstance(source_authorities, dict) or set(source_authorities) != set(PROCESS_FAMILY_NAMES):
         return [f"{cohort}.family_authorities.source_map"]
     mismatches: list[str] = []
     results = {result["id"]: result for result in document["results"]}
-    for family in families:
+    for family in PROCESS_FAMILY_NAMES:
         source_authority = source_authorities.get(family)
         if source_authority not in ("legacy_local", "supervised"):
             mismatches.append(f"{cohort}.family_authorities.{family}.source")
             continue
+        if not isinstance(build_authorities, dict) or build_authorities.get(family) != source_authority:
+            mismatches.append(f"{cohort}.family_authorities.{family}.build")
+        if not isinstance(helper_authorities, dict) or helper_authorities.get(family) != source_authority:
+            mismatches.append(f"{cohort}.family_authorities.{family}.helper_build")
         if document["capabilities"].get(f"{family}_authority") != source_authority:
             mismatches.append(f"{cohort}.family_authorities.{family}.capability")
         result = results[f"family_{family}_lifecycle"]
@@ -2504,9 +2807,9 @@ def _family_authority_mismatches(document: dict[str, Any], cohort: str) -> list[
     return mismatches
 
 
-def _family_blob_signature(document: dict[str, Any], family: str) -> tuple[tuple[str, str], ...]:
-    blobs = document["provenance"]["family_sources"][family]["blobs"]
-    return tuple((blob["path"], blob["object"]) for blob in blobs)
+def _family_tree_signature(document: dict[str, Any], family: str) -> tuple[str, str]:
+    identity = document["provenance"]["family_sources"][family]
+    return identity["tree_path"], identity["tree_object"]
 
 
 def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
@@ -2552,8 +2855,8 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             "Family result authority must match the source-owned capability map in each cohort.",
             authority_mismatches,
         )
-    before_authorities = before["provenance"]["build"]["features"]["family_authorities"]
-    after_authorities = after["provenance"]["build"]["features"]["family_authorities"]
+    before_authorities = before["provenance"]["family_authorities"]["authorities"]
+    after_authorities = after["provenance"]["family_authorities"]["authorities"]
     changed_authorities = [
         family for family in PROCESS_FAMILY_SOURCE_PATHS if before_authorities[family] != after_authorities[family]
     ]
@@ -2580,20 +2883,20 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             [f"family_authorities.{family}" for family in changed_authorities],
         )
     transitioned_family = changed_authorities[0]
-    changed_family_blobs = [
+    changed_family_trees = [
         family
-        for family in PROCESS_FAMILY_SOURCE_PATHS
-        if _family_blob_signature(before, family) != _family_blob_signature(after, family)
+        for family in PROCESS_FAMILY_NAMES
+        if _family_tree_signature(before, family) != _family_tree_signature(after, family)
     ]
-    if changed_family_blobs != [transitioned_family]:
+    if changed_family_trees != [transitioned_family]:
         attribution_mismatches = [
             f"family_sources.{family}"
-            for family in PROCESS_FAMILY_SOURCE_PATHS
-            if (family == transitioned_family) != (family in changed_family_blobs)
+            for family in PROCESS_FAMILY_NAMES
+            if (family == transitioned_family) != (family in changed_family_trees)
         ]
         return comparison_unsupported(
             "family_source_attribution_mismatch",
-            "Tracked family source changes must be attributable only to the one authority transition.",
+            "Complete family-tree changes must be attributable only to the one authority transition.",
             attribution_mismatches,
         )
     before_results = {result["id"]: result for result in before["results"]}

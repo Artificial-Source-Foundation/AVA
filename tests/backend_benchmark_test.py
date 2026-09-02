@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import copy
 import hashlib
 import importlib.util
 import io
@@ -378,8 +379,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
 
     def valid_process_document(self):
         artifacts = {
-            "ava": self.process_artifact("/test/ava"),
-            "benchmark_helper": self.process_artifact("/test/helper"),
+            "ava": self.process_artifact("/test/build/ava"),
+            "benchmark_helper": self.process_artifact("/test/build/tests/helper"),
             "benchmark_script": self.process_artifact("/test/harness/scripts/benchmark-backend.py"),
             "memory_helper": self.process_artifact("/test/memory.py"),
             "python": self.process_artifact("/test/python"),
@@ -413,6 +414,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "load_at_end": [0.0, 0.0, 0.0],
         }
         recipe = {"generator": "Ninja", "cmake_version": "cmake 1", "build_type": "Release", "cmake_flags": {}, "cxx_flags": {}}
+        authorities = {name: "legacy_local" for name in self.module.PROCESS_FAMILY_NAMES}
         compiler_artifact = self.process_artifact("/usr/bin/c++")
         build = {
             "generator": "Ninja",
@@ -429,7 +431,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 "process_supervisor": True,
                 "process_fixture": True,
                 "platform_backend": "posix",
-                "family_authorities": {name: "legacy_local" for name in ("curl", "plugin", "mcp", "lsp", "bash")},
+                "family_authorities": dict(authorities),
             },
             "compiler": {
                 "path": "/usr/bin/c++",
@@ -449,6 +451,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 "binary_not_older_than_cmake_cache": True,
             },
         }
+        helper_build = copy.deepcopy(build)
+        build_binding = self.module.process_binary_build_binding(build, helper_build)
         results = [
             self.module.process_unsupported_result(result_id, "fixture_unavailable")
             for result_id in self.module.PROCESS_EXPECTED_RESULT_IDS
@@ -476,7 +480,15 @@ class BenchmarkHarnessTests(unittest.TestCase):
                     "contract_version": self.module.PROCESS_CONTRACT_VERSION,
                 },
                 "family_sources": self.process_family_sources(),
+                "family_authorities": {
+                    "path": self.module.PROCESS_AUTHORITY_SOURCE_PATH,
+                    "object": "5" * 40,
+                    "sha256": "6" * 64,
+                    "authorities": dict(authorities),
+                },
                 "build": build,
+                "benchmark_helper_build": helper_build,
+                "binary_build_binding": build_binding,
                 "host": host,
                 "driver": {"exact_command": ["benchmark"], "run_order": list(self.module.PROCESS_EXPECTED_RESULT_IDS)},
             },
@@ -748,6 +760,44 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.module.validate_arguments(non_process)
         self.assertIsNone(non_process.measured_source_root)
 
+    def test_git_status_failures_remain_unresolved_not_false_clean(self) -> None:
+        def git_identity_run(command, **_kwargs):
+            if "status" in command:
+                return subprocess.CompletedProcess(command, 2, "", "status failed")
+            value = "a" * 40 if command[-1] == "HEAD" else "b" * 40
+            return subprocess.CompletedProcess(command, 0, value + "\n", "")
+
+        with mock.patch.object(self.module.subprocess, "run", side_effect=git_identity_run):
+            identity = self.module.git_identity(pathlib.Path("/test/repository"))
+        self.assertIsNone(identity["dirty"])
+        self.assertEqual(identity["commit_with_state"], f"{'a' * 40}-state-unknown")
+
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        clean_identity = {
+            "repository": str(repository),
+            "commit": "a" * 40,
+            "tree": "b" * 40,
+            "dirty": False,
+            "commit_with_state": "a" * 40,
+        }
+
+        def provenance_git(_repository, *arguments):
+            if arguments[0] == "status":
+                return "unknown"
+            return "a" * 40 if arguments[-1].endswith("^{commit}") else "b" * 40
+
+        with (
+            mock.patch.object(self.module, "git_identity", return_value=clean_identity),
+            mock.patch.object(self.module, "_git", side_effect=provenance_git),
+            mock.patch.object(
+                self.module.subprocess,
+                "run",
+                return_value=subprocess.CompletedProcess([], 0, "", ""),
+            ),
+        ):
+            provenance = self.module.process_source_provenance(repository, repository, "HEAD")
+        self.assertIsNone(provenance["runtime_reference"]["measured_production_paths_dirty"])
+
     def test_explicit_measured_source_root_is_retained_in_exact_command_and_build_match(self) -> None:
         repository = pathlib.Path(self.script).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
@@ -826,8 +876,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
             git("commit", "-m", "before")
             before_commit = git("rev-parse", "HEAD")
             before_tree = git("rev-parse", "HEAD^{tree}")
-            (repository / "src/ava/plugin/runner.cpp").write_text("after plugin\n", encoding="utf-8")
-            git("add", "src/ava/plugin/runner.cpp")
+            (repository / "src/ava/plugin/runner_io.cpp").write_text("new plugin process seam\n", encoding="utf-8")
+            git("add", "src/ava/plugin/runner_io.cpp")
             git("commit", "-m", "after")
             after_commit = git("rev-parse", "HEAD")
             after_tree = git("rev-parse", "HEAD^{tree}")
@@ -850,9 +900,13 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.assertEqual(after_provenance["measured_checkout"]["repository"], str(after_root))
             self.assertEqual(after_provenance["measured_checkout"]["commit"], after_commit)
             self.assertEqual(after_provenance["measured_checkout"]["tree"], after_tree)
+            self.assertEqual(
+                before_provenance["family_sources"]["plugin"]["blobs"],
+                after_provenance["family_sources"]["plugin"]["blobs"],
+            )
             self.assertNotEqual(
-                before_provenance["family_sources"]["plugin"]["blobs"][0]["object"],
-                after_provenance["family_sources"]["plugin"]["blobs"][0]["object"],
+                before_provenance["family_sources"]["plugin"]["tree_object"],
+                after_provenance["family_sources"]["plugin"]["tree_object"],
             )
             self.assertEqual(before_provenance["harness"], after_provenance["harness"])
 
@@ -863,6 +917,11 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 document["provenance"]["harness"] = measured["harness"]
                 document["provenance"]["harness"]["dirty"] = False
                 document["provenance"]["family_sources"] = measured["family_sources"]
+                for build_key in ("build", "benchmark_helper_build"):
+                    document["provenance"][build_key]["cmake_source_root"] = measured["measured_checkout"]["repository"]
+                document["provenance"]["binary_build_binding"] = self.module.process_binary_build_binding(
+                    document["provenance"]["build"], document["provenance"]["benchmark_helper_build"]
+                )
                 document["artifacts"]["benchmark_script"] = self.module.file_identity_v3(
                     harness_repository / "scripts" / "benchmark-backend.py"
                 )
@@ -873,6 +932,81 @@ class BenchmarkHarnessTests(unittest.TestCase):
             comparison = self.module.compare_process_documents(before, after)
             self.assertEqual(comparison["status"], "measured")
             self.assertNotIn("fixture_hashes", comparison.get("mismatches", []))
+
+    def test_force_removes_linked_worktree_with_initialized_submodule_without_deinit(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            submodule = root / "submodule"
+            repository = root / "repository"
+            linked = root / "linked"
+            submodule.mkdir()
+            repository.mkdir()
+
+            def run_git(directory: pathlib.Path, *arguments: str) -> str:
+                completed = subprocess.run(
+                    ["git", "-C", str(directory), *arguments],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True,
+                )
+                return completed.stdout.strip()
+
+            for directory in (submodule, repository):
+                run_git(directory, "init")
+                run_git(directory, "config", "user.name", "Benchmark Self Test")
+                run_git(directory, "config", "user.email", "benchmark@example.invalid")
+            (submodule / "fixture.txt").write_text("fixture\n", encoding="utf-8")
+            run_git(submodule, "add", "fixture.txt")
+            run_git(submodule, "commit", "-m", "fixture")
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "add",
+                    str(submodule),
+                    "vendor/fixture",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            run_git(repository, "commit", "-am", "superproject")
+            config_before = run_git(repository, "config", "--local", "--get-regexp", r"^submodule\.")
+
+            run_git(repository, "worktree", "add", "--detach", str(linked), "HEAD")
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(linked),
+                    "-c",
+                    "protocol.file.allow=always",
+                    "submodule",
+                    "update",
+                    "--init",
+                    "--recursive",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            self.assertTrue((linked / "vendor/fixture/fixture.txt").is_file())
+            self.assertEqual(run_git(linked, "status", "--porcelain", "--untracked-files=normal"), "")
+
+            run_git(repository, "worktree", "remove", "--force", str(linked))
+            self.assertFalse(linked.exists())
+            self.assertEqual(
+                run_git(repository, "config", "--local", "--get-regexp", r"^submodule\."),
+                config_before,
+            )
+            self.assertTrue((repository / "vendor/fixture/fixture.txt").is_file())
 
     def test_process_schema_requires_independent_content_correct_harness_identity(self) -> None:
         document = self.valid_process_document()
@@ -899,6 +1033,12 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 del document["provenance"][section][field]
                 with self.assertRaisesRegex(ValueError, "split fields must be present atomically"):
                     self.module.validate_process_document(document)
+
+    def test_historical_v3_without_helper_build_binding_still_validates(self) -> None:
+        document = self.valid_process_document()
+        for field in ("family_authorities", "benchmark_helper_build", "binary_build_binding"):
+            del document["provenance"][field]
+        self.module.validate_process_document(document)
 
     def test_historical_v3_without_provenance_split_validates_but_cannot_compare(self) -> None:
         for measured_repository_present in (False, True):
@@ -948,7 +1088,13 @@ class BenchmarkHarnessTests(unittest.TestCase):
             (before, before_authorities, 100.0),
             (after, after_authorities, 130.0),
         ):
-            document["provenance"]["build"]["features"]["family_authorities"] = dict(authorities)
+            provenance = document["provenance"]
+            provenance["family_authorities"]["authorities"] = dict(authorities)
+            provenance["build"]["features"]["family_authorities"] = dict(authorities)
+            provenance["benchmark_helper_build"]["features"]["family_authorities"] = dict(authorities)
+            provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+                provenance["build"], provenance["benchmark_helper_build"]
+            )
             document["capabilities"].update(
                 {f"{family}_authority": authority for family, authority in authorities.items()}
             )
@@ -956,6 +1102,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 result_id = f"family_{family}_lifecycle"
                 index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
                 document["results"][index] = self.measured_process_result(result_id, authority, value)
+        after["provenance"]["family_authorities"]["object"] = "7" * 40
+        after["provenance"]["family_authorities"]["sha256"] = "8" * 64
         after_plugin = after["provenance"]["family_sources"]["plugin"]
         after_plugin["tree_object"] = "e" * 40
         after_plugin["blobs"][0]["object"] = "f" * 40
@@ -1040,6 +1188,60 @@ class BenchmarkHarnessTests(unittest.TestCase):
             ["before.build.best_effort_provenance.cmake_source_root_matches_recorded_source"],
         )
 
+    def test_comparison_rejects_unresolved_cleanliness(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["measured_checkout"]["dirty"] = None
+        before["provenance"]["runtime_reference"]["measured_production_paths_dirty"] = None
+        before["provenance"]["harness"]["dirty"] = None
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            [
+                "before.measured_checkout.dirty",
+                "before.runtime_reference.measured_production_paths_dirty",
+                "before.harness.dirty",
+            ],
+        )
+
+    def test_comparison_rejects_helper_from_wrong_valid_source_root(self) -> None:
+        before, after = self.comparison_documents()
+        provenance = before["provenance"]
+        helper_build = provenance["benchmark_helper_build"]
+        helper_build["cmake_source_root"] = "/test/other-valid-checkout"
+        helper_build["cmake_cache"] = self.process_artifact("/test/other-valid-build/CMakeCache.txt")
+        helper_build["best_effort_provenance"]["cmake_source_root_matches_recorded_source"] = False
+        before["artifacts"]["benchmark_helper"] = self.process_artifact("/test/other-valid-build/tests/helper")
+        provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+            provenance["build"], helper_build
+        )
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertIn("before.benchmark_helper_build.cmake_source_root", comparison["mismatches"])
+        self.assertIn(
+            "before.benchmark_helper_build.best_effort_provenance.cmake_source_root_matches_recorded_source",
+            comparison["mismatches"],
+        )
+
+    def test_comparison_rejects_helper_from_inconsistent_valid_cache(self) -> None:
+        before, after = self.comparison_documents()
+        provenance = before["provenance"]
+        helper_build = provenance["benchmark_helper_build"]
+        helper_build["cmake_cache"] = self.process_artifact("/test/other-valid-build/CMakeCache.txt")
+        helper_build["generator"] = "Unix Makefiles"
+        helper_build["recipe"]["generator"] = "Unix Makefiles"
+        before["artifacts"]["benchmark_helper"] = self.process_artifact("/test/other-valid-build/tests/helper")
+        provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+            provenance["build"], helper_build
+        )
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertIn(
+            "before.binary_build_binding.recorded_configuration_equivalent",
+            comparison["mismatches"],
+        )
+
     def test_comparison_rejects_dirty_harness(self) -> None:
         before, after = self.comparison_documents()
         before["provenance"]["harness"]["dirty"] = True
@@ -1065,14 +1267,48 @@ class BenchmarkHarnessTests(unittest.TestCase):
         before, after = self.comparison_documents()
         result_id = "family_plugin_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
-        after["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
+        provenance = after["provenance"]
+        provenance["family_authorities"]["authorities"]["plugin"] = "legacy_local"
+        provenance["build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
+        provenance["benchmark_helper_build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
+        provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+            provenance["build"], provenance["benchmark_helper_build"]
+        )
         after["capabilities"]["plugin_authority"] = "legacy_local"
         after["results"][index] = self.measured_process_result(result_id, "legacy_local", 130.0)
-        after["provenance"]["family_sources"]["plugin"] = self.process_family_sources()["plugin"]
+        provenance["family_sources"]["plugin"] = self.process_family_sources()["plugin"]
         comparison = self.module.compare_process_documents(before, after)
         self.assertEqual(comparison["status"], "unsupported")
         self.assertEqual(comparison["reason_code"], "authority_transition_required")
         self.assertFalse(comparison["repeatable_claim"])
+
+    def test_comparison_binds_process_python_and_optional_provider_fixtures(self) -> None:
+        for artifact_name in ("fake_process_child", "python"):
+            with self.subTest(artifact=artifact_name):
+                before, after = self.comparison_documents()
+                after["artifacts"][artifact_name]["sha256"] = "f" * 64
+                comparison = self.module.compare_process_documents(before, after)
+                self.assertEqual(comparison["status"], "unsupported")
+                self.assertEqual(comparison["reason_code"], "incomparable_cohorts")
+                self.assertEqual(comparison["mismatches"], ["fixture_hashes"])
+
+        before, after = self.comparison_documents()
+        before["artifacts"]["fake_provider"] = self.process_artifact("/test/provider")
+        after["artifacts"]["fake_provider"] = self.process_artifact("/test/provider")
+        after["artifacts"]["fake_provider"]["sha256"] = "f" * 64
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "incomparable_cohorts")
+        self.assertEqual(comparison["mismatches"], ["fixture_hashes"])
+
+    def test_comparison_allows_expected_ava_and_helper_artifact_differences(self) -> None:
+        before, after = self.comparison_documents()
+        after["artifacts"]["ava"]["sha256"] = "a" * 64
+        after["artifacts"]["benchmark_helper"]["sha256"] = "b" * 64
+        before = self.module.json.loads(self.module.json.dumps(before, sort_keys=True))
+        after = self.module.json.loads(self.module.json.dumps(after, sort_keys=True))
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "measured")
 
     def test_comparison_recomputes_stats_and_rejects_compatibility_change(self) -> None:
         before, after = self.comparison_documents()
@@ -1093,7 +1329,13 @@ class BenchmarkHarnessTests(unittest.TestCase):
 
     def test_comparison_rejects_multiple_or_unexpected_authority_transitions(self) -> None:
         before, after = self.comparison_documents()
-        after["provenance"]["build"]["features"]["family_authorities"]["mcp"] = "supervised"
+        provenance = after["provenance"]
+        provenance["family_authorities"]["authorities"]["mcp"] = "supervised"
+        provenance["build"]["features"]["family_authorities"]["mcp"] = "supervised"
+        provenance["benchmark_helper_build"]["features"]["family_authorities"]["mcp"] = "supervised"
+        provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+            provenance["build"], provenance["benchmark_helper_build"]
+        )
         after["capabilities"]["mcp_authority"] = "supervised"
         result_id = "family_mcp_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
@@ -1108,14 +1350,19 @@ class BenchmarkHarnessTests(unittest.TestCase):
         )
 
         before, after = self.comparison_documents()
-        before["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "supervised"
-        before["capabilities"]["plugin_authority"] = "supervised"
+        for document, authority in ((before, "supervised"), (after, "legacy_local")):
+            provenance = document["provenance"]
+            provenance["family_authorities"]["authorities"]["plugin"] = authority
+            provenance["build"]["features"]["family_authorities"]["plugin"] = authority
+            provenance["benchmark_helper_build"]["features"]["family_authorities"]["plugin"] = authority
+            provenance["binary_build_binding"] = self.module.process_binary_build_binding(
+                provenance["build"], provenance["benchmark_helper_build"]
+            )
+            document["capabilities"]["plugin_authority"] = authority
         plugin_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("family_plugin_lifecycle")
         before["results"][plugin_index] = self.measured_process_result(
             "family_plugin_lifecycle", "supervised", 100.0
         )
-        after["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
-        after["capabilities"]["plugin_authority"] = "legacy_local"
         after["results"][plugin_index] = self.measured_process_result(
             "family_plugin_lifecycle", "legacy_local", 130.0
         )
@@ -1123,6 +1370,14 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "unsupported")
         self.assertEqual(comparison["reason_code"], "unexpected_authority_transition")
         self.assertEqual(comparison["mismatches"], ["family_authorities.plugin"])
+
+    def test_comparison_binds_source_authority_map_to_helper_capabilities(self) -> None:
+        before, after = self.comparison_documents()
+        before["capabilities"]["curl_authority"] = "legacy_local"
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "authority_attribution_mismatch")
+        self.assertEqual(comparison["mismatches"], ["before.family_authorities.curl.capability"])
 
     def test_comparison_rejects_wrong_authority_and_source_attribution(self) -> None:
         before, after = self.comparison_documents()
@@ -1136,7 +1391,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["mismatches"], ["after.family_authorities.plugin.result"])
 
         before, after = self.comparison_documents()
-        after["provenance"]["family_sources"]["curl"]["blobs"][0]["object"] = "b" * 40
+        after["provenance"]["family_sources"]["curl"]["tree_object"] = "b" * 40
         comparison = self.module.compare_process_documents(before, after)
         self.assertEqual(comparison["status"], "unsupported")
         self.assertEqual(comparison["reason_code"], "family_source_attribution_mismatch")

@@ -10,6 +10,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <iterator>
 #include <memory>
 #include <mutex>
@@ -56,7 +57,8 @@ ava::process::OwnerPathV1 operation_owner(ava::process::OwnerPathV1 const& prefi
 ava::core::Result<ava::process::SpawnResultV1> spawn_fixture(ava::process::Supervisor& supervisor, ava::process::OwnerPathV1 const& owner, std::string mode,
                                                              ava::process::ProcessDeadline execution_deadline,
                                                              std::chrono::milliseconds termination_grace = 100ms, bool capture_input = false,
-                                                             bool capture_output = false, std::vector<std::string> extra = {})
+                                                             bool capture_output = false, std::vector<std::string> extra = {},
+                                                             std::function<bool()> cancel_requested = {})
 {
   auto reservation =
       supervisor.reserve(owner, ava::process::ProcessRoleV1::Plugin, {.termination_grace = termination_grace, .execution_deadline = execution_deadline});
@@ -73,7 +75,8 @@ ava::core::Result<ava::process::SpawnResultV1> spawn_fixture(ava::process::Super
                                                     .cwd = "/",
                                                     .stdin_mode = capture_input ? ava::process::StreamModeV1::Capture : ava::process::StreamModeV1::Discard,
                                                     .stdout_mode = capture_output ? ava::process::StreamModeV1::Capture : ava::process::StreamModeV1::Discard,
-                                                    .stderr_mode = ava::process::StreamModeV1::Discard});
+                                                    .stderr_mode = ava::process::StreamModeV1::Discard,
+                                                    .cancel_requested = std::move(cancel_requested)});
 }
 
 void wait_until(ava::process::ProcessDeadline deadline)
@@ -291,6 +294,78 @@ void test_reserved_deadline_expires_before_spawn()
                      snapshot.records.front().cleanup == ava::process::CleanupStateV1::NotRequired && snapshot.records.front().settlement_count == 1;
   expect(reservation && environment && !launched && exact && snapshot.live_records == 0 && !snapshot.monitor_started && !std::filesystem::exists(marker),
          "a reservation that expires before spawn settles once as content-free DeadlineExpired without a fork or monitor");
+}
+
+void test_due_deadline_precedes_unregistered_spawn_cancellation()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const root = create_empty_root("process-deadline-unregistered-cancel");
+  auto const marker = root / "executed";
+  auto const deadline = Clock::now() + 100ms;
+  auto launched = spawn_fixture(supervisor, operation_owner(application), "exec-marker", deadline, 100ms, false, false, {marker.string()}, [deadline] {
+    wait_until(deadline);
+    return true;
+  });
+  auto const snapshot = supervisor.snapshot();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::NotRequired && snapshot.records.front().settlement_count == 1;
+  expect(!launched && exact && snapshot.live_records == 0 && !snapshot.monitor_started && !std::filesystem::exists(marker),
+         "an execution deadline made due inside the first common-spawn cancellation callback settles unregistered as DeadlineExpired once");
+}
+
+void test_due_deadline_precedes_registered_gate_cancellation()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const root = create_empty_root("process-deadline-registered-cancel");
+  auto const marker = root / "executed";
+  auto gate_latch = std::make_shared<HookLatch>();
+  auto monitor_latch = std::make_shared<HookLatch>();
+  SupervisorTestAccess::set_after_fork_before_release_hook(supervisor, [gate_latch] { gate_latch->arrive_and_wait(); });
+  SupervisorTestAccess::set_after_poll_snapshot_hook(supervisor, [monitor_latch] { monitor_latch->arrive_and_wait(); });
+
+  std::atomic_bool canceled = false;
+  auto const deadline = Clock::now() + 1s;
+  std::optional<ava::core::Result<ava::process::SpawnResultV1>> launch;
+  std::thread launcher([&] {
+    launch.emplace(spawn_fixture(supervisor, operation_owner(application), "exec-marker", deadline, 100ms, false, false, {marker.string()},
+                                 [&] { return canceled.load(std::memory_order_relaxed); }));
+  });
+  bool const gate_reached = gate_latch->wait_until(deadline);
+  bool const monitor_frozen = monitor_latch->wait_until(deadline);
+  if (gate_reached && monitor_frozen)
+  {
+    wait_until(deadline);
+    canceled.store(true, std::memory_order_relaxed);
+  }
+  gate_latch->release();
+
+  bool deadline_visible = false;
+  auto const observation_deadline = Clock::now() + 500ms;
+  while (gate_reached && monitor_frozen && Clock::now() < observation_deadline)
+  {
+    auto const snapshot = supervisor.snapshot();
+    deadline_visible = snapshot.records.size() == 1 && snapshot.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired;
+    if (deadline_visible)
+      break;
+    std::this_thread::yield();
+  }
+
+  monitor_latch->release();
+  launcher.join();
+  SupervisorTestAccess::clear_after_fork_before_release_hook(supervisor);
+  SupervisorTestAccess::clear_after_poll_snapshot_hook(supervisor);
+  auto const shutdown = supervisor.shutdown(Clock::now() + 2s);
+  auto const snapshot = supervisor.snapshot();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::Complete && snapshot.records.front().settlement_count == 1;
+  bool const deadline_error = launch && !launch->has_value() && launch->error().format().find("deadline_expired") != std::string::npos;
+  expect(gate_reached && monitor_frozen && deadline_visible && deadline_error && shutdown.complete && exact && snapshot.live_records == 0 &&
+             SupervisorTestAccess::retained_native_child_count(supervisor) == 0 && !std::filesystem::exists(marker),
+         "a due execution deadline wins registered common-spawn cancellation while a frozen monitor cannot race, keeps the gate closed, and cleans once");
 }
 
 void test_after_fork_before_release_deadline()
@@ -694,6 +769,8 @@ void run_process_deadline_tests()
 #else
   test_reservation_policy_validation();
   test_reserved_deadline_expires_before_spawn();
+  test_due_deadline_precedes_unregistered_spawn_cancellation();
+  test_due_deadline_precedes_registered_gate_cancellation();
   test_after_fork_before_release_deadline();
   test_running_deadlines_reap_within_cleanup_horizon();
   test_natural_exit_near_trigger_is_reaped();

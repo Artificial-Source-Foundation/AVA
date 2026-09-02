@@ -9,6 +9,7 @@
 #include <climits>
 #include <cstddef>
 #include <cstring>
+#include <optional>
 #include <string>
 #if !defined(_WIN32)
 #include <poll.h>
@@ -71,6 +72,18 @@ bool parent_canceled(std::function<bool()> const& cancel_requested) noexcept
   }
 }
 
+std::optional<FrameReadResult> observe_wait_stop(ProcessDeadline deadline, std::function<bool()> const& cancel_requested) noexcept
+{
+  if (Clock::now() >= deadline)
+    return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+  bool const canceled = parent_canceled(cancel_requested);
+  if (Clock::now() >= deadline)
+    return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+  if (canceled)
+    return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
+  return std::nullopt;
+}
+
 bool valid_failure_stage(std::uint8_t raw) noexcept
 {
   return raw >= static_cast<std::uint8_t>(LaunchFailureStageV1::SignalReset) && raw <= static_cast<std::uint8_t>(LaunchFailureStageV1::DescriptorValidation);
@@ -102,10 +115,8 @@ FrameReadResult read_frame(int descriptor, ProcessDeadline deadline, std::functi
   std::size_t offset = 0;
   while (true)
   {
-    if (parent_canceled(cancel_requested))
-      return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
-    if (Clock::now() >= deadline)
-      return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+    if (auto stopped = observe_wait_stop(deadline, cancel_requested))
+      return *stopped;
 
     pollfd item{.fd = descriptor, .events = POLLIN, .revents = 0};
     int result = -1;
@@ -119,16 +130,14 @@ FrameReadResult read_frame(int descriptor, ProcessDeadline deadline, std::functi
       poll_error = errno == 0 ? EIO : errno;
       if (poll_error != EINTR)
         break;
-      if (parent_canceled(cancel_requested))
-        return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
-      if (Clock::now() >= deadline)
-        return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
+      if (auto stopped = observe_wait_stop(deadline, cancel_requested))
+        return *stopped;
     }
     if (result == 0)
     {
-      if (parent_canceled(cancel_requested))
-        return FrameReadResult{.kind = FrameReadKind::Canceled, .frame = {}, .error_number = 0};
-      if (Clock::now() < deadline && observation_deadline < deadline)
+      if (auto stopped = observe_wait_stop(deadline, cancel_requested))
+        return *stopped;
+      if (observation_deadline < deadline)
         continue;
       return FrameReadResult{.kind = FrameReadKind::TimedOut, .frame = {}, .error_number = 0};
     }
@@ -150,7 +159,11 @@ FrameReadResult read_frame(int descriptor, ProcessDeadline deadline, std::functi
     if (count == 0)
       return FrameReadResult{.kind = offset == 0 ? FrameReadKind::End : FrameReadKind::Truncated, .frame = {}, .error_number = 0};
     if (errno == EINTR || errno == EAGAIN || errno == EWOULDBLOCK)
+    {
+      if (auto stopped = observe_wait_stop(deadline, cancel_requested))
+        return *stopped;
       continue;
+    }
     return FrameReadResult{.kind = FrameReadKind::Failed, .frame = {}, .error_number = errno == 0 ? EIO : errno};
   }
 }

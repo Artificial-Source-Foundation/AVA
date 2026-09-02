@@ -5,8 +5,12 @@
 #include <array>
 #include <cerrno>
 #include <chrono>
+#include <condition_variable>
 #include <cstddef>
 #include <cstring>
+#include <mutex>
+#include <optional>
+#include <thread>
 #include <type_traits>
 #if !defined(_WIN32)
 #include <fcntl.h>
@@ -66,6 +70,50 @@ class TestPipe final
   int write_ = -1;
   bool valid_ = false;
 };
+
+class CallbackLatch final
+{
+ public:
+  ~CallbackLatch() { release(); }
+
+  void arrive_and_wait()
+  {
+    std::unique_lock lock(mutex_);
+    arrived_ = true;
+    changed_.notify_all();
+    changed_.wait(lock, [&] { return released_; });
+  }
+
+  bool wait_until(std::chrono::steady_clock::time_point deadline)
+  {
+    std::unique_lock lock(mutex_);
+    return changed_.wait_until(lock, deadline, [&] { return arrived_; });
+  }
+
+  void release() noexcept
+  {
+    {
+      std::lock_guard lock(mutex_);
+      released_ = true;
+    }
+    changed_.notify_all();
+  }
+
+ private:
+  std::mutex mutex_;
+  std::condition_variable changed_;
+  bool arrived_ = false;
+  bool released_ = false;
+};
+
+void wait_until(std::chrono::steady_clock::time_point deadline)
+{
+  std::mutex mutex;
+  std::condition_variable changed;
+  std::unique_lock lock(mutex);
+  while (std::chrono::steady_clock::now() < deadline)
+    changed.wait_until(lock, deadline);
+}
 
 bool write_all(int descriptor, void const* data, std::size_t size) noexcept
 {
@@ -146,9 +194,51 @@ void test_parent_cancellation_is_observed_in_bounded_slices()
   auto const started = std::chrono::steady_clock::now();
   auto const canceled = await_launch_exec_confirmation(channel.read_descriptor(), started + 1s, false, -1, [&] { return ++observations >= 3; });
   auto const elapsed = std::chrono::steady_clock::now() - started;
+  TestPipe throwing_channel;
+  auto const throwing =
+      await_launch_exec_confirmation(throwing_channel.read_descriptor(), std::chrono::steady_clock::now() + 1s, false, -1, []() -> bool { throw 1; });
   expect(channel.valid() && canceled.disposition == LaunchProtocolDispositionV1::LaunchFailed && canceled.problem == LaunchProtocolProblemV1::Canceled &&
-             observations == 3 && elapsed < 250ms,
-         "common spawn exec confirmation observes parent cancellation in bounded slices without a helper thread");
+             observations == 3 && elapsed < 250ms && throwing_channel.valid() && throwing.disposition == LaunchProtocolDispositionV1::LaunchFailed &&
+             throwing.problem == LaunchProtocolProblemV1::Canceled,
+         "common spawn exec confirmation observes true or throwing parent cancellation in bounded slices before its deadline");
+}
+
+void test_deadline_precedes_parent_cancellation()
+{
+  using namespace ava::process::detail;
+
+  TestPipe channel;
+  std::size_t observations = 0;
+  auto const timed_out = await_launch_exec_confirmation(channel.read_descriptor(), std::chrono::steady_clock::now() - 1ms, false, -1, [&] {
+    ++observations;
+    return true;
+  });
+  expect(channel.valid() && timed_out.disposition == LaunchProtocolDispositionV1::LaunchFailed && timed_out.problem == LaunchProtocolProblemV1::TimedOut &&
+             observations == 0,
+         "an already-exhausted launch deadline wins before a true parent-cancellation callback is observed");
+}
+
+void test_deadline_crossing_during_parent_cancellation_callback()
+{
+  using namespace ava::process::detail;
+
+  TestPipe channel;
+  CallbackLatch callback;
+  auto const deadline = std::chrono::steady_clock::now() + 100ms;
+  std::optional<LaunchProtocolOutcomeV1> outcome;
+  std::thread waiter([&] {
+    outcome = await_launch_exec_confirmation(channel.read_descriptor(), deadline, false, -1, [&]() -> bool {
+      callback.arrive_and_wait();
+      throw 1;
+    });
+  });
+  bool const entered = callback.wait_until(deadline);
+  if (entered)
+    wait_until(deadline);
+  callback.release();
+  waiter.join();
+  expect(entered && outcome && outcome->disposition == LaunchProtocolDispositionV1::LaunchFailed && outcome->problem == LaunchProtocolProblemV1::TimedOut,
+         "a launch deadline crossed during a blocking, throwing cancellation callback wins over cancellation");
 }
 
 void test_malformed_truncated_and_out_of_order_protocol()
@@ -226,6 +316,8 @@ void run_process_launch_protocol_posix_tests()
   test_fixed_protocol_success_and_failures();
   test_absolute_deadline_timeout();
   test_parent_cancellation_is_observed_in_bounded_slices();
+  test_deadline_precedes_parent_cancellation();
+  test_deadline_crossing_during_parent_cancellation_callback();
   test_malformed_truncated_and_out_of_order_protocol();
   test_containment_checkpoint_sequence();
 #endif

@@ -308,11 +308,31 @@ void test_due_deadline_precedes_unregistered_spawn_cancellation()
     return true;
   });
   auto const snapshot = supervisor.snapshot();
+  auto const error = !launched ? launched.error().format() : std::string();
   bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
                      snapshot.records.front().reason == ava::process::TerminationReasonV1::DeadlineExpired &&
                      snapshot.records.front().cleanup == ava::process::CleanupStateV1::NotRequired && snapshot.records.front().settlement_count == 1;
-  expect(!launched && exact && snapshot.live_records == 0 && !snapshot.monitor_started && !std::filesystem::exists(marker),
-         "an execution deadline made due inside the first common-spawn cancellation callback settles unregistered as DeadlineExpired once");
+  expect(!launched && exact && snapshot.live_records == 0 && !snapshot.monitor_started && !std::filesystem::exists(marker) &&
+             snapshot_text(snapshot).find("deadline_expired") != std::string::npos && error.find("deadline_expired") != std::string::npos,
+         "an execution deadline made due inside the first common-spawn cancellation callback settles and reports unregistered as DeadlineExpired once");
+}
+
+void test_pre_deadline_unregistered_spawn_cancellation()
+{
+  ava::process::Supervisor supervisor;
+  auto application = application_owner();
+  auto const root = create_empty_root("process-deadline-unregistered-pre-deadline-cancel");
+  auto const marker = root / "executed";
+  auto launched =
+      spawn_fixture(supervisor, operation_owner(application), "exec-marker", Clock::now() + 5s, 100ms, false, false, {marker.string()}, [] { return true; });
+  auto const snapshot = supervisor.snapshot();
+  auto const error = !launched ? launched.error().format() : std::string();
+  bool const exact = snapshot.records.size() == 1 && snapshot.records.front().state == ava::process::ProcessStateV1::Finished &&
+                     snapshot.records.front().reason == ava::process::TerminationReasonV1::Canceled &&
+                     snapshot.records.front().cleanup == ava::process::CleanupStateV1::NotRequired && snapshot.records.front().settlement_count == 1;
+  expect(!launched && exact && snapshot.live_records == 0 && !snapshot.monitor_started && !std::filesystem::exists(marker) &&
+             snapshot_text(snapshot).find("canceled") != std::string::npos && error.find("reason: canceled") != std::string::npos,
+         "a common-spawn cancellation before its execution deadline settles and reports unregistered as Canceled once");
 }
 
 void test_due_deadline_precedes_registered_gate_cancellation()
@@ -770,6 +790,7 @@ void run_process_deadline_tests()
   test_reservation_policy_validation();
   test_reserved_deadline_expires_before_spawn();
   test_due_deadline_precedes_unregistered_spawn_cancellation();
+  test_pre_deadline_unregistered_spawn_cancellation();
   test_due_deadline_precedes_registered_gate_cancellation();
   test_after_fork_before_release_deadline();
   test_running_deadlines_reap_within_cleanup_horizon();

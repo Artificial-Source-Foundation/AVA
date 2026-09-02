@@ -713,8 +713,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   auto const identity = *consumed;
   if (parent_cancel_requested(specification))
   {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
-    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+    auto const reason = detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", reason));
   }
   auto const role = detail::record_role(state, identity);
   if (!role || !detail::EnvironmentAccess::matches_common_launch(specification.environment, *role, specification.cwd))
@@ -742,8 +742,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   auto prepared = prepare_spawn_checked(specification);
   if (parent_cancel_requested(specification))
   {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
-    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+    auto const reason = detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", reason));
   }
   if (!prepared)
   {
@@ -779,8 +779,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
 
   if (parent_cancel_requested(specification))
   {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
-    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+    auto const reason = detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", reason));
   }
 
   detail::PreForkDecision prepared_check;
@@ -816,8 +816,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   }
   if (parent_cancel_requested(specification))
   {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
-    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+    auto const reason = detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", reason));
   }
 
   detail::PreForkDecision final_check;
@@ -833,8 +833,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   }
   if (parent_cancel_requested(specification))
   {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
-    return std::unexpected(detail::canceled_launch_error("process launch", TerminationReasonV1::Canceled));
+    auto const reason = detail::finish_unregistered(state, identity, TerminationReasonV1::Canceled);
+    return std::unexpected(detail::canceled_launch_error("process launch", reason));
   }
 
   pid_t const parent_group = ::getpgrp();

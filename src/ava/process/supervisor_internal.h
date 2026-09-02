@@ -376,8 +376,8 @@ void finalize_locked(SupervisorState& state, Record& record, CleanupStateV1 clea
 [[nodiscard]] bool commit_due_execution_deadline_locked(Record& record, Clock::time_point now) noexcept;
 void abandon_reservation(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 [[nodiscard]] std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
-void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
-                         CleanupStateV1 cleanup = CleanupStateV1::NotRequired) noexcept;
+TerminationReasonV1 finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
+                                        CleanupStateV1 cleanup = CleanupStateV1::NotRequired) noexcept;
 [[nodiscard]] ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept;
 [[nodiscard]] ava::core::VoidResult invoke_after_fork_before_release_hook(std::shared_ptr<SupervisorState> const& state);
 [[nodiscard]] ava::core::VoidResult invoke_after_gate_release_hook(std::shared_ptr<SupervisorState> const& state);

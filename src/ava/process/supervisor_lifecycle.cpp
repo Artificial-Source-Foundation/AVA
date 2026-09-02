@@ -299,22 +299,28 @@ std::optional<ProcessRoleV1> record_role(std::shared_ptr<SupervisorState> const&
   return found == state->records.end() ? std::nullopt : std::optional(found->second->role);
 }
 
-void finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback, CleanupStateV1 cleanup) noexcept
+TerminationReasonV1 finish_unregistered(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity, TerminationReasonV1 fallback,
+                                        CleanupStateV1 cleanup) noexcept
 {
   if (!state || identity == 0)
-    return;
+    return fallback;
+  TerminationReasonV1 committed = fallback;
   {
     std::lock_guard lock(state->mutex);
     auto found = state->records.find(identity);
-    if (found == state->records.end() || found->second->state == ProcessStateV1::Finished)
-      return;
+    if (found == state->records.end())
+      return fallback;
     auto& record = *found->second;
+    if (record.state == ProcessStateV1::Finished)
+      return record.reason.value_or(fallback);
     static_cast<void>(commit_due_execution_deadline_locked(record, Clock::now()));
     static_cast<void>(commit_reason_locked(record, fallback));
+    committed = record.reason.value_or(fallback);
     mark_launch_error_locked(record);
     finalize_locked(*state, record, cleanup);
   }
   notify_monitor_state(state);
+  return committed;
 }
 
 ProcessDeadline startup_deadline_for_record(std::shared_ptr<SupervisorState> const& state, std::uint64_t identity) noexcept

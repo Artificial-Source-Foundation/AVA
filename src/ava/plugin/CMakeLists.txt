@@ -5,6 +5,8 @@ add_library(ava_plugin
   "install.cpp"
   "manifest.cpp"
   "runner.cpp"
+  "runner_io.cpp"
+  "runner_process.cpp"
   "runner_protocol.cpp"
   "runner_support.cpp"
   "static_resources.cpp"
@@ -21,6 +23,7 @@ target_link_libraries(ava_plugin
   PUBLIC
     AVA::context
     AVA::core
+    AVA::process
     AVA::tools
   PRIVATE
     AVA::diagnostics

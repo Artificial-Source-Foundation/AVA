@@ -1,9 +1,11 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/process/scope.h"
 
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace ava::tools {
@@ -27,6 +29,9 @@ struct ToolExecutionOptions
   std::vector<std::filesystem::path> ava_authority_roots = {};
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
+  // Run authority copied into each model ToolContext. Child loops replace it
+  // with a fresh application/session/run hierarchy before publication.
+  std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;
 
   // Includes authority roots and capability adapters; never stream this
   // aggregate through generated debug output.

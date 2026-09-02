@@ -384,6 +384,19 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   auto const session_process_scope_copy = session_r->session_process_scope();
   CRITICAL_AREA_END_R(session);
 
+  std::optional<ava::process::ProcessScopeV1> run_process_scope;
+  if (session_process_scope_copy)
+  {
+    auto derived = session_process_scope_copy->run();
+    if (!derived)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive runtime tool process authority");
+      error.with_context("cause", derived.error().message());
+      return fail_run(std::move(error));
+    }
+    run_process_scope = std::move(*derived);
+  }
+
   ava::http::TransportFactory session_transport_factory;
   if (session_process_scope_copy)
   {
@@ -448,6 +461,7 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                 .ava_authority_roots = session_r->ava_authority_roots_1(),
                 .exact_file_access = runtime_options.exact_file_access,
                 .command_executor = runtime_options.command_executor,
+                .process_scope = run_process_scope,
             },
         .subagents = std::move(subagents),
         .tool_visibility = session_r->tool_visibility(),

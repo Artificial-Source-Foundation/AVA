@@ -153,6 +153,26 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     return std::unexpected(std::move(error));
   }
 
+  std::optional<ava::process::ProcessScopeV1> child_run_process_scope;
+  if (options_.tool_execution.process_scope)
+  {
+    auto child_session_scope = options_.tool_execution.process_scope->application_scope().session();
+    if (!child_session_scope)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive task subagent session process authority");
+      error.with_context("cause", child_session_scope.error().message());
+      return std::unexpected(std::move(error));
+    }
+    auto child_run_scope = child_session_scope->run();
+    if (!child_run_scope)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive task subagent run process authority");
+      error.with_context("cause", child_run_scope.error().message());
+      return std::unexpected(std::move(error));
+    }
+    child_run_process_scope = std::move(*child_run_scope);
+  }
+
   auto child_store_result = request.task_id ? ava::session::SessionStore::open(options_.workspace_dir, *request.task_id, session_root)
                                             : ava::session::SessionStore::create(options_.workspace_dir, session_root);
   if (!child_store_result)
@@ -191,6 +211,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     return std::unexpected(std::move(child_read_authority.error()));
 
   auto child_options = options_;
+  child_options.tool_execution.process_scope = std::move(child_run_process_scope);
   // A child owns a distinct exact session namespace. Preserve the parent
   // roots and add the child directory before its AgentLoop constructs any
   // model ToolContext; duplicates remain bounded and harmless.

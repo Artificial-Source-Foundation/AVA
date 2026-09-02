@@ -53,6 +53,7 @@ target_link_libraries(ava_agent
     AVA::core
     AVA::http
     AVA::observability
+    AVA::process
   PRIVATE
     AVA::command
     AVA::context

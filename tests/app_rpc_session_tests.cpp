@@ -11,6 +11,8 @@
 #include "ava/agent/background_job_registry.h"
 #include "ava/agent/subagent_job.h"
 #include "ava/plugin/enablement.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
 #include "ava/session/session_metadata.h"
@@ -112,6 +114,12 @@ void test_app_rpc_plugin_command_has_no_tui_authority()
   open_context.workspace_dir = workspace;
   open_context.current_dir = workspace;
   open_context.paths = paths;
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_process_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(application_process_scope.has_value(), "RPC plugin UI fixture creates explicit test process authority");
+  if (!application_process_scope)
+    return;
+  open_context.application_process_scope = *application_process_scope;
   ava::app::runtime::SessionLifecycleRequest lifecycle;
   lifecycle.sessionless = true;
   auto opened = ava::app::runtime::Session::open(open_context, lifecycle);
@@ -157,7 +165,10 @@ void test_app_rpc_plugin_command_has_no_tui_authority()
         return entry.data_json.find("RPC_UI_RAW_CANARY_2d91") != std::string::npos || entry.data_json.find("RPC_UI_HIDDEN_REQUEST") != std::string::npos;
       });
   auto const ui_permission_prompted = std::ranges::find(prompted_operations, ava::permissions::Operation::PluginUiPresent) != prompted_operations.end();
-  expect(loop && output.find("\"id\":\"rpc-ui\"") != std::string::npos && output.find("plugin UI capability is unavailable") != std::string::npos &&
+  supervisor->stop_accepting();
+  auto const process_cleanup = supervisor->shutdown(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+  expect(loop && process_cleanup.complete && output.find("\"id\":\"rpc-ui\"") != std::string::npos &&
+             output.find("plugin UI capability is unavailable") != std::string::npos &&
              output.find("\"id\":\"after-ui\"") != std::string::npos && output.find("RPC_UI_RAW_CANARY_2d91") == std::string::npos &&
              output.find("RPC_UI_HIDDEN_REQUEST") == std::string::npos && output.find("\\\"type\\\":\\\"ui.status\\\"") == std::string::npos &&
              !ui_permission_prompted && child_gone && !session_has_ui,

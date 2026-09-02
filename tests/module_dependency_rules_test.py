@@ -46,7 +46,7 @@ RECOGNIZED_FIRST_PARTY_ROOTS = frozenset(
 )
 ALLOWED = {
     "app": SCANNED_MODULE_SET - {"app"},
-    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin"}),
+    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin", "process"}),
     "provider": frozenset({"config", "http"}),
     "session": frozenset({"config"}),
     "tools": frozenset({"http", "lsp", "permissions", "process"}),
@@ -224,6 +224,9 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
     def test_agent_may_depend_on_external_tool_brokers(self) -> None:
         self.assertEqual(self.run_check('#include "ava/mcp/tool_broker.h"\n', [], module="agent"), [])
         self.assertEqual(self.run_check('#include "ava/plugin/tool_broker.h"\n', [], module="agent"), [])
+
+    def test_agent_may_propagate_process_authority(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/process/scope.h"\n', [], module="agent"), [])
 
     def test_external_tool_brokers_may_depend_only_on_lower_tool_layers(self) -> None:
         for module in ("mcp", "plugin"):

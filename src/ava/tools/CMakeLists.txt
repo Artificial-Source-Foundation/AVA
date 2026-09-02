@@ -27,6 +27,7 @@ target_link_libraries(ava_tools
     AVA::http
     AVA::observability
     AVA::permissions
+    AVA::process
 )
 
 ava_apply_debugging(ava_tools)

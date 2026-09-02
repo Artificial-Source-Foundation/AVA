@@ -60,6 +60,7 @@ void run_agent_todo_tests();
 void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
+void run_plugin_runner_process_tests();
 void run_plugin_ui_tests();
 void run_process_adoption_posix_tests();
 void run_process_capability_posix_tests();
@@ -135,6 +136,7 @@ constexpr std::array kTestSuites{
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
+    TestSuite{"plugin_runner_process", run_plugin_runner_process_tests},
     TestSuite{"plugin_ui", run_plugin_ui_tests},
     TestSuite{"process_adoption_posix", run_process_adoption_posix_tests},
     TestSuite{"process_capability_posix", run_process_capability_posix_tests},

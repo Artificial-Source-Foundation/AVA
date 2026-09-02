@@ -1,4 +1,6 @@
 #include "tests/backend_benchmark_cases.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/agent/tool_registry.h"
 #include "ava/plugin/discovery.h"
@@ -16,6 +18,7 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -346,10 +349,14 @@ void benchmark_plugin(Options const& options, bool cleanup_only)
 {
   auto const manifest = load_sample_manifest(options.sample_plugin);
   auto const workspace = options.sample_plugin.parent_path();
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto process_scope = ava::process::ProcessScopeV1::application(supervisor);
+  if (!process_scope)
+    fail(process_scope.error().format());
   auto const started = Clock::now();
   for (std::size_t index = 0; index < options.iterations; ++index)
   {
-    auto process = ava::plugin::PluginProcess::start(manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace});
+    auto process = ava::plugin::PluginProcess::start(manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace, .process_scope = *process_scope});
     if (!process)
       fail(process.error().format());
     if (!cleanup_only)
@@ -362,6 +369,11 @@ void benchmark_plugin(Options const& options, bool cleanup_only)
     if (!shutdown)
       fail(shutdown.error().format());
   }
+  supervisor->stop_accepting();
+  auto const supervisor_shutdown = supervisor->shutdown(Clock::now() + std::chrono::seconds(2));
+  auto const snapshot = supervisor->snapshot();
+  if (!supervisor_shutdown.complete || snapshot.live_records != 0)
+    fail("plugin benchmark supervisor cleanup did not complete");
   if (!no_waitable_children())
     fail("plugin benchmark left a child process waitable");
   emit(elapsed_nanoseconds(started) / static_cast<double>(options.iterations), cleanup_only ? "ns_per_cleanup" : "ns_per_one_shot_call",

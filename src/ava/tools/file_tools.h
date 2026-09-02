@@ -3,6 +3,7 @@
 #include "ava/debug/print_members_on.h"
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
+#include "ava/process/scope.h"
 #include "ava/tools/tool_io.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
@@ -127,6 +128,9 @@ struct ToolContext
   // session ownership rather than storing lifetime-sensitive references.
   std::shared_ptr<ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<CommandExecutor const> command_executor = nullptr;
+  // Explicit parent authority for one-shot tool-owned process operations.
+  // Plugin execution derives a fresh operation scope before reservation.
+  std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;
   // Session-capturing process authority for web tools. Explicit per-call fake
   // transports bypass this factory and require no process authority.
   ava::http::TransportFactory transport_factory = nullptr;

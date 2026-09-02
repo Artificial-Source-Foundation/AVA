@@ -27,6 +27,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -260,6 +261,16 @@ std::string dynamic_resource_manifest_json(std::string id, std::string script_na
 //
 // The caller supplies the isolated XDG paths and workspace. Test setup failures are reported before
 // returning the successfully opened Session by value.
+std::optional<ava::process::ProcessScopeV1> plugin_test_process_scope()
+{
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto scope = ava::process::ProcessScopeV1::application(std::move(supervisor));
+  expect(scope.has_value(), scope ? "plugin test process scope is available" : "plugin test process scope is available: " + scope.error().format());
+  if (!scope)
+    return std::nullopt;
+  return std::move(*scope);
+}
+
 ava::app::runtime::session_ts plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
 {
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
@@ -269,6 +280,7 @@ ava::app::runtime::session_ts plugin_command_test_session(ava::config::XdgPaths 
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;
+  context.application_process_scope = plugin_test_process_scope();
   auto unlocked_session_result = ava::app::runtime::Session::open(context, {.sessionless = true,
                                                                             .requested_session_id = std::nullopt,
                                                                             .fork_session_id = std::nullopt,
@@ -304,6 +316,7 @@ ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& wor
   options.startup_timeout = startup_timeout;
   options.max_record_bytes = 64 * 1024;
   options.max_stderr_bytes = 64 * 1024;
+  options.process_scope = plugin_test_process_scope();
   return options;
 }
 
@@ -360,6 +373,7 @@ ava::tools::ToolContext plugin_proxy_test_context(std::filesystem::path const& w
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
+  context.process_scope = plugin_test_process_scope();
   context.session_id = "ses_proxy_test";
   context.provider_id = "openai";
   context.model_id = "gpt-test";
@@ -1582,6 +1596,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                              prompts.push_back(prompt);
                                              return ava::permissions::PermissionResolution::Allow;
                                            },
+                                           .process_scope = plugin_test_process_scope(),
                                            .session_id = "ses_event_test",
                                            .provider_id = "openai",
                                            .model_id = "gpt-test",
@@ -1656,6 +1671,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             return ava::permissions::PermissionResolution::Allow;
           },
+          .process_scope = plugin_test_process_scope(),
           .hook_failure_sink =
               [&failures](std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error) {
                 failures.push_back(CapturedFailure{.plugin_id = std::string(plugin_id),
@@ -1744,6 +1760,7 @@ void test_plugin_tool_dispatcher()
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
+  context.process_scope = plugin_test_process_scope();
 
   auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
   auto const plugin_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
@@ -2219,6 +2236,7 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
+  context.process_scope = plugin_test_process_scope();
 
   auto const model_tool_name = ava::plugin::plugin_model_tool_name("com.example.invalid", "todo_add");
   ava::agent::ToolDispatcher dispatcher(context);

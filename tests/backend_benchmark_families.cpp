@@ -159,6 +159,10 @@ void emit_family(std::string_view benchmark_case, double elapsed, bool protocol_
   if (options.benchmark_case == "family-curl-lifecycle")
     return false;
 #endif
+#if defined(AVA_BENCHMARK_PLUGIN_AUTHORITY_SUPERVISED)
+  if (options.benchmark_case == "family-plugin-lifecycle")
+    return false;
+#endif
   emit_helper_unsupported(options.benchmark_case, "lifecycle_ns", "ns", "caller_not_migrated", kCallerNotMigratedReason, family_case_metrics(authority));
   return true;
 }
@@ -248,7 +252,7 @@ void benchmark_plugin(BackendBenchmarkOptions const& options)
       !std::filesystem::is_regular_file(options.sample_plugin / "plugin.sh"))
   {
     emit_helper_unsupported(options.benchmark_case, "lifecycle_ns", "ns", "fixture_unavailable", kFixtureUnavailableReason,
-                            family_case_metrics("legacy_local"));
+                            family_case_metrics(authority_for(options.benchmark_case)));
     return;
   }
   auto manifest = ava::plugin::load_plugin_manifest(options.sample_plugin / "plugin.json");
@@ -258,8 +262,62 @@ void benchmark_plugin(BackendBenchmarkOptions const& options)
   auto const workspace = temporary.path() / "workspace";
   std::filesystem::create_directories(workspace);
   bool const clean_before = no_waitable_children();
+#if defined(AVA_BENCHMARK_PLUGIN_AUTHORITY_SUPERVISED)
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
+  if (!application_scope)
+    fail(application_scope.error().format());
   auto const started = Clock::now();
-  auto process = ava::plugin::PluginProcess::start(*manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace});
+  auto process =
+      ava::plugin::PluginProcess::start(*manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace, .process_scope = *application_scope});
+  bool initialized = process && (*process)->initialization().api_version == "ava.plugin.v1";
+  auto called = process ? (*process)->call_tool("todo_add", "{\"text\":\"benchmark\"}", "benchmark")
+                        : ava::core::Result<ava::plugin::PluginToolCallResult>(std::unexpected(process.error()));
+  auto plugin_shutdown = process ? (*process)->shutdown(500ms) : ava::core::VoidResult(std::unexpected(process.error()));
+  if (process)
+    process->reset();
+  auto const elapsed = elapsed_nanoseconds(started);
+
+  supervisor->stop_accepting();
+  auto const supervisor_shutdown = supervisor->shutdown(Clock::now() + 2s);
+  auto const snapshot = supervisor->snapshot();
+  std::size_t plugin_records = 0;
+  bool record_finished = false;
+  bool settlement_once = false;
+  for (auto const& record : snapshot.records)
+  {
+    if (record.role != ava::process::ProcessRoleV1::Plugin)
+      continue;
+    ++plugin_records;
+    record_finished = record.state == ava::process::ProcessStateV1::Finished && record.cleanup == ava::process::CleanupStateV1::Complete;
+    settlement_once = record.settlement_count == 1;
+  }
+  bool const supervisor_verified = supervisor_shutdown.complete && snapshot.live_records == 0 && plugin_records == 1 && record_finished && settlement_once;
+  if (!supervisor_verified)
+    fail("supervised plugin benchmark did not produce one completely settled managed-group record");
+  bool const clean_after = no_waitable_children();
+  emit_helper_measurement(options.benchmark_case, "lifecycle_ns", "ns",
+                          {{.ordinal = 1,
+                            .value = elapsed,
+                            .metrics = {},
+                            .checks = {{"protocol_compatible", initialized},
+                                       {"expected_response", called && called->ok},
+                                       {"shutdown_complete", static_cast<bool>(plugin_shutdown) && supervisor_shutdown.complete},
+                                       {"immediate_child_guard", clean_before && clean_after},
+                                       {"supervisor_record_finished", true},
+                                       {"supervisor_settlement_once", true}}}},
+                          {{"authority", std::string("supervised")},
+                           {"supervisor_record_finished", true},
+                           {"supervisor_settlement_once", true},
+                           {"cleanup_scope", std::string("managed_group")}});
+#else
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
+  if (!application_scope)
+    fail(application_scope.error().format());
+  auto const started = Clock::now();
+  auto process =
+      ava::plugin::PluginProcess::start(*manifest, ava::plugin::PluginRunnerOptions{.workspace_dir = workspace, .process_scope = *application_scope});
   bool initialized = process && (*process)->initialization().api_version == "ava.plugin.v1";
   auto called = process ? (*process)->call_tool("todo_add", "{\"text\":\"benchmark\"}", "benchmark")
                         : ava::core::Result<ava::plugin::PluginToolCallResult>(std::unexpected(process.error()));
@@ -269,6 +327,7 @@ void benchmark_plugin(BackendBenchmarkOptions const& options)
   auto const elapsed = elapsed_nanoseconds(started);
   bool const clean_after = no_waitable_children();
   emit_family(options.benchmark_case, elapsed, initialized, called && called->ok, static_cast<bool>(shutdown), clean_before && clean_after);
+#endif
 }
 
 void benchmark_mcp(BackendBenchmarkOptions const& options)

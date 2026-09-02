@@ -106,6 +106,16 @@ ava::plugin::PluginManifest load_ui_manifest(std::filesystem::path const& plugin
   return manifest.value_or(ava::plugin::PluginManifest{});
 }
 
+std::optional<ava::process::ProcessScopeV1> plugin_ui_test_process_scope()
+{
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto scope = ava::process::ProcessScopeV1::application(std::move(supervisor));
+  expect(scope.has_value(), scope ? "plugin UI test process scope is available" : "plugin UI test process scope is available: " + scope.error().format());
+  if (!scope)
+    return std::nullopt;
+  return std::move(*scope);
+}
+
 ava::plugin::PluginRunnerOptions ui_runner_options(std::filesystem::path const& workspace,
                                                    std::chrono::milliseconds request_timeout = std::chrono::milliseconds(500))
 {
@@ -113,6 +123,7 @@ ava::plugin::PluginRunnerOptions ui_runner_options(std::filesystem::path const& 
   options.workspace_dir = workspace;
   options.startup_timeout = std::chrono::milliseconds(500);
   options.request_timeout = request_timeout;
+  options.process_scope = plugin_ui_test_process_scope();
   return options;
 }
 
@@ -873,6 +884,7 @@ ava::app::runtime::session_ts plugin_ui_test_session(ava::config::XdgPaths const
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;
+  context.application_process_scope = plugin_ui_test_process_scope();
   auto session = ava::app::runtime::Session::open(context, {.sessionless = true,
                                                             .requested_session_id = std::nullopt,
                                                             .fork_session_id = std::nullopt,

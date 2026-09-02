@@ -101,6 +101,7 @@ class PluginEventObserverState final
 
       ava::plugin::PluginRunnerOptions runner_options;
       runner_options.workspace_dir = options_.workspace_dir;
+      runner_options.process_scope = options_.process_scope;
       auto process = ava::plugin::PluginProcess::start(binding.manifest, runner_options);
       if (!process)
       {
@@ -179,6 +180,7 @@ class PluginEventObserverState final
                                    .cancel_requested = options_.cancel_requested,
                                    .permission_tool_name = std::string(tool_name),
                                    .current_tool_name = std::string(tool_name),
+                                   .process_scope = options_.process_scope,
                                    .session_id = options_.session_id,
                                    .provider_id = options_.provider_id,
                                    .model_id = options_.model_id,
@@ -254,6 +256,7 @@ PluginEventObserverOptions plugin_event_observer_options(runtime::session_ts& un
         return ava::agent::append_permission_decision(sink, event);
       },
       .cancel_requested = nullptr,
+      .process_scope = session_r->session_process_scope(),
       .session_id = session_r->store.session_id(),
       .provider_id = session_r->model().provider_id,
       .model_id = session_r->model().model_id,

@@ -159,12 +159,14 @@ ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session,
                       session_r->permission_rule_store(),
                       session_r->anchor_set(),
                       session_r->ava_authority_roots_1(),
+                      session_r->session_process_scope(),
                       session_r->store.session_id(),
                       session_r->model().provider_id,
                       session_r->model().model_id,
                       session_r->current_dir()};
   }();
-  auto& [workspace_dir, spill_dir, mode, permission_rule_store, anchor_set, ava_authority_roots, session_id, provider_id, model_id, current_dir] = snapshot;
+  auto& [workspace_dir, spill_dir, mode, permission_rule_store, anchor_set, ava_authority_roots, process_scope, session_id, provider_id, model_id, current_dir] =
+      snapshot;
   auto lsp_provider = ava::lsp::make_configured_lsp_provider(ava::lsp::ConfiguredLspProviderFiles{
       .global_config_file = resource_policy.global_lsp_config_file,
       .project_config_file = resource_policy.project_lsp_config_file,
@@ -189,6 +191,7 @@ ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session,
       },
       .anchor_set = anchor_set,
       .ava_authority_roots = ava_authority_roots,
+      .process_scope = process_scope,
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
       .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,

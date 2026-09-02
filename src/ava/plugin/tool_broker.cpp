@@ -593,6 +593,7 @@ ava::tools::ToolDispatchResult dispatch_plugin_tool(ava::tools::ToolContext cons
 
   PluginRunnerOptions options;
   options.workspace_dir = context.workspace_dir;
+  options.process_scope = context.process_scope;
   auto process = PluginProcess::start(binding.manifest, options, context.cancel_requested);
   if (!process)
     return tool_error_result(call, process.error());

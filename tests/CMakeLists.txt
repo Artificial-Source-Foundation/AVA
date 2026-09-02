@@ -63,6 +63,11 @@ ava_apply_debugging(ava_fake_clipboard_child)
 ava_apply_warnings(ava_fake_clipboard_child)
 ava_apply_sanitizers(ava_fake_clipboard_child)
 
+add_executable(ava_fake_plugin_child "support/fake_plugin_child.cpp")
+ava_apply_debugging(ava_fake_plugin_child)
+ava_apply_warnings(ava_fake_plugin_child)
+ava_apply_sanitizers(ava_fake_plugin_child)
+
 add_executable(ava_fake_mermaid_helper "support/fake_mermaid_helper.cpp")
 ava_apply_debugging(ava_fake_mermaid_helper)
 ava_apply_warnings(ava_fake_mermaid_helper)
@@ -219,6 +224,7 @@ set(AVA_TESTS_SOURCES
   "mermaid_render_coordinator_tests.cpp"
   "permission_rules_tests.cpp"
   "plugin_tests.cpp"
+  "plugin_runner_process_tests.cpp"
   "plugin_ui_tests.cpp"
   "process_adoption_posix_tests.cpp"
   "process_capability_posix_tests.cpp"
@@ -294,12 +300,13 @@ endif()
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
 target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
-add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_curl_child ava_fake_clipboard_child ava_fake_mermaid_helper ava_fake_provider_server)
+add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_curl_child ava_fake_clipboard_child ava_fake_plugin_child ava_fake_mermaid_helper ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_PROCESS_CHILD_PATH="$<TARGET_FILE:ava_fake_process_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_CURL_CHILD_PATH="$<TARGET_FILE:ava_fake_curl_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_CLIPBOARD_CHILD_PATH="$<TARGET_FILE:ava_fake_clipboard_child>")
+target_compile_definitions(ava_tests PRIVATE AVA_FAKE_PLUGIN_CHILD_PATH="$<TARGET_FILE:ava_fake_plugin_child>")
 target_compile_definitions(ava_tests PRIVATE AVA_PROCESS_PUBLIC_HEADER_PATH="${CMAKE_SOURCE_DIR}/src/ava/process/supervisor.h")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MERMAID_HELPER_PATH="$<TARGET_FILE:ava_fake_mermaid_helper>")
 target_compile_definitions(ava_tests PRIVATE AVA_SAMPLE_TODO_PLUGIN_DIR="${CMAKE_SOURCE_DIR}/examples/plugins/todo")
@@ -354,6 +361,7 @@ set(AVA_TEST_SUITES
   tool_scheduler
   lsp
   plugin
+  plugin_runner_process
   plugin_ui
   process_adoption_posix
   process_capability_posix
@@ -855,6 +863,14 @@ if(Python3_Interpreter_FOUND)
             -DAVA_INTERACTIVE_TUI_SOURCE=${CMAKE_SOURCE_DIR}/src/ava/app/interactive_tui.cpp
             -P ${CMAKE_CURRENT_SOURCE_DIR}/clipboard_image_static_contract.cmake)
   set_tests_properties(ava_tests.clipboard_image_static_contract PROPERTIES TIMEOUT 15)
+
+  add_test(
+    NAME ava_tests.plugin_runner_static_contract
+    COMMAND ${CMAKE_COMMAND}
+            -DAVA_PLUGIN_RUNNER_DIR=${CMAKE_SOURCE_DIR}/src/ava/plugin
+            -DAVA_PLUGIN_CMAKE=${CMAKE_SOURCE_DIR}/src/ava/plugin/CMakeLists.txt
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/plugin_runner_static_contract.cmake)
+  set_tests_properties(ava_tests.plugin_runner_static_contract PROPERTIES TIMEOUT 15)
 
   add_test(
     NAME ava_cli.doctor_support

@@ -32,6 +32,24 @@ class BenchmarkHarnessTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.module = load_module(pathlib.Path(cls.script).resolve())
 
+    def setUp(self) -> None:
+        # Most comparator unit tests use synthetic paths; dedicated requalification
+        # tests below restore the live Git validator around exact Plugin worktrees.
+        self.live_comparison_validator = self.module._live_comparison_provenance_mismatches
+        self.live_comparison_patch = mock.patch.object(
+            self.module, "_live_comparison_provenance_mismatches", return_value=[]
+        )
+        self.live_comparison_patch.start()
+        self.addCleanup(self.live_comparison_patch.stop)
+
+    def compare_with_live_provenance(self, before, after):
+        with mock.patch.object(
+            self.module,
+            "_live_comparison_provenance_mismatches",
+            new=self.live_comparison_validator,
+        ):
+            return self.module.compare_process_documents(before, after)
+
     def test_statistics_use_nearest_rank_p95(self) -> None:
         summary = self.module.summarize([1.0, 2.0, 3.0, 100.0])
         self.assertEqual(summary, {"median": 2.5, "p95": 100.0, "maximum": 100.0})
@@ -398,6 +416,89 @@ class BenchmarkHarnessTests(unittest.TestCase):
             identity["canonical_pathspecs"],
             identity["entries"],
         )
+
+    @contextlib.contextmanager
+    def live_plugin_comparison_documents(self):
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        before_commit = "13fb0cef5925368fa12f8bcf693235281bce099f"
+        after_commit = "2a30f40ec562b49915c3b09369cf4e6897de3d4d"
+
+        def git(*arguments: str) -> str:
+            completed = subprocess.run(
+                ["git", "-C", str(repository), *arguments],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            return completed.stdout.strip()
+
+        harness_commit = git("rev-parse", "HEAD^{commit}")
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            before_root = root / "before"
+            after_root = root / "after"
+            harness_root = root / "harness"
+            worktrees = (before_root, after_root, harness_root)
+            try:
+                for path, revision in (
+                    (before_root, before_commit),
+                    (after_root, after_commit),
+                    (harness_root, harness_commit),
+                ):
+                    git("worktree", "add", "--detach", str(path), revision)
+
+                before, after = self.comparison_documents()
+                for document, source_root, revision in (
+                    (before, before_root, before_commit),
+                    (after, after_root, after_commit),
+                ):
+                    provenance = document["provenance"]
+                    source = self.module.process_source_provenance(
+                        source_root, harness_root, revision
+                    )
+                    families, shared = self.module.process_source_scope_identities(
+                        source_root, revision
+                    )
+                    provenance["measured_checkout"] = source["measured_checkout"]
+                    provenance["runtime_reference"] = source["runtime_reference"]
+                    provenance["harness"] = source["harness"]
+                    provenance["family_sources"] = families
+                    provenance["shared_process_source"] = shared
+                    provenance["family_authorities"] = (
+                        self.module.family_authority_source_identity(source_root, revision)
+                    )
+                    for build_key in ("build", "benchmark_helper_build"):
+                        provenance[build_key]["cmake_source_root"] = str(source_root)
+                    provenance["binary_build_binding"] = (
+                        self.module.process_binary_build_binding(
+                            provenance["build"], provenance["benchmark_helper_build"]
+                        )
+                    )
+                    document["artifacts"]["benchmark_script"] = (
+                        self.module.file_identity_v3(
+                            harness_root / "scripts" / "benchmark-backend.py"
+                        )
+                    )
+                yield before, after, before_root, after_root, harness_root
+            finally:
+                for path in worktrees:
+                    if path.exists():
+                        subprocess.run(
+                            [
+                                "git",
+                                "-C",
+                                str(repository),
+                                "worktree",
+                                "remove",
+                                "--force",
+                                str(path),
+                            ],
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.PIPE,
+                            text=True,
+                            check=False,
+                        )
 
     def process_family_sources(self):
         paths = {
@@ -1080,36 +1181,25 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.module._source_scope_signature(after_shared),
         )
 
-        before, after = self.comparison_documents()
-        for document, revision, scopes, shared in (
-            (before, before_revision, before_scopes, before_shared),
-            (after, after_revision, after_scopes, after_shared),
+        with self.live_plugin_comparison_documents() as (
+            before,
+            after,
+            _before_root,
+            _after_root,
+            _harness_root,
         ):
-            tree = self.module._git(repository, "rev-parse", f"{revision}^{{tree}}")
-            document["provenance"]["measured_checkout"].update(
-                {"commit": revision, "tree": tree}
+            self.module.validate_process_document(before)
+            self.module.validate_process_document(after)
+            comparison = self.compare_with_live_provenance(before, after)
+            self.assertEqual(comparison["status"], "measured")
+            self.assertEqual(
+                comparison["source_attribution"],
+                {
+                    "transitioned_family": "plugin",
+                    "changed_family_scopes": ["plugin"],
+                    "shared_process_scope_changed": True,
+                },
             )
-            document["provenance"]["runtime_reference"].update(
-                {"commit": revision, "tree": tree}
-            )
-            document["provenance"]["family_sources"] = scopes
-            document["provenance"]["shared_process_source"] = shared
-            document["provenance"]["family_authorities"] = (
-                self.module.family_authority_source_identity(repository, revision)
-            )
-
-        self.module.validate_process_document(before)
-        self.module.validate_process_document(after)
-        comparison = self.module.compare_process_documents(before, after)
-        self.assertEqual(comparison["status"], "measured")
-        self.assertEqual(
-            comparison["source_attribution"],
-            {
-                "transitioned_family": "plugin",
-                "changed_family_scopes": ["plugin"],
-                "shared_process_scope_changed": True,
-            },
-        )
 
     def test_force_removes_linked_worktree_with_initialized_submodule_without_deinit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -1377,6 +1467,286 @@ class BenchmarkHarnessTests(unittest.TestCase):
         document["provenance"]["shared_process_source"]["scope_digest_sha256"] = "f" * 64
         with self.assertRaisesRegex(ValueError, "shared process source scope digest"):
             self.module.validate_process_document(document)
+
+    def test_comparison_regenerates_pathspec_scopes_for_both_plugin_cohorts(self) -> None:
+        with self.live_plugin_comparison_documents() as (
+            before,
+            after,
+            _before_root,
+            _after_root,
+            _harness_root,
+        ):
+            for document in (before, after):
+                bash_scope = document["provenance"]["family_sources"]["bash"]
+                bash_scope["entries"] = [
+                    entry
+                    for entry in bash_scope["entries"]
+                    if entry["path"] != "src/ava/tools/bash_tool.cpp"
+                ]
+                self.refresh_source_scope_digest(bash_scope)
+
+            comparison = self.compare_with_live_provenance(before, after)
+
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(
+            comparison["mismatches"],
+            ["before.family_sources.bash", "after.family_sources.bash"],
+        )
+
+    def test_comparison_regenerates_plugin_and_shared_scopes(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after = live_documents[:2]
+            for scope_name in ("plugin", "shared"):
+                with self.subTest(scope=scope_name):
+                    before = copy.deepcopy(live_before)
+                    after = copy.deepcopy(live_after)
+                    for document in (before, after):
+                        provenance = document["provenance"]
+                        identity = (
+                            provenance["family_sources"]["plugin"]
+                            if scope_name == "plugin"
+                            else provenance["shared_process_source"]
+                        )
+                        identity["entries"].pop(0)
+                        self.refresh_source_scope_digest(identity)
+
+                    comparison = self.compare_with_live_provenance(before, after)
+                    self.assertEqual(comparison["status"], "unsupported")
+                    self.assertEqual(
+                        comparison["reason_code"], "comparison_provenance_required"
+                    )
+                    expected_path = (
+                        "family_sources.plugin"
+                        if scope_name == "plugin"
+                        else "shared_process_source"
+                    )
+                    self.assertEqual(
+                        comparison["mismatches"],
+                        [f"before.{expected_path}", f"after.{expected_path}"],
+                    )
+
+    def test_comparison_rejects_forged_extra_scope_entries_and_digest(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after = live_documents[:2]
+            before = copy.deepcopy(live_before)
+            after = copy.deepcopy(live_after)
+            for document in (before, after):
+                bash_scope = document["provenance"]["family_sources"]["bash"]
+                bash_scope["entries"].append(
+                    {
+                        "mode": "100644",
+                        "type": "blob",
+                        "object": "f" * 40,
+                        "path": "src/ava/tools/bash_tool_forged.cpp",
+                    }
+                )
+                self.refresh_source_scope_digest(bash_scope)
+
+            comparison = self.compare_with_live_provenance(before, after)
+            self.assertEqual(comparison["status"], "unsupported")
+            self.assertEqual(
+                comparison["mismatches"],
+                ["before.family_sources.bash", "after.family_sources.bash"],
+            )
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["family_sources"]["bash"][
+                "scope_digest_sha256"
+            ] = "f" * 64
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertEqual(comparison["status"], "unsupported")
+            self.assertEqual(
+                comparison["reason_code"], "comparison_provenance_required"
+            )
+            self.assertEqual(comparison["mismatches"], ["before.document_validation"])
+
+    def test_comparison_requires_recorded_measured_worktrees(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after, before_root, after_root, _harness_root = (
+                live_documents
+            )
+            repository = pathlib.Path(self.script).resolve().parents[1]
+            subprocess.run(
+                [
+                    "git",
+                    "-C",
+                    str(repository),
+                    "worktree",
+                    "remove",
+                    "--force",
+                    str(before_root),
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                check=True,
+            )
+            comparison = self.compare_with_live_provenance(live_before, live_after)
+            self.assertEqual(
+                comparison["mismatches"],
+                ["before.measured_checkout.repository_worktree"],
+            )
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["measured_checkout"]["repository"] = str(after_root)
+            for build_key in ("build", "benchmark_helper_build"):
+                before["provenance"][build_key]["cmake_source_root"] = str(after_root)
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertEqual(comparison["status"], "unsupported")
+            self.assertEqual(
+                comparison["reason_code"], "comparison_provenance_required"
+            )
+            self.assertIn(
+                "before.measured_checkout.current_commit", comparison["mismatches"]
+            )
+            self.assertIn(
+                "before.measured_checkout.current_tree", comparison["mismatches"]
+            )
+
+    def test_comparison_rechecks_checkout_after_collection(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            before, after, before_root = live_documents[:3]
+            changed_source = before_root / "src" / "ava" / "tools" / "bash_tool.cpp"
+            original = changed_source.read_bytes()
+            try:
+                changed_source.write_bytes(original + b"\npost-collection mutation\n")
+                comparison = self.compare_with_live_provenance(before, after)
+            finally:
+                changed_source.write_bytes(original)
+
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertIn("before.measured_checkout.current_dirty", comparison["mismatches"])
+        self.assertIn(
+            "before.runtime_reference.current_production_path_equality",
+            comparison["mismatches"],
+        )
+        self.assertIn(
+            "before.runtime_reference.current_production_paths_dirty",
+            comparison["mismatches"],
+        )
+
+    def test_comparison_resolves_recorded_commits_and_trees(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after = live_documents[:2]
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["measured_checkout"]["commit"] = "f" * 40
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertEqual(comparison["status"], "unsupported")
+            self.assertIn(
+                "before.measured_checkout.commit_resolution", comparison["mismatches"]
+            )
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["measured_checkout"]["tree"] = (
+                live_after["provenance"]["measured_checkout"]["tree"]
+            )
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertIn(
+                "before.measured_checkout.tree_matches_commit",
+                comparison["mismatches"],
+            )
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["runtime_reference"]["commit"] = "f" * 40
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertIn(
+                "before.runtime_reference.commit_resolution",
+                comparison["mismatches"],
+            )
+
+            before = copy.deepcopy(live_before)
+            before["provenance"]["runtime_reference"]["tree"] = (
+                live_after["provenance"]["runtime_reference"]["tree"]
+            )
+            comparison = self.compare_with_live_provenance(before, live_after)
+            self.assertIn(
+                "before.runtime_reference.tree_matches_commit",
+                comparison["mismatches"],
+            )
+
+    def test_comparison_regenerates_authority_source_identity(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after = live_documents[:2]
+            mutations = {
+                "object": "f" * 40,
+                "sha256": "f" * 64,
+                "authorities": {
+                    **live_before["provenance"]["family_authorities"]["authorities"],
+                    "bash": "supervised",
+                },
+            }
+            for field, value in mutations.items():
+                with self.subTest(field=field):
+                    before = copy.deepcopy(live_before)
+                    before["provenance"]["family_authorities"][field] = value
+                    comparison = self.compare_with_live_provenance(before, live_after)
+                    self.assertEqual(comparison["status"], "unsupported")
+                    self.assertEqual(
+                        comparison["reason_code"], "comparison_provenance_required"
+                    )
+                    self.assertEqual(
+                        comparison["mismatches"],
+                        ["before.family_authorities.source_identity"],
+                    )
+
+    def test_comparison_git_failure_is_structured_unsupported(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            before, after = live_documents[:2]
+            with mock.patch.object(self.module, "_comparison_git", return_value=None):
+                comparison = self.compare_with_live_provenance(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(
+            comparison["mismatches"],
+            [
+                "before.measured_checkout.repository_worktree",
+                "after.measured_checkout.repository_worktree",
+            ],
+        )
+
+    def test_comparison_requires_present_pinned_clean_harness_worktree(self) -> None:
+        with self.live_plugin_comparison_documents() as live_documents:
+            live_before, live_after, _before_root, _after_root, harness_root = (
+                live_documents
+            )
+            before = copy.deepcopy(live_before)
+            after = copy.deepcopy(live_after)
+            removed = harness_root.parent / "removed-harness-worktree"
+            for document in (before, after):
+                document["provenance"]["harness"]["repository"] = str(removed)
+                document["artifacts"]["benchmark_script"]["path"] = str(
+                    removed / "scripts" / "benchmark-backend.py"
+                )
+            comparison = self.compare_with_live_provenance(before, after)
+            self.assertEqual(
+                comparison["mismatches"],
+                [
+                    "before.harness.repository_worktree",
+                    "after.harness.repository_worktree",
+                ],
+            )
+
+            harness_script = harness_root / "scripts" / "benchmark-backend.py"
+            original = harness_script.read_bytes()
+            try:
+                harness_script.write_bytes(original + b"\n# post-collection mutation\n")
+                comparison = self.compare_with_live_provenance(
+                    live_before, live_after
+                )
+            finally:
+                harness_script.write_bytes(original)
+            self.assertEqual(comparison["status"], "unsupported")
+            for cohort in ("before", "after"):
+                self.assertIn(
+                    f"{cohort}.harness.current_dirty", comparison["mismatches"]
+                )
+                self.assertIn(
+                    f"{cohort}.harness.current_benchmark_script_sha256",
+                    comparison["mismatches"],
+                )
 
     def test_wrong_but_valid_measured_root_is_structured_unsupported(self) -> None:
         before, after = self.comparison_documents()

@@ -1720,6 +1720,43 @@ def _git(repository: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
+def _read_only_git_environment() -> dict[str, str]:
+    environment = dict(os.environ)
+    for name in (
+        "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+        "GIT_COMMON_DIR",
+        "GIT_DIR",
+        "GIT_INDEX_FILE",
+        "GIT_OBJECT_DIRECTORY",
+        "GIT_PREFIX",
+        "GIT_WORK_TREE",
+    ):
+        environment.pop(name, None)
+    environment.update(
+        {
+            "GIT_NO_LAZY_FETCH": "1",
+            "GIT_NO_REPLACE_OBJECTS": "1",
+            "GIT_OPTIONAL_LOCKS": "0",
+            "GIT_PAGER": "cat",
+            "GIT_TERMINAL_PROMPT": "0",
+        }
+    )
+    return environment
+
+
+def _read_only_git_command(repository: Path, *arguments: str) -> list[str]:
+    return [
+        "git",
+        "-c",
+        "core.fsmonitor=false",
+        "-c",
+        "core.hooksPath=",
+        "-C",
+        str(repository),
+        *arguments,
+    ]
+
+
 def process_source_provenance(
     measured_source_root: Path, harness_repository: Path, runtime_reference: str
 ) -> dict[str, Any]:
@@ -1777,13 +1814,15 @@ def _scope_entries_from_git(
     canonical_paths: Sequence[str],
     canonical_pathspecs: Sequence[str],
 ) -> list[dict[str, str]]:
+    if revision != "HEAD" and not _is_full_git_object_id(revision):
+        raise RuntimeError("source scope revision must be HEAD or a full commit ID")
     with tempfile.TemporaryDirectory(prefix="ava-benchmark-git-index-") as temporary:
         index_path = Path(temporary) / "index"
-        environment = dict(os.environ)
+        environment = _read_only_git_environment()
         environment["GIT_INDEX_FILE"] = str(index_path)
         try:
             read_tree = subprocess.run(
-                ["git", "-C", str(repository), "read-tree", revision],
+                _read_only_git_command(repository, "read-tree", revision),
                 env=environment,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
@@ -1793,17 +1832,15 @@ def _scope_entries_from_git(
             if read_tree.returncode != 0:
                 raise RuntimeError(f"cannot resolve source scope revision {revision}")
             listed = subprocess.run(
-                [
-                    "git",
-                    "-C",
-                    str(repository),
+                _read_only_git_command(
+                    repository,
                     "ls-files",
                     "--stage",
                     "-z",
                     "--",
                     *canonical_paths,
                     *canonical_pathspecs,
-                ],
+                ),
                 env=environment,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
@@ -1909,29 +1946,62 @@ def process_source_scope_identities(
     return families, shared
 
 
+def _git_blob_at_path(repository: Path, revision: str, path: str) -> tuple[str, bytes]:
+    if revision != "HEAD" and not _is_full_git_object_id(revision):
+        raise RuntimeError("Git blob revision must be HEAD or a full commit ID")
+    environment = _read_only_git_environment()
+    try:
+        listed = subprocess.run(
+            _read_only_git_command(repository, "ls-tree", "-z", revision, "--", path),
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("cannot resolve benchmark family authority source") from error
+    records = [record for record in listed.stdout.split(b"\0") if record]
+    if listed.returncode != 0 or len(records) != 1:
+        raise RuntimeError("cannot resolve benchmark family authority source")
+    try:
+        metadata, raw_path = records[0].split(b"\t", 1)
+        _mode, object_type, raw_object = metadata.decode("ascii").split()
+        resolved_path = raw_path.decode("utf-8")
+    except (UnicodeDecodeError, ValueError) as error:
+        raise RuntimeError("cannot resolve benchmark family authority source") from error
+    if object_type != "blob" or resolved_path != path or not _is_full_git_object_id(raw_object):
+        raise RuntimeError("cannot resolve benchmark family authority source")
+    try:
+        loaded = subprocess.run(
+            _read_only_git_command(repository, "cat-file", "blob", raw_object),
+            env=environment,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise RuntimeError("cannot resolve benchmark family authority source") from error
+    if loaded.returncode != 0:
+        raise RuntimeError("cannot resolve benchmark family authority source")
+    return raw_object, loaded.stdout
+
+
 def family_authority_source_identity(repository: Path, revision: str = "HEAD") -> dict[str, Any]:
+    source_object, committed_bytes = _git_blob_at_path(
+        repository, revision, PROCESS_AUTHORITY_SOURCE_PATH
+    )
     if revision == "HEAD":
         source = repository / PROCESS_AUTHORITY_SOURCE_PATH
         text = source.read_text(encoding="utf-8")
         source_sha256 = sha256_file(source)
     else:
         try:
-            completed = subprocess.run(
-                ["git", "-C", str(repository), "show", f"{revision}:{PROCESS_AUTHORITY_SOURCE_PATH}"],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                timeout=15,
-                check=False,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise RuntimeError("cannot resolve benchmark family authority source") from error
-        if completed.returncode != 0:
-            raise RuntimeError("cannot resolve benchmark family authority source")
-        try:
-            text = completed.stdout.decode("utf-8")
+            text = committed_bytes.decode("utf-8")
         except UnicodeDecodeError as error:
             raise RuntimeError("benchmark family authority source is not UTF-8") from error
-        source_sha256 = hashlib.sha256(completed.stdout).hexdigest()
+        source_sha256 = hashlib.sha256(committed_bytes).hexdigest()
     matches = re.findall(
         r"^set\(AVA_BENCHMARK_(CURL|PLUGIN|MCP|LSP|BASH)_AUTHORITY +(legacy_local|supervised)\)$",
         text,
@@ -1942,7 +2012,7 @@ def family_authority_source_identity(repository: Path, revision: str = "HEAD") -
         raise RuntimeError("benchmark family authority source must declare each family exactly once in canonical order")
     return {
         "path": PROCESS_AUTHORITY_SOURCE_PATH,
-        "object": _git(repository, "rev-parse", f"{revision}:{PROCESS_AUTHORITY_SOURCE_PATH}"),
+        "object": source_object,
         "sha256": source_sha256,
         "authorities": {name.lower(): authority for name, authority in matches},
     }
@@ -2919,6 +2989,248 @@ def _helper_build_binding_mismatches(document: dict[str, Any], cohort: str) -> l
     return mismatches
 
 
+def _comparison_git(repository: Path, *arguments: str) -> tuple[int, str] | None:
+    try:
+        completed = subprocess.run(
+            _read_only_git_command(repository, *arguments),
+            env=_read_only_git_environment(),
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except (OSError, UnicodeError, subprocess.TimeoutExpired):
+        return None
+    return completed.returncode, completed.stdout.strip()
+
+
+def _comparison_worktree(repository_value: Any) -> Path | None:
+    if not _is_resolved_text(repository_value):
+        return None
+    try:
+        repository = Path(repository_value).resolve()
+        if not repository.is_dir():
+            return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    identity = _comparison_git(
+        repository, "rev-parse", "--show-toplevel", "--is-inside-work-tree"
+    )
+    if identity is None or identity[0] != 0:
+        return None
+    lines = identity[1].splitlines()
+    if len(lines) != 2 or lines[1] != "true":
+        return None
+    try:
+        if Path(lines[0]).resolve() != repository:
+            return None
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return repository
+
+
+def _comparison_resolved_revision(repository: Path, revision: Any) -> tuple[str, str] | None:
+    if not _is_full_git_object_id(revision):
+        return None
+    resolved_commit = _comparison_git(
+        repository,
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        f"{revision}^{{commit}}",
+    )
+    if (
+        resolved_commit is None
+        or resolved_commit[0] != 0
+        or resolved_commit[1] != revision
+    ):
+        return None
+    resolved_tree = _comparison_git(
+        repository,
+        "rev-parse",
+        "--verify",
+        "--end-of-options",
+        f"{revision}^{{tree}}",
+    )
+    if (
+        resolved_tree is None
+        or resolved_tree[0] != 0
+        or not _is_full_git_object_id(resolved_tree[1])
+    ):
+        return None
+    return resolved_commit[1], resolved_tree[1]
+
+
+def _exact_json_identity_equal(first: Any, second: Any) -> bool:
+    try:
+        return json.dumps(
+            first, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ) == json.dumps(
+            second, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        )
+    except (TypeError, ValueError):
+        return False
+
+
+def _live_comparison_provenance_mismatches(
+    document: dict[str, Any], cohort: str
+) -> list[str]:
+    provenance = document["provenance"]
+    mismatches: list[str] = []
+
+    def mismatch(path: str) -> None:
+        qualified = f"{cohort}.{path}"
+        if qualified not in mismatches:
+            mismatches.append(qualified)
+
+    measured = provenance["measured_checkout"]
+    repository = _comparison_worktree(measured.get("repository"))
+    if repository is None:
+        mismatch("measured_checkout.repository_worktree")
+        return mismatches
+
+    measured_revision = _comparison_resolved_revision(repository, measured.get("commit"))
+    if measured_revision is None:
+        mismatch("measured_checkout.commit_resolution")
+    elif measured_revision[1] != measured.get("tree"):
+        mismatch("measured_checkout.tree_matches_commit")
+
+    current_head = _comparison_git(
+        repository, "rev-parse", "--verify", "HEAD^{commit}"
+    )
+    current_revision = (
+        _comparison_resolved_revision(repository, current_head[1])
+        if current_head is not None and current_head[0] == 0
+        else None
+    )
+    if current_revision is None or current_revision[0] != measured.get("commit"):
+        mismatch("measured_checkout.current_commit")
+    if current_revision is None or current_revision[1] != measured.get("tree"):
+        mismatch("measured_checkout.current_tree")
+    current_status = _comparison_git(
+        repository,
+        "status",
+        "--porcelain",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+    )
+    if current_status is None or current_status[0] != 0 or current_status[1]:
+        mismatch("measured_checkout.current_dirty")
+
+    if measured_revision is not None:
+        try:
+            regenerated_families, regenerated_shared = process_source_scope_identities(
+                repository, measured_revision[0]
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            mismatch("source_ownership_scopes.regeneration")
+        else:
+            recorded_families = provenance["family_sources"]
+            for family in PROCESS_FAMILY_NAMES:
+                if not _exact_json_identity_equal(
+                    regenerated_families[family], recorded_families[family]
+                ):
+                    mismatch(f"family_sources.{family}")
+            if not _exact_json_identity_equal(
+                regenerated_shared, provenance["shared_process_source"]
+            ):
+                mismatch("shared_process_source")
+
+        try:
+            regenerated_authority = family_authority_source_identity(
+                repository, measured_revision[0]
+            )
+        except (OSError, RuntimeError, ValueError, subprocess.TimeoutExpired):
+            mismatch("family_authorities.source_identity")
+        else:
+            if not _exact_json_identity_equal(
+                regenerated_authority, provenance["family_authorities"]
+            ):
+                mismatch("family_authorities.source_identity")
+
+    runtime_reference = provenance["runtime_reference"]
+    runtime_revision = _comparison_resolved_revision(
+        repository, runtime_reference.get("commit")
+    )
+    if runtime_revision is None:
+        mismatch("runtime_reference.commit_resolution")
+    elif runtime_revision[1] != runtime_reference.get("tree"):
+        mismatch("runtime_reference.tree_matches_commit")
+
+    if runtime_revision is not None:
+        compared = _comparison_git(
+            repository,
+            "diff",
+            "--quiet",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=none",
+            runtime_revision[0],
+            "--",
+            *PROCESS_PRODUCTION_SOURCE_PATHS,
+        )
+        if compared is None or compared[0] != 0:
+            mismatch("runtime_reference.current_production_path_equality")
+    production_status = _comparison_git(
+        repository,
+        "status",
+        "--porcelain",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+        "--",
+        *PROCESS_PRODUCTION_SOURCE_PATHS,
+    )
+    if production_status is None or production_status[0] != 0 or production_status[1]:
+        mismatch("runtime_reference.current_production_paths_dirty")
+
+    harness = provenance["harness"]
+    harness_repository = _comparison_worktree(harness.get("repository"))
+    if harness_repository is None:
+        mismatch("harness.repository_worktree")
+        return mismatches
+
+    harness_revision = _comparison_resolved_revision(
+        harness_repository, harness.get("commit")
+    )
+    if harness_revision is None:
+        mismatch("harness.commit_resolution")
+    elif harness_revision[1] != harness.get("tree"):
+        mismatch("harness.tree_matches_commit")
+
+    harness_head = _comparison_git(
+        harness_repository, "rev-parse", "--verify", "HEAD^{commit}"
+    )
+    current_harness_revision = (
+        _comparison_resolved_revision(harness_repository, harness_head[1])
+        if harness_head is not None and harness_head[0] == 0
+        else None
+    )
+    if current_harness_revision is None or current_harness_revision[0] != harness.get("commit"):
+        mismatch("harness.current_commit")
+    if current_harness_revision is None or current_harness_revision[1] != harness.get("tree"):
+        mismatch("harness.current_tree")
+    harness_status = _comparison_git(
+        harness_repository,
+        "status",
+        "--porcelain",
+        "--untracked-files=normal",
+        "--ignore-submodules=none",
+    )
+    if harness_status is None or harness_status[0] != 0 or harness_status[1]:
+        mismatch("harness.current_dirty")
+
+    harness_script = harness_repository / "scripts" / "benchmark-backend.py"
+    try:
+        current_script_hash = sha256_file(harness_script)
+    except (OSError, RuntimeError, ValueError):
+        mismatch("harness.current_benchmark_script_sha256")
+    else:
+        if current_script_hash != harness.get("benchmark_script_sha256"):
+            mismatch("harness.current_benchmark_script_sha256")
+    return mismatches
+
+
 def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
     provenance = document["provenance"]
     mismatches: list[str] = []
@@ -3098,8 +3410,18 @@ def _shared_process_scope_signature(document: dict[str, Any]) -> str:
 
 
 def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
-    validate_process_document(before)
-    validate_process_document(after)
+    validation_mismatches: list[str] = []
+    for cohort, document in (("before", before), ("after", after)):
+        try:
+            validate_process_document(document)
+        except (KeyError, OSError, RuntimeError, TypeError, ValueError):
+            validation_mismatches.append(f"{cohort}.document_validation")
+    if validation_mismatches:
+        return comparison_unsupported(
+            "comparison_provenance_required",
+            "Each cohort requires clean, resolved, internally consistent comparison provenance.",
+            validation_mismatches,
+        )
     split_mismatches = [
         f"{cohort}.provenance_split"
         for cohort, document in (("before", before), ("after", after))
@@ -3115,6 +3437,13 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
         *(_comparison_provenance_mismatches(before, "before")),
         *(_comparison_provenance_mismatches(after, "after")),
     ]
+    if not provenance_mismatches:
+        provenance_mismatches.extend(
+            _live_comparison_provenance_mismatches(before, "before")
+        )
+        provenance_mismatches.extend(
+            _live_comparison_provenance_mismatches(after, "after")
+        )
     if provenance_mismatches:
         return comparison_unsupported(
             "comparison_provenance_required",

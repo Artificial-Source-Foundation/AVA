@@ -221,6 +221,7 @@ set(AVA_TESTS_SOURCES
   "plugin_tests.cpp"
   "plugin_ui_tests.cpp"
   "process_adoption_posix_tests.cpp"
+  "process_capability_posix_tests.cpp"
   "process_deadline_tests.cpp"
   "process_environment_tests.cpp"
   "process_launch_protocol_posix_tests.cpp"
@@ -355,6 +356,7 @@ set(AVA_TEST_SUITES
   plugin
   plugin_ui
   process_adoption_posix
+  process_capability_posix
   process_deadline
   process_environment
   process_launch_protocol_posix
@@ -388,6 +390,7 @@ foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
 endforeach()
 set_tests_properties(ava_tests.provider_live_smoke PROPERTIES SKIP_RETURN_CODE 77)
 set_tests_properties(ava_tests.process_adoption_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;adoption;offline")
+set_tests_properties(ava_tests.process_capability_posix PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;capability;offline")
 set_tests_properties(ava_tests.process_deadline PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 45 LABELS "process;posix;deadline;monitor;offline")
 set_tests_properties(ava_tests.clipboard_image_process PROPERTIES TIMEOUT 30 LABELS "process;clipboard;posix;offline")
 set_tests_properties(ava_tests.process_environment PROPERTIES LABELS "process;offline")

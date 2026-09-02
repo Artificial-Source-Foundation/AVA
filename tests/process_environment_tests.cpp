@@ -4,6 +4,7 @@
 #include "ava/process/environment_test_support.h"
 #include "ava/process/scope.h"
 #include "ava/process/supervisor.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -30,6 +31,21 @@ using ava::process::EnvironmentVariableV1;
 using ava::process::ExactEnvironmentV1;
 using ava::process::HostEnvironmentV1;
 using ava::process::testing::EnvironmentTestAccess;
+
+ava::process::AnchoredWorkingDirectoryV1 anchored_root_cwd()
+{
+#if defined(_WIN32)
+  return {};
+#else
+  auto anchors = ava::core::AnchorSet::open({"/"});
+  if (!anchors)
+    throw std::runtime_error(anchors.error().format());
+  auto capability = ava::process::mint_anchored_working_directory(std::move(*anchors), "/");
+  if (!capability)
+    throw std::runtime_error(capability.error().format());
+  return std::move(*capability);
+#endif
+}
 
 class EnvironmentSandbox final
 {
@@ -647,6 +663,7 @@ void test_secure_adoption_rejects_mismatched_logical_cwd()
     auto result = supervisor.begin_secure_adoption(std::move(*reservation), {.environment = std::move(environment),
                                                                              .argv = {"adopted-process"},
                                                                              .cwd = std::string(adoption_cwd),
+                                                                             .anchored_cwd = anchored_root_cwd(),
                                                                              .bash_containment = ava::process::BashContainmentHandshakeV1::None});
     if (!result)
       errors.push_back(result.error().format());
@@ -696,9 +713,11 @@ void test_closed_launch_surface_and_content_free_failures()
     auto reservation = supervisor.reserve(operation_owner(*application), role);
     if (!reservation)
       return false;
-    auto result = supervisor.begin_secure_adoption(
-        std::move(*reservation),
-        {.environment = std::move(environment), .argv = {"adopted-process"}, .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None});
+    auto result = supervisor.begin_secure_adoption(std::move(*reservation), {.environment = std::move(environment),
+                                                                             .argv = {"adopted-process"},
+                                                                             .cwd = "/",
+                                                                             .anchored_cwd = anchored_root_cwd(),
+                                                                             .bash_containment = ava::process::BashContainmentHandshakeV1::None});
     if (!result)
       errors.push_back(result.error().format());
     return !result;
@@ -722,6 +741,7 @@ void test_closed_launch_surface_and_content_free_failures()
           ? supervisor.begin_secure_adoption(std::move(*mermaid_reservation), {.environment = std::move(*mermaid_environment),
                                                                                .argv = {"adopted-process"},
                                                                                .cwd = "/",
+                                                                               .anchored_cwd = anchored_root_cwd(),
                                                                                .bash_containment = ava::process::BashContainmentHandshakeV1::None})
           : ava::core::Result<ava::process::AdoptionGate>(
                 std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "failed to prepare sentinel fixture")));

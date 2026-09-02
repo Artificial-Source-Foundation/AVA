@@ -252,7 +252,8 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
   if (!valid() || implementation_->leader > 1 || implementation_->child_branch)
     return std::unexpected(detail::invalid_error("secure adoption gate cannot fork another leader"));
   auto& gate = *implementation_;
-  bool const binding_valid = detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) &&
+  bool const binding_valid = detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) && gate.anchored_cwd.valid() &&
+                             detail::ExecutionCapabilityAccess::logical_matches(gate.anchored_cwd, gate.cwd) &&
                              prepared_argv_valid(gate.argv_storage, gate.argv_pointers) && is_valid(gate.bash_containment) &&
                              (gate.role != ProcessRoleV1::Mermaid || gate.cwd == "/") &&
                              (gate.bash_containment != BashContainmentHandshakeV1::Required || gate.role == ProcessRoleV1::Bash);
@@ -261,6 +262,12 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
     gate.record = 0;
     return std::unexpected(detail::invalid_error("secure-adoption leader requires its retained closed launch binding"));
+  }
+  if (auto refreshed = detail::ExecutionCapabilityAccess::refresh(gate.anchored_cwd); !refreshed)
+  {
+    detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
+    gate.record = 0;
+    return std::unexpected(std::move(refreshed.error()));
   }
 
   detail::PreForkDecision initial_check;
@@ -276,17 +283,22 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
     return std::unexpected(detail::canceled_launch_error("secure-adoption leader launch", initial_check.reason));
   }
 
-  // Revalidate role, profile, prepared argv, retained logical cwd, and
-  // containment policy at the final pre-fork boundary after all
-  // allocator-backed preparation.
-  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) ||
-      !prepared_argv_valid(gate.argv_storage, gate.argv_pointers) || !is_valid(gate.bash_containment) ||
-      (gate.role == ProcessRoleV1::Mermaid && gate.cwd != "/") ||
+  // Revalidate immutable bindings, then refresh the retained cwd route at the
+  // final pre-fork boundary after all allocator-backed preparation.
+  if (!detail::EnvironmentAccess::matches_secure_adoption(gate.environment, gate.role, gate.cwd) || !gate.anchored_cwd.valid() ||
+      !detail::ExecutionCapabilityAccess::logical_matches(gate.anchored_cwd, gate.cwd) || !prepared_argv_valid(gate.argv_storage, gate.argv_pointers) ||
+      !is_valid(gate.bash_containment) || (gate.role == ProcessRoleV1::Mermaid && gate.cwd != "/") ||
       (gate.bash_containment == BashContainmentHandshakeV1::Required && gate.role != ProcessRoleV1::Bash))
   {
     detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
     gate.record = 0;
     return std::unexpected(detail::invalid_error("secure-adoption leader lost its retained closed launch binding"));
+  }
+  if (auto refreshed = detail::ExecutionCapabilityAccess::refresh(gate.anchored_cwd); !refreshed)
+  {
+    detail::finish_unregistered(gate.state, gate.record, TerminationReasonV1::LaunchFailed);
+    gate.record = 0;
+    return std::unexpected(std::move(refreshed.error()));
   }
 
   detail::PreForkDecision final_check;
@@ -345,14 +357,18 @@ ava::core::Result<AdoptionForkBranchV1> AdoptionGate::fork_leader()
 
     if (gate.role == ProcessRoleV1::Mermaid && ::raise(SIGSTOP) != 0)
       child_fail(status_descriptor, detail::LaunchFailureStageV1::Gate, errno == 0 ? EIO : errno);
-    if (::fchdir(gate.cwd_descriptor.get()) != 0)
+    int const cwd_descriptor = detail::ExecutionCapabilityAccess::target_descriptor(gate.anchored_cwd);
+    if (::fchdir(cwd_descriptor) != 0)
       child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, errno == 0 ? EIO : errno);
-    gate.cwd_descriptor.reset();
+    detail::ExecutionCapabilityAccess::child_close_after_fchdir(gate.anchored_cwd);
     gate.cwd_applied = true;
     gate.child_api_ready = true;
     return AdoptionForkBranchV1::Child;
   }
   gate.leader = process;
+  // The forked leader has its own inherited cwd authority. Drop every parent
+  // cwd/route copy before a caller can request the optional sentinel.
+  gate.anchored_cwd = AnchoredWorkingDirectoryV1{};
   gate.launch_status.write_end.reset();
   gate.leader_control.read_end.reset();
   gate.containment_control.read_end.reset();
@@ -491,9 +507,8 @@ void AdoptionGate::child_bash_containment_applied() noexcept
   }
 
   auto hidden_descriptor = [&](int descriptor) noexcept {
-    bool hidden = descriptor == status_descriptor || descriptor == gate.cwd_descriptor.get() || descriptor == gate.leader_control.read_end.get() ||
-                  descriptor == gate.leader_control.write_end.get() || descriptor == gate.containment_control.read_end.get() ||
-                  descriptor == gate.containment_control.write_end.get();
+    bool hidden = descriptor == status_descriptor || descriptor == gate.leader_control.read_end.get() || descriptor == gate.leader_control.write_end.get() ||
+                  descriptor == gate.containment_control.read_end.get() || descriptor == gate.containment_control.write_end.get();
     if (gate.sentinel_status)
       hidden = hidden || descriptor == gate.sentinel_status->read_end.get() || descriptor == gate.sentinel_status->write_end.get();
     if (gate.sentinel_control)
@@ -551,18 +566,29 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
   if (!consumed)
     return std::unexpected(std::move(consumed.error()));
   auto const identity = *consumed;
+#if defined(_WIN32)
+  static_cast<void>(specification);
+  detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+  return std::unexpected(detail::unsupported_error());
+#else
   auto const role = detail::record_role(state, identity);
   auto reject_invalid = [&](std::string message) -> ava::core::Result<AdoptionGate> {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
     return std::unexpected(detail::invalid_error(std::move(message)));
   };
   bool const binding_valid = role && is_valid(specification.bash_containment) && !specification.cwd.empty() && specification.cwd.starts_with('/') &&
-                             !contains_nul(specification.cwd) &&
+                             !contains_nul(specification.cwd) && specification.anchored_cwd.valid() &&
+                             detail::ExecutionCapabilityAccess::logical_matches(specification.anchored_cwd, specification.cwd) &&
                              detail::EnvironmentAccess::matches_secure_adoption(specification.environment, *role, specification.cwd) &&
                              (*role != ProcessRoleV1::Mermaid || specification.cwd == "/") &&
                              (specification.bash_containment != BashContainmentHandshakeV1::Required || *role == ProcessRoleV1::Bash);
   if (!binding_valid)
-    return reject_invalid("reserved secure adoption requires one matching closed environment, cwd, and containment specification");
+    return reject_invalid("reserved secure adoption requires one matching closed environment, anchored cwd, and containment specification");
+  if (auto refreshed = detail::ExecutionCapabilityAccess::refresh(specification.anchored_cwd); !refreshed)
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(std::move(refreshed.error()));
+  }
   if (specification.argv.empty() || specification.argv.size() > detail::kMaximumLaunchArgumentCount)
     return reject_invalid("secure-adoption argv count is outside the supported bound");
   if (specification.argv.front().empty())
@@ -598,27 +624,6 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
     detail::finish_unregistered(state, identity, initial_check.reason);
     return std::unexpected(detail::canceled_launch_error("secure adoption", initial_check.reason));
   }
-#if defined(_WIN32)
-  static_cast<void>(startup_deadline);
-  detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
-  return std::unexpected(detail::unsupported_error());
-#else
-  // Deliberately neutral transition seam: cwd is preopened here until the
-  // anchored cwd capability lands as a separate migration prerequisite.
-  int cwd_descriptor = ::open(specification.cwd.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK);
-  if (cwd_descriptor < 0)
-  {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
-    return std::unexpected(detail::io_error("failed to prepare the secure-adoption cwd", errno));
-  }
-  auto moved_cwd = detail::move_above_standard_descriptors(cwd_descriptor);
-  if (!moved_cwd)
-  {
-    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
-    return std::unexpected(std::move(moved_cwd.error()));
-  }
-  detail::UniqueFd prepared_cwd(*moved_cwd);
-
   auto launch_status = detail::make_cloexec_pipe();
   auto leader_control = launch_status ? detail::make_cloexec_pipe() : ava::core::Result<detail::Pipe>(std::unexpected(launch_status.error()));
   auto containment_control = leader_control ? detail::make_cloexec_pipe() : ava::core::Result<detail::Pipe>(std::unexpected(leader_control.error()));
@@ -657,6 +662,7 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
     gate->role = *role;
     gate->environment = std::move(specification.environment);
     gate->cwd = std::move(specification.cwd);
+    gate->anchored_cwd = std::move(specification.anchored_cwd);
     gate->argv_storage = std::move(specification.argv);
     gate->bash_containment = specification.bash_containment;
     gate->argv_pointers.reserve(gate->argv_storage.size() + 1);
@@ -684,13 +690,23 @@ ava::core::Result<AdoptionGate> Supervisor::begin_secure_adoption(Reservation&& 
   }
 
   gate->startup_deadline = startup_deadline;
-  gate->cwd_descriptor = std::move(prepared_cwd);
   gate->launch_status = std::move(*launch_status);
   gate->leader_control = std::move(*leader_control);
   gate->containment_control = std::move(*containment_control);
   gate->sentinel_status = std::move(sentinel_status);
   gate->sentinel_control = std::move(sentinel_control);
   gate->maximum_descriptor = detail::descriptor_limit();
+
+  if (!detail::ExecutionCapabilityAccess::logical_matches(gate->anchored_cwd, gate->cwd))
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(detail::invalid_error("secure adoption lost its anchored cwd binding"));
+  }
+  if (auto refreshed = detail::ExecutionCapabilityAccess::refresh(gate->anchored_cwd); !refreshed)
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(std::move(refreshed.error()));
+  }
 
   detail::PreForkDecision final_check;
   {

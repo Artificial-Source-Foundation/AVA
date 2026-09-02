@@ -376,6 +376,8 @@ struct PreparedSpawn
   std::vector<std::string> environment_storage;
   std::vector<char*> environment;
   UniqueFd cwd;
+  std::optional<PreopenedExecutableV1> preopened_executable;
+  std::optional<AnchoredWorkingDirectoryV1> anchored_cwd;
   PreparedStream standard_input;
   PreparedStream standard_output;
   PreparedStream standard_error;
@@ -496,6 +498,17 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
   auto const& exact_environment = detail::EnvironmentAccess::variables(specification.environment);
   if (specification.cwd.empty() || !specification.cwd.starts_with('/') || contains_nul(specification.cwd))
     return std::unexpected(detail::invalid_error("process cwd must be a NUL-free absolute path"));
+  if (specification.preopened_executable &&
+      (!specification.preopened_executable->valid() ||
+       !detail::ExecutionCapabilityAccess::logical_matches(*specification.preopened_executable, specification.executable)))
+  {
+    return std::unexpected(detail::invalid_error("process executable capability does not match its logical launch spelling"));
+  }
+  if (specification.anchored_cwd &&
+      (!specification.anchored_cwd->valid() || !detail::ExecutionCapabilityAccess::logical_matches(*specification.anchored_cwd, specification.cwd)))
+  {
+    return std::unexpected(detail::invalid_error("process cwd capability does not match its logical launch spelling"));
+  }
 
   if (specification.executable.size() > detail::kMaximumPreparedLaunchBytes ||
       specification.cwd.size() > detail::kMaximumPreparedLaunchBytes - specification.executable.size())
@@ -527,16 +540,26 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
     prepared_bytes += bytes;
   }
 
-  auto executable = resolve_executable(specification.executable, exact_environment);
-  if (!executable)
-    return std::unexpected(std::move(executable.error()));
+  std::string executable;
+  if (!specification.preopened_executable)
+  {
+    auto resolved = resolve_executable(specification.executable, exact_environment);
+    if (!resolved)
+      return std::unexpected(std::move(resolved.error()));
+    executable = std::move(*resolved);
+  }
 
-  int cwd_descriptor = ::open(specification.cwd.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK);
-  if (cwd_descriptor < 0)
-    return std::unexpected(detail::io_error("failed to prepare the process cwd", errno));
-  auto moved_cwd = detail::move_above_standard_descriptors(cwd_descriptor);
-  if (!moved_cwd)
-    return std::unexpected(std::move(moved_cwd.error()));
+  UniqueFd cwd;
+  if (!specification.anchored_cwd)
+  {
+    int cwd_descriptor = ::open(specification.cwd.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC | O_NONBLOCK);
+    if (cwd_descriptor < 0)
+      return std::unexpected(detail::io_error("failed to prepare the process cwd", errno));
+    auto moved_cwd = detail::move_above_standard_descriptors(cwd_descriptor);
+    if (!moved_cwd)
+      return std::unexpected(std::move(moved_cwd.error()));
+    cwd.reset(*moved_cwd);
+  }
 
   auto standard_input = prepare_stream(specification.stdin_mode, true);
   if (!standard_input)
@@ -557,12 +580,14 @@ ava::core::Result<PreparedSpawn> prepare_spawn(SpawnSpecV1& specification)
     return std::unexpected(std::move(nonblocking.error()));
 
   PreparedSpawn result;
-  result.executable = std::move(*executable);
+  result.executable = std::move(executable);
   result.argv_storage = std::move(specification.argv);
   result.environment_storage.reserve(exact_environment.size());
   for (auto const& variable : exact_environment)
     result.environment_storage.push_back(variable.name + "=" + variable.value);
-  result.cwd = UniqueFd(*moved_cwd);
+  result.cwd = std::move(cwd);
+  result.preopened_executable = std::move(specification.preopened_executable);
+  result.anchored_cwd = std::move(specification.anchored_cwd);
   result.standard_input = std::move(*standard_input);
   result.standard_output = std::move(*standard_output);
   result.standard_error = std::move(*standard_error);
@@ -626,14 +651,36 @@ void child_duplicate_stream(PreparedStream const& stream, int target, int launch
   child_duplicate_stream(prepared.standard_input, STDIN_FILENO, status_descriptor);
   child_duplicate_stream(prepared.standard_output, STDOUT_FILENO, status_descriptor);
   child_duplicate_stream(prepared.standard_error, STDERR_FILENO, status_descriptor);
+  int const cwd_descriptor = prepared.anchored_cwd ? detail::ExecutionCapabilityAccess::target_descriptor(*prepared.anchored_cwd) : prepared.cwd.get();
   if (prepared.fail_working_directory_for_test)
-    static_cast<void>(::close(prepared.cwd.get()));
-  if (::fchdir(prepared.cwd.get()) != 0)
+    static_cast<void>(::close(cwd_descriptor));
+  if (::fchdir(cwd_descriptor) != 0)
     child_fail(status_descriptor, detail::LaunchFailureStageV1::WorkingDirectory, errno);
-  detail::close_nonstandard_descriptors(status_descriptor, prepared.maximum_descriptor);
+
+  int const executable_descriptor = prepared.preopened_executable ? detail::ExecutionCapabilityAccess::target_descriptor(*prepared.preopened_executable) : -1;
+  if (executable_descriptor >= 0)
+  {
+    std::array<int, 2> const preserved{status_descriptor, executable_descriptor};
+    detail::close_nonstandard_descriptors_except(preserved, prepared.maximum_descriptor);
+  }
+  else
+  {
+    detail::close_nonstandard_descriptors(status_descriptor, prepared.maximum_descriptor);
+  }
   if (!detail::child_write_exec_attempt(status_descriptor))
     _exit(127);
-  ::execve(prepared.executable.c_str(), prepared.argv.data(), prepared.environment.data());
+  if (executable_descriptor >= 0)
+  {
+#if defined(__linux__) && defined(SYS_execveat) && defined(AT_EMPTY_PATH)
+    static_cast<void>(::syscall(SYS_execveat, executable_descriptor, "", prepared.argv.data(), prepared.environment.data(), AT_EMPTY_PATH));
+#else
+    static_cast<void>(::fexecve(executable_descriptor, prepared.argv.data(), prepared.environment.data()));
+#endif
+  }
+  else
+  {
+    ::execve(prepared.executable.c_str(), prepared.argv.data(), prepared.environment.data());
+  }
   int const execute_error = errno == 0 ? EIO : errno;
   static_cast<void>(detail::child_write_exec_failed(status_descriptor, execute_error));
   _exit(127);
@@ -723,8 +770,15 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
     state->fail_next_common_child_working_directory_for_test = false;
   }
 
-  // Repeat the immutable role/profile/logical-cwd capability check at the
-  // final pre-fork boundary after every allocator-backed launch preparation.
+  // Refresh descriptor-backed namespace authority after every allocator-backed
+  // launch preparation and immediately before the final closed launch checks.
+  if (auto refreshed =
+          detail::ExecutionCapabilityAccess::refresh_spawn(prepared->preopened_executable, specification.executable, prepared->anchored_cwd, specification.cwd);
+      !refreshed)
+  {
+    detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
+    return std::unexpected(std::move(refreshed.error()));
+  }
   if (!detail::EnvironmentAccess::matches_common_launch(specification.environment, *role, specification.cwd))
   {
     detail::finish_unregistered(state, identity, TerminationReasonV1::LaunchFailed);
@@ -760,6 +814,8 @@ ava::core::Result<SpawnResultV1> Supervisor::spawn(Reservation&& reservation, Sp
   prepared->standard_output.child_end.reset();
   prepared->standard_error.child_end.reset();
   prepared->cwd.reset();
+  prepared->anchored_cwd.reset();
+  prepared->preopened_executable.reset();
 
   bool group_set = false;
   while (true)

@@ -4,6 +4,7 @@
 #include "ava/process/environment_test_support.h"
 #include "ava/process/supervisor.h"
 #include "ava/process/supervisor_test_support.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -151,11 +152,27 @@ ava::process::SpawnSpecV1 with_role_environment(ava::process::ProcessRoleV1 role
   return specification;
 }
 
+ava::process::AnchoredWorkingDirectoryV1 anchored_cwd(std::filesystem::path const& cwd)
+{
+  auto anchors = ava::core::AnchorSet::open({"/"});
+  if (!anchors)
+    throw std::runtime_error(anchors.error().format());
+  auto capability = ava::process::mint_anchored_working_directory(std::move(*anchors), cwd);
+  if (!capability)
+    throw std::runtime_error(capability.error().format());
+  return std::move(*capability);
+}
+
 ava::process::SecureAdoptionSpecV1 adoption_spec(ava::process::ProcessRoleV1 role, std::string cwd = "/",
                                                  ava::process::BashContainmentHandshakeV1 containment = ava::process::BashContainmentHandshakeV1::None,
                                                  std::vector<std::string> argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"})
 {
-  return {.environment = environment_for_role(role), .argv = std::move(argv), .cwd = std::move(cwd), .bash_containment = containment};
+  auto cwd_capability = anchored_cwd(cwd);
+  return {.environment = environment_for_role(role),
+          .argv = std::move(argv),
+          .cwd = std::move(cwd),
+          .anchored_cwd = std::move(cwd_capability),
+          .bash_containment = containment};
 }
 
 ava::core::Result<ava::process::SpawnResultV1> spawn_fake(ava::process::Supervisor& supervisor, ava::process::OwnerPathV1 const& owner,

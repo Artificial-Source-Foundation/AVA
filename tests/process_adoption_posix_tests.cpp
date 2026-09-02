@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/process/environment.h"
 #include "ava/process/supervisor.h"
+#include "ava/core/AnchorSet.h"
 
 #include <algorithm>
 #include <array>
@@ -52,6 +53,17 @@ ava::process::OwnerPathV1 operation_owner(ava::process::OwnerPathV1 const& appli
   return std::move(*owner);
 }
 
+ava::process::AnchoredWorkingDirectoryV1 anchored_cwd(std::filesystem::path const& cwd)
+{
+  auto anchors = ava::core::AnchorSet::open({"/"});
+  if (!anchors)
+    throw std::runtime_error(anchors.error().format());
+  auto capability = ava::process::mint_anchored_working_directory(std::move(*anchors), cwd);
+  if (!capability)
+    throw std::runtime_error(capability.error().format());
+  return std::move(*capability);
+}
+
 std::vector<ava::process::EnvironmentVariableV1> bash_variables(std::string cwd = "/")
 {
   return {{"LANG", "C.UTF-8"},
@@ -76,7 +88,12 @@ ava::process::SecureAdoptionSpecV1 bash_spec(ava::process::BashContainmentHandsh
   auto environment = ava::process::validate_bash_environment_v1(ava::process::kBashEnvironmentProfileIdV1, cwd, bash_variables(cwd));
   if (!environment)
     throw std::runtime_error(environment.error().format());
-  return {.environment = std::move(*environment), .argv = std::move(argv), .cwd = std::move(cwd), .bash_containment = containment};
+  auto cwd_capability = anchored_cwd(cwd);
+  return {.environment = std::move(*environment),
+          .argv = std::move(argv),
+          .cwd = std::move(cwd),
+          .anchored_cwd = std::move(cwd_capability),
+          .bash_containment = containment};
 }
 
 ava::process::SecureAdoptionSpecV1 mermaid_spec(std::vector<std::string> argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"})
@@ -84,7 +101,11 @@ ava::process::SecureAdoptionSpecV1 mermaid_spec(std::vector<std::string> argv = 
   auto environment = ava::process::make_mermaid_environment_v1();
   if (!environment)
     throw std::runtime_error(environment.error().format());
-  return {.environment = std::move(*environment), .argv = std::move(argv), .cwd = "/", .bash_containment = ava::process::BashContainmentHandshakeV1::None};
+  return {.environment = std::move(*environment),
+          .argv = std::move(argv),
+          .cwd = "/",
+          .anchored_cwd = anchored_cwd("/"),
+          .bash_containment = ava::process::BashContainmentHandshakeV1::None};
 }
 
 std::optional<ava::process::ExitStatusV1> wait_for(ava::process::Supervisor& supervisor, ava::process::ProcessHandle const& handle)
@@ -398,6 +419,7 @@ void test_containment_order_and_non_bash_rejection()
           ? supervisor.begin_secure_adoption(std::move(*non_bash_reservation), {.environment = std::move(*mermaid_environment),
                                                                                 .argv = {AVA_FAKE_PROCESS_CHILD_PATH, "normal"},
                                                                                 .cwd = "/",
+                                                                                .anchored_cwd = anchored_cwd("/"),
                                                                                 .bash_containment = ava::process::BashContainmentHandshakeV1::Required})
           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "fixture failed")));
   auto snapshot = supervisor.snapshot();

@@ -2,6 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/process/environment.h"
+#include "ava/process/execution_capability.h"
 #include "ava/process/owner.h"
 #include "ava/process/types.h"
 #include "ava/core/result.h"
@@ -58,6 +59,10 @@ struct SpawnSpecV1
   std::vector<std::string> argv;
   ExactEnvironmentV1 environment;
   std::string cwd;
+  // Independent optional descriptor authorities. When present, each private
+  // logical spelling must exactly match its corresponding string above.
+  std::optional<PreopenedExecutableV1> preopened_executable = std::nullopt;
+  std::optional<AnchoredWorkingDirectoryV1> anchored_cwd = std::nullopt;
   StreamModeV1 stdin_mode = StreamModeV1::Discard;
   StreamModeV1 stdout_mode = StreamModeV1::Capture;
   StreamModeV1 stderr_mode = StreamModeV1::Capture;
@@ -72,6 +77,8 @@ struct SecureAdoptionSpecV1
   ExactEnvironmentV1 environment;
   std::vector<std::string> argv;
   std::string cwd;
+  // Secure adoption has no pathname-open cwd seam; this capability is required.
+  AnchoredWorkingDirectoryV1 anchored_cwd{};
   BashContainmentHandshakeV1 bash_containment = BashContainmentHandshakeV1::None;
 
   // Exact environment, argv, and cwd content are intentionally excluded from

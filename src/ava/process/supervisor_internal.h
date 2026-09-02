@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/process/environment_internal.h"
+#include "ava/process/execution_capability_internal.h"
 #include "ava/process/supervisor.h"
 #include "ava/core/error.h"
 
@@ -473,6 +474,7 @@ struct AdoptionGate::Impl
   ProcessRoleV1 role = ProcessRoleV1::Curl;
   ExactEnvironmentV1 environment;
   std::string cwd;
+  AnchoredWorkingDirectoryV1 anchored_cwd;
   std::vector<std::string> argv_storage;
   std::vector<char*> argv_pointers;
   std::vector<std::string> environment_storage;
@@ -485,7 +487,6 @@ struct AdoptionGate::Impl
   bool containment_applied = false;
   bool registered = false;
 #if !defined(_WIN32)
-  detail::UniqueFd cwd_descriptor;
   detail::Pipe launch_status;
   detail::Pipe leader_control;
   detail::Pipe containment_control;

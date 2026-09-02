@@ -107,6 +107,20 @@ PROCESS_CLOSED_LABELS = {
     "posix_fallback",
     PROCESS_CONTRACT_VERSION,
 }
+PROCESS_FAMILY_SOURCE_PATHS = {
+    "curl": ("src/ava/http", ("src/ava/http/curl_transport.cpp", "src/ava/http/curl_transport.h")),
+    "plugin": ("src/ava/plugin", ("src/ava/plugin/runner.cpp", "src/ava/plugin/runner.h")),
+    "mcp": ("src/ava/mcp", ("src/ava/mcp/stdio_client.cpp", "src/ava/mcp/stdio_client.h")),
+    "lsp": ("src/ava/lsp", ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h")),
+    "bash": ("src/ava/tools", ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h")),
+}
+PROCESS_PROVENANCE_SPLIT_FIELDS = (
+    ("measured_checkout", "repository"),
+    ("harness", "repository"),
+    ("harness", "benchmark_script_sha256"),
+)
+FULL_GIT_OBJECT_ID = re.compile(r"^[0-9a-f]{40}$")
+FULL_SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
 
 def positive_int(value: str) -> int:
@@ -1706,15 +1720,8 @@ def process_source_provenance(
 
 
 def family_source_identities(repository: Path) -> dict[str, Any]:
-    paths = {
-        "curl": ("src/ava/http", ("src/ava/http/curl_transport.cpp", "src/ava/http/curl_transport.h")),
-        "plugin": ("src/ava/plugin", ("src/ava/plugin/runner.cpp", "src/ava/plugin/runner.h")),
-        "mcp": ("src/ava/mcp", ("src/ava/mcp/stdio_client.cpp", "src/ava/mcp/stdio_client.h")),
-        "lsp": ("src/ava/lsp", ("src/ava/lsp/lsp_process.cpp", "src/ava/lsp/lsp_client.h")),
-        "bash": ("src/ava/tools", ("src/ava/tools/bash_tool.cpp", "src/ava/tools/bash_tool.h")),
-    }
     identities: dict[str, Any] = {}
-    for family, (tree_path, blob_paths) in paths.items():
+    for family, (tree_path, blob_paths) in PROCESS_FAMILY_SOURCE_PATHS.items():
         identities[family] = {
             "tree_path": tree_path,
             "tree_object": _git(repository, "rev-parse", f"HEAD:{tree_path}"),
@@ -2161,6 +2168,22 @@ def _statistics_equal(actual: Any, expected: Any) -> bool:
     return True
 
 
+def _is_resolved_text(value: Any) -> bool:
+    return isinstance(value, str) and bool(value.strip()) and value.strip().lower() != "unknown"
+
+
+def _is_full_git_object_id(value: Any) -> bool:
+    return isinstance(value, str) and FULL_GIT_OBJECT_ID.fullmatch(value) is not None
+
+
+def _is_full_sha256(value: Any) -> bool:
+    return isinstance(value, str) and FULL_SHA256.fullmatch(value) is not None
+
+
+def _has_process_provenance_split(provenance: dict[str, Any]) -> bool:
+    return all(field in provenance.get(section, {}) for section, field in PROCESS_PROVENANCE_SPLIT_FIELDS)
+
+
 def validate_process_document(document: dict[str, Any]) -> None:
     if document.get("schema_version") != PROCESS_SCHEMA_VERSION or document.get("contract_version") != PROCESS_CONTRACT_VERSION:
         raise ValueError("unexpected process benchmark schema or contract version")
@@ -2173,18 +2196,28 @@ def validate_process_document(document: dict[str, Any]) -> None:
     for key in ("measured_checkout", "runtime_reference", "harness", "family_sources", "build", "host", "driver"):
         if key not in provenance:
             raise ValueError(f"process benchmark provenance lacks {key}")
-    for key in ("repository", "commit", "tree", "dirty"):
-        if key not in provenance["measured_checkout"]:
+    measured_checkout = provenance["measured_checkout"]
+    for key in ("commit", "tree", "dirty"):
+        if key not in measured_checkout:
             raise ValueError(f"process measured checkout lacks {key}")
     for key in ("commit", "tree", "exact_production_path_equality"):
         if key not in provenance["runtime_reference"]:
             raise ValueError(f"process runtime reference lacks {key}")
     harness = provenance["harness"]
-    for key in ("repository", "commit", "tree", "dirty", "benchmark_script_sha256"):
+    for key in ("commit", "tree", "dirty"):
         if key not in harness:
             raise ValueError(f"process harness provenance lacks {key}")
-    if not isinstance(harness["repository"], str) or not harness["repository"]:
-        raise ValueError("process harness provenance has an invalid repository")
+    split_field_presence = [field in provenance[section] for section, field in PROCESS_PROVENANCE_SPLIT_FIELDS]
+    harness_split_present = any(split_field_presence[1:])
+    if harness_split_present and not all(split_field_presence):
+        raise ValueError("process provenance split fields must be present atomically")
+    if all(split_field_presence):
+        for section, field in PROCESS_PROVENANCE_SPLIT_FIELDS:
+            if not isinstance(provenance[section][field], str):
+                raise ValueError(f"process provenance split field {section}.{field} must be a string")
+        script_hash = harness["benchmark_script_sha256"]
+        if script_hash != "unknown" and not _is_full_sha256(script_hash):
+            raise ValueError("process harness provenance has an invalid benchmark script SHA-256")
     if harness.get("contract_version") != PROCESS_CONTRACT_VERSION:
         raise ValueError("process harness provenance has the wrong contract")
     if provenance["build"].get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
@@ -2212,11 +2245,14 @@ def validate_process_document(document: dict[str, Any]) -> None:
         validate_file_identity(artifacts.get(key), key)
         if not isinstance(artifacts[key].get("mode"), int):
             raise ValueError(f"process artifact {key} lacks mode")
-    expected_script_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
-    if Path(artifacts["benchmark_script"]["path"]).resolve() != expected_script_path:
-        raise ValueError("process benchmark script artifact is not from the harness repository")
-    if artifacts["benchmark_script"]["sha256"] != harness["benchmark_script_sha256"]:
-        raise ValueError("process benchmark script artifact does not match harness content")
+    if _has_process_provenance_split(provenance):
+        if _is_resolved_text(harness["repository"]):
+            expected_script_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
+            if Path(artifacts["benchmark_script"]["path"]).resolve() != expected_script_path:
+                raise ValueError("process benchmark script artifact is not from the harness repository")
+        if _is_full_sha256(harness["benchmark_script_sha256"]):
+            if artifacts["benchmark_script"]["sha256"] != harness["benchmark_script_sha256"]:
+                raise ValueError("process benchmark script artifact does not match harness content")
     for key in ("fake_process_child", "fake_mcp_server", "fake_lsp_server", "fake_provider", "curl", "bash_direct_argv_executable"):
         if artifacts.get(key) is not None:
             validate_file_identity(artifacts[key], key)
@@ -2308,6 +2344,82 @@ def _artifact_hash(identity: Any) -> str | None:
     return identity.get("sha256") if isinstance(identity, dict) else None
 
 
+def _comparison_provenance_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
+    provenance = document["provenance"]
+    mismatches: list[str] = []
+
+    def mismatch(path: str) -> None:
+        mismatches.append(f"{cohort}.{path}")
+
+    measured = provenance["measured_checkout"]
+    if not _is_resolved_text(measured.get("repository")):
+        mismatch("measured_checkout.repository")
+    for field in ("commit", "tree"):
+        if not _is_full_git_object_id(measured.get(field)):
+            mismatch(f"measured_checkout.{field}")
+    if measured.get("dirty") is not False:
+        mismatch("measured_checkout.dirty")
+
+    runtime_reference = provenance["runtime_reference"]
+    for field in ("commit", "tree"):
+        if not _is_full_git_object_id(runtime_reference.get(field)):
+            mismatch(f"runtime_reference.{field}")
+    if runtime_reference.get("exact_production_path_equality") is not True:
+        mismatch("runtime_reference.exact_production_path_equality")
+    if runtime_reference.get("measured_production_paths_dirty") is not False:
+        mismatch("runtime_reference.measured_production_paths_dirty")
+
+    family_sources = provenance["family_sources"]
+    for family, (expected_tree_path, expected_blob_paths) in PROCESS_FAMILY_SOURCE_PATHS.items():
+        identity = family_sources.get(family) if isinstance(family_sources, dict) else None
+        if not isinstance(identity, dict):
+            mismatch(f"family_sources.{family}")
+            continue
+        if identity.get("tree_path") != expected_tree_path:
+            mismatch(f"family_sources.{family}.tree_path")
+        if not _is_full_git_object_id(identity.get("tree_object")):
+            mismatch(f"family_sources.{family}.tree_object")
+        blobs = identity.get("blobs")
+        if not isinstance(blobs, list) or len(blobs) != len(expected_blob_paths):
+            mismatch(f"family_sources.{family}.blobs")
+            continue
+        for index, (blob, expected_path) in enumerate(zip(blobs, expected_blob_paths)):
+            if not isinstance(blob, dict):
+                mismatch(f"family_sources.{family}.blobs[{index}]")
+                continue
+            if blob.get("path") != expected_path:
+                mismatch(f"family_sources.{family}.blobs[{index}].path")
+            if not _is_full_git_object_id(blob.get("object")):
+                mismatch(f"family_sources.{family}.blobs[{index}].object")
+
+    best_effort = provenance["build"].get("best_effort_provenance", {})
+    if best_effort.get("cmake_source_root_matches_recorded_source") is not True:
+        mismatch("build.best_effort_provenance.cmake_source_root_matches_recorded_source")
+
+    harness = provenance["harness"]
+    if not _is_resolved_text(harness.get("repository")):
+        mismatch("harness.repository")
+    for field in ("commit", "tree"):
+        if not _is_full_git_object_id(harness.get(field)):
+            mismatch(f"harness.{field}")
+    if not _is_full_sha256(harness.get("benchmark_script_sha256")):
+        mismatch("harness.benchmark_script_sha256")
+    if harness.get("dirty") is not False:
+        mismatch("harness.dirty")
+
+    script_artifact = document["artifacts"].get("benchmark_script")
+    if isinstance(script_artifact, dict):
+        if _is_resolved_text(harness.get("repository")):
+            expected_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
+            if Path(script_artifact.get("path", "")).resolve() != expected_path:
+                mismatch("harness.benchmark_script_artifact_path")
+        if script_artifact.get("sha256") != harness.get("benchmark_script_sha256"):
+            mismatch("harness.benchmark_script_artifact_sha256")
+    else:
+        mismatch("harness.benchmark_script_artifact")
+    return mismatches
+
+
 def _comparison_identity(document: dict[str, Any]) -> dict[str, Any]:
     provenance = document["provenance"]
     host = provenance["host"]
@@ -2331,8 +2443,14 @@ def _comparison_identity(document: dict[str, Any]) -> dict[str, Any]:
         result["id"]: {"unit": result["unit"], "primary_metric": result["primary_metric"], "boundary": result["boundary"]}
         for result in document["results"]
     }
+    harness = provenance["harness"]
     return {
         "contract": document["contract_version"],
+        "harness": {
+            "commit": harness["commit"],
+            "tree": harness["tree"],
+            "benchmark_script_sha256": harness["benchmark_script_sha256"],
+        },
         "host": {
             key: host.get(key)
             for key in ("os", "kernel", "machine", "cpu", "cpu_count", "ram_bytes", "page_size_bytes", "boot_id_sha256")
@@ -2366,9 +2484,55 @@ def comparison_unsupported(reason_code: str, reason: str, mismatches: Sequence[s
     }
 
 
+def _family_authority_mismatches(document: dict[str, Any], cohort: str) -> list[str]:
+    families = tuple(PROCESS_FAMILY_SOURCE_PATHS)
+    source_authorities = document["provenance"]["build"].get("features", {}).get("family_authorities")
+    if not isinstance(source_authorities, dict) or set(source_authorities) != set(families):
+        return [f"{cohort}.family_authorities.source_map"]
+    mismatches: list[str] = []
+    results = {result["id"]: result for result in document["results"]}
+    for family in families:
+        source_authority = source_authorities.get(family)
+        if source_authority not in ("legacy_local", "supervised"):
+            mismatches.append(f"{cohort}.family_authorities.{family}.source")
+            continue
+        if document["capabilities"].get(f"{family}_authority") != source_authority:
+            mismatches.append(f"{cohort}.family_authorities.{family}.capability")
+        result = results[f"family_{family}_lifecycle"]
+        if result["status"] == "measured" and result.get("authority") != source_authority:
+            mismatches.append(f"{cohort}.family_authorities.{family}.result")
+    return mismatches
+
+
+def _family_blob_signature(document: dict[str, Any], family: str) -> tuple[tuple[str, str], ...]:
+    blobs = document["provenance"]["family_sources"][family]["blobs"]
+    return tuple((blob["path"], blob["object"]) for blob in blobs)
+
+
 def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     validate_process_document(before)
     validate_process_document(after)
+    split_mismatches = [
+        f"{cohort}.provenance_split"
+        for cohort, document in (("before", before), ("after", after))
+        if not _has_process_provenance_split(document["provenance"])
+    ]
+    if split_mismatches:
+        return comparison_unsupported(
+            "provenance_split_required",
+            "Comparison requires v3 provenance with independent measured-source and harness identities.",
+            split_mismatches,
+        )
+    provenance_mismatches = [
+        *(_comparison_provenance_mismatches(before, "before")),
+        *(_comparison_provenance_mismatches(after, "after")),
+    ]
+    if provenance_mismatches:
+        return comparison_unsupported(
+            "comparison_provenance_required",
+            "Each cohort requires clean, resolved, internally consistent comparison provenance.",
+            provenance_mismatches,
+        )
     before_identity = _comparison_identity(before)
     after_identity = _comparison_identity(after)
     mismatch_names = [name for name in before_identity if before_identity[name] != after_identity[name]]
@@ -2377,6 +2541,60 @@ def compare_process_documents(before: dict[str, Any], after: dict[str, Any]) -> 
             "incomparable_cohorts",
             "The cohorts differ in required host, boot, build, compiler, feature, fixture, boundary, or contract identity.",
             mismatch_names,
+        )
+    authority_mismatches = [
+        *(_family_authority_mismatches(before, "before")),
+        *(_family_authority_mismatches(after, "after")),
+    ]
+    if authority_mismatches:
+        return comparison_unsupported(
+            "authority_attribution_mismatch",
+            "Family result authority must match the source-owned capability map in each cohort.",
+            authority_mismatches,
+        )
+    before_authorities = before["provenance"]["build"]["features"]["family_authorities"]
+    after_authorities = after["provenance"]["build"]["features"]["family_authorities"]
+    changed_authorities = [
+        family for family in PROCESS_FAMILY_SOURCE_PATHS if before_authorities[family] != after_authorities[family]
+    ]
+    unexpected_transitions = [
+        family
+        for family in changed_authorities
+        if (before_authorities[family], after_authorities[family]) != ("legacy_local", "supervised")
+    ]
+    if unexpected_transitions:
+        return comparison_unsupported(
+            "unexpected_authority_transition",
+            "The pair contains an authority change other than legacy_local to supervised.",
+            [f"family_authorities.{family}" for family in unexpected_transitions],
+        )
+    if not changed_authorities:
+        return comparison_unsupported(
+            "authority_transition_required",
+            "No family has a validated legacy_local to supervised authority transition.",
+        )
+    if len(changed_authorities) != 1:
+        return comparison_unsupported(
+            "single_authority_transition_required",
+            "A comparison pair must change exactly one family from legacy_local to supervised.",
+            [f"family_authorities.{family}" for family in changed_authorities],
+        )
+    transitioned_family = changed_authorities[0]
+    changed_family_blobs = [
+        family
+        for family in PROCESS_FAMILY_SOURCE_PATHS
+        if _family_blob_signature(before, family) != _family_blob_signature(after, family)
+    ]
+    if changed_family_blobs != [transitioned_family]:
+        attribution_mismatches = [
+            f"family_sources.{family}"
+            for family in PROCESS_FAMILY_SOURCE_PATHS
+            if (family == transitioned_family) != (family in changed_family_blobs)
+        ]
+        return comparison_unsupported(
+            "family_source_attribution_mismatch",
+            "Tracked family source changes must be attributable only to the one authority transition.",
+            attribution_mismatches,
         )
     before_results = {result["id"]: result for result in before["results"]}
     after_results = {result["id"]: result for result in after["results"]}

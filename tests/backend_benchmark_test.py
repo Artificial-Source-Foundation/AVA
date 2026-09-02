@@ -363,6 +363,19 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "checks": checks or {"correct": True},
         }
 
+    def process_family_sources(self):
+        identities = {}
+        for family, (tree_path, blob_paths) in self.module.PROCESS_FAMILY_SOURCE_PATHS.items():
+            identities[family] = {
+                "tree_path": tree_path,
+                "tree_object": hashlib.sha256(f"tree:{family}".encode()).hexdigest()[:40],
+                "blobs": [
+                    {"path": path, "object": hashlib.sha256(f"blob:{path}".encode()).hexdigest()[:40]}
+                    for path in blob_paths
+                ],
+            }
+        return identities
+
     def valid_process_document(self):
         artifacts = {
             "ava": self.process_artifact("/test/ava"),
@@ -448,7 +461,12 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "suite": "process-baseline",
             "provenance": {
                 "measured_checkout": {"repository": "/test/source", "commit": "1" * 40, "tree": "2" * 40, "dirty": False},
-                "runtime_reference": {"commit": "1" * 40, "tree": "2" * 40, "exact_production_path_equality": True},
+                "runtime_reference": {
+                    "commit": "1" * 40,
+                    "tree": "2" * 40,
+                    "exact_production_path_equality": True,
+                    "measured_production_paths_dirty": False,
+                },
                 "harness": {
                     "repository": "/test/harness",
                     "commit": "3" * 40,
@@ -457,13 +475,16 @@ class BenchmarkHarnessTests(unittest.TestCase):
                     "benchmark_script_sha256": "0" * 64,
                     "contract_version": self.module.PROCESS_CONTRACT_VERSION,
                 },
-                "family_sources": {},
+                "family_sources": self.process_family_sources(),
                 "build": build,
                 "host": host,
                 "driver": {"exact_command": ["benchmark"], "run_order": list(self.module.PROCESS_EXPECTED_RESULT_IDS)},
             },
             "artifacts": artifacts,
-            "capabilities": {"helper_contract": self.module.PROCESS_CONTRACT_VERSION},
+            "capabilities": {
+                "helper_contract": self.module.PROCESS_CONTRACT_VERSION,
+                **{f"{name}_authority": "legacy_local" for name in ("curl", "plugin", "mcp", "lsp", "bash")},
+            },
             "results": results,
             "checks": [],
         }
@@ -805,8 +826,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
             git("commit", "-m", "before")
             before_commit = git("rev-parse", "HEAD")
             before_tree = git("rev-parse", "HEAD^{tree}")
-            (repository / "src/ava/http/curl_transport.cpp").write_text("after curl\n", encoding="utf-8")
-            git("add", "src/ava/http/curl_transport.cpp")
+            (repository / "src/ava/plugin/runner.cpp").write_text("after plugin\n", encoding="utf-8")
+            git("add", "src/ava/plugin/runner.cpp")
             git("commit", "-m", "after")
             after_commit = git("rev-parse", "HEAD")
             after_tree = git("rev-parse", "HEAD^{tree}")
@@ -830,8 +851,8 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.assertEqual(after_provenance["measured_checkout"]["commit"], after_commit)
             self.assertEqual(after_provenance["measured_checkout"]["tree"], after_tree)
             self.assertNotEqual(
-                before_provenance["family_sources"]["curl"]["blobs"][0]["object"],
-                after_provenance["family_sources"]["curl"]["blobs"][0]["object"],
+                before_provenance["family_sources"]["plugin"]["blobs"][0]["object"],
+                after_provenance["family_sources"]["plugin"]["blobs"][0]["object"],
             )
             self.assertEqual(before_provenance["harness"], after_provenance["harness"])
 
@@ -840,6 +861,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 document["provenance"]["measured_checkout"] = measured["measured_checkout"]
                 document["provenance"]["runtime_reference"] = measured["runtime_reference"]
                 document["provenance"]["harness"] = measured["harness"]
+                document["provenance"]["harness"]["dirty"] = False
                 document["provenance"]["family_sources"] = measured["family_sources"]
                 document["artifacts"]["benchmark_script"] = self.module.file_identity_v3(
                     harness_repository / "scripts" / "benchmark-backend.py"
@@ -870,6 +892,37 @@ class BenchmarkHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "not from the harness repository"):
             self.module.validate_process_document(document)
 
+    def test_process_schema_requires_provenance_split_fields_atomically(self) -> None:
+        for section, field in self.module.PROCESS_PROVENANCE_SPLIT_FIELDS:
+            with self.subTest(field=f"{section}.{field}"):
+                document = self.valid_process_document()
+                del document["provenance"][section][field]
+                with self.assertRaisesRegex(ValueError, "split fields must be present atomically"):
+                    self.module.validate_process_document(document)
+
+    def test_historical_v3_without_provenance_split_validates_but_cannot_compare(self) -> None:
+        for measured_repository_present in (False, True):
+            with self.subTest(measured_repository_present=measured_repository_present):
+                before, after = self.comparison_documents()
+                del before["provenance"]["harness"]["repository"]
+                del before["provenance"]["harness"]["benchmark_script_sha256"]
+                if not measured_repository_present:
+                    del before["provenance"]["measured_checkout"]["repository"]
+
+                self.module.validate_process_document(before)
+                comparison = self.module.compare_process_documents(before, after)
+
+                self.assertEqual(comparison["status"], "unsupported")
+                self.assertEqual(comparison["reason_code"], "provenance_split_required")
+                self.assertEqual(comparison["mismatches"], ["before.provenance_split"])
+
+    def test_standalone_process_document_allows_dirty_source_and_harness(self) -> None:
+        document = self.valid_process_document()
+        document["provenance"]["measured_checkout"]["dirty"] = True
+        document["provenance"]["runtime_reference"]["measured_production_paths_dirty"] = True
+        document["provenance"]["harness"]["dirty"] = True
+        self.module.validate_process_document(document)
+
     def test_process_smoke_threshold_failure_is_gating_but_not_a_delta_gate(self) -> None:
         document = self.valid_process_document()
         startup_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("application_warm_startup")
@@ -883,11 +936,124 @@ class BenchmarkHarnessTests(unittest.TestCase):
     def comparison_documents(self):
         before = self.valid_process_document()
         after = self.valid_process_document()
-        for result_id in self.module.PROCESS_EXPECTED_RESULT_IDS[-5:]:
-            index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
-            before["results"][index] = self.measured_process_result(result_id, "legacy_local", 100.0)
-            after["results"][index] = self.measured_process_result(result_id, "supervised", 130.0)
+        before_authorities = {
+            "curl": "supervised",
+            "plugin": "legacy_local",
+            "mcp": "legacy_local",
+            "lsp": "legacy_local",
+            "bash": "legacy_local",
+        }
+        after_authorities = {**before_authorities, "plugin": "supervised"}
+        for document, authorities, value in (
+            (before, before_authorities, 100.0),
+            (after, after_authorities, 130.0),
+        ):
+            document["provenance"]["build"]["features"]["family_authorities"] = dict(authorities)
+            document["capabilities"].update(
+                {f"{family}_authority": authority for family, authority in authorities.items()}
+            )
+            for family, authority in authorities.items():
+                result_id = f"family_{family}_lifecycle"
+                index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+                document["results"][index] = self.measured_process_result(result_id, authority, value)
+        after_plugin = after["provenance"]["family_sources"]["plugin"]
+        after_plugin["tree_object"] = "e" * 40
+        after_plugin["blobs"][0]["object"] = "f" * 40
         return before, after
+
+    def assert_comparison_provenance_rejected(self, before, after, mismatches) -> None:
+        self.module.validate_process_document(before)
+        self.module.validate_process_document(after)
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
+        self.assertEqual(comparison["mismatches"], mismatches)
+        self.assertEqual(comparison["comparisons"], [])
+
+    def test_comparison_rejects_dirty_measured_source(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["measured_checkout"]["dirty"] = True
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            ["before.measured_checkout.dirty"],
+        )
+
+    def test_comparison_rejects_unresolved_measured_identity(self) -> None:
+        before, after = self.comparison_documents()
+        measured = before["provenance"]["measured_checkout"]
+        measured.update({"repository": "unknown", "commit": "unknown", "tree": ""})
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            [
+                "before.measured_checkout.repository",
+                "before.measured_checkout.commit",
+                "before.measured_checkout.tree",
+            ],
+        )
+
+    def test_comparison_rejects_bad_runtime_reference_and_equality(self) -> None:
+        before, after = self.comparison_documents()
+        runtime_reference = before["provenance"]["runtime_reference"]
+        runtime_reference.update(
+            {
+                "commit": "unknown",
+                "tree": "not-a-full-object-id",
+                "exact_production_path_equality": False,
+                "measured_production_paths_dirty": True,
+            }
+        )
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            [
+                "before.runtime_reference.commit",
+                "before.runtime_reference.tree",
+                "before.runtime_reference.exact_production_path_equality",
+                "before.runtime_reference.measured_production_paths_dirty",
+            ],
+        )
+
+    def test_comparison_rejects_unknown_family_objects(self) -> None:
+        before, after = self.comparison_documents()
+        plugin_source = before["provenance"]["family_sources"]["plugin"]
+        plugin_source["tree_object"] = "unknown"
+        plugin_source["blobs"][1]["object"] = "1234"
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            [
+                "before.family_sources.plugin.tree_object",
+                "before.family_sources.plugin.blobs[1].object",
+            ],
+        )
+
+    def test_wrong_but_valid_measured_root_is_structured_unsupported(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["build"]["best_effort_provenance"][
+            "cmake_source_root_matches_recorded_source"
+        ] = False
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            ["before.build.best_effort_provenance.cmake_source_root_matches_recorded_source"],
+        )
+
+    def test_comparison_rejects_dirty_harness(self) -> None:
+        before, after = self.comparison_documents()
+        before["provenance"]["harness"]["dirty"] = True
+        self.assert_comparison_provenance_rejected(before, after, ["before.harness.dirty"])
+
+    def test_comparison_rejects_unresolved_harness_identity(self) -> None:
+        before, after = self.comparison_documents()
+        harness = before["provenance"]["harness"]
+        harness.update({"repository": "unknown", "commit": "unknown", "tree": ""})
+        self.assert_comparison_provenance_rejected(
+            before,
+            after,
+            ["before.harness.repository", "before.harness.commit", "before.harness.tree"],
+        )
 
     def test_comparison_rejects_provenance_mismatch_and_same_authority(self) -> None:
         before, after = self.comparison_documents()
@@ -897,12 +1063,15 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["reason_code"], "incomparable_cohorts")
 
         before, after = self.comparison_documents()
-        result_id = "family_curl_lifecycle"
+        result_id = "family_plugin_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        after["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
+        after["capabilities"]["plugin_authority"] = "legacy_local"
         after["results"][index] = self.measured_process_result(result_id, "legacy_local", 130.0)
+        after["provenance"]["family_sources"]["plugin"] = self.process_family_sources()["plugin"]
         comparison = self.module.compare_process_documents(before, after)
-        item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
-        self.assertEqual(item["reason_code"], "authority_transition_required")
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "authority_transition_required")
         self.assertFalse(comparison["repeatable_claim"])
 
     def test_comparison_recomputes_stats_and_rejects_compatibility_change(self) -> None:
@@ -911,8 +1080,10 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["status"], "measured")
         self.assertFalse(comparison["gating"])
         self.assertFalse(comparison["faster_required"])
+        measured_ids = [item["id"] for item in comparison["comparisons"] if item["status"] == "measured"]
+        self.assertEqual(measured_ids, ["family_plugin_lifecycle"])
 
-        result_id = "family_mcp_lifecycle"
+        result_id = "family_plugin_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
         after["results"][index]["samples"][0]["checks"]["expected_response"] = False
         after["results"][index]["compatibility_checks"]["expected_response"] = False
@@ -920,9 +1091,60 @@ class BenchmarkHarnessTests(unittest.TestCase):
         item = next(item for item in comparison["comparisons"] if item["id"] == result_id)
         self.assertEqual(item["reason_code"], "compatibility_mismatch")
 
+    def test_comparison_rejects_multiple_or_unexpected_authority_transitions(self) -> None:
+        before, after = self.comparison_documents()
+        after["provenance"]["build"]["features"]["family_authorities"]["mcp"] = "supervised"
+        after["capabilities"]["mcp_authority"] = "supervised"
+        result_id = "family_mcp_lifecycle"
+        index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
+        after["results"][index] = self.measured_process_result(result_id, "supervised", 130.0)
+        after["provenance"]["family_sources"]["mcp"]["blobs"][0]["object"] = "a" * 40
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "single_authority_transition_required")
+        self.assertEqual(
+            comparison["mismatches"],
+            ["family_authorities.plugin", "family_authorities.mcp"],
+        )
+
+        before, after = self.comparison_documents()
+        before["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "supervised"
+        before["capabilities"]["plugin_authority"] = "supervised"
+        plugin_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("family_plugin_lifecycle")
+        before["results"][plugin_index] = self.measured_process_result(
+            "family_plugin_lifecycle", "supervised", 100.0
+        )
+        after["provenance"]["build"]["features"]["family_authorities"]["plugin"] = "legacy_local"
+        after["capabilities"]["plugin_authority"] = "legacy_local"
+        after["results"][plugin_index] = self.measured_process_result(
+            "family_plugin_lifecycle", "legacy_local", 130.0
+        )
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "unexpected_authority_transition")
+        self.assertEqual(comparison["mismatches"], ["family_authorities.plugin"])
+
+    def test_comparison_rejects_wrong_authority_and_source_attribution(self) -> None:
+        before, after = self.comparison_documents()
+        plugin_index = self.module.PROCESS_EXPECTED_RESULT_IDS.index("family_plugin_lifecycle")
+        after["results"][plugin_index] = self.measured_process_result(
+            "family_plugin_lifecycle", "legacy_local", 130.0
+        )
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "authority_attribution_mismatch")
+        self.assertEqual(comparison["mismatches"], ["after.family_authorities.plugin.result"])
+
+        before, after = self.comparison_documents()
+        after["provenance"]["family_sources"]["curl"]["blobs"][0]["object"] = "b" * 40
+        comparison = self.module.compare_process_documents(before, after)
+        self.assertEqual(comparison["status"], "unsupported")
+        self.assertEqual(comparison["reason_code"], "family_source_attribution_mismatch")
+        self.assertEqual(comparison["mismatches"], ["family_sources.curl"])
+
     def test_comparison_rejects_matching_false_compatibility(self) -> None:
         before, after = self.comparison_documents()
-        result_id = "family_mcp_lifecycle"
+        result_id = "family_plugin_lifecycle"
         index = self.module.PROCESS_EXPECTED_RESULT_IDS.index(result_id)
         for document in (before, after):
             checks = document["results"][index]["samples"][0]["checks"]

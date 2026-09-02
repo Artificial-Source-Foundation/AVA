@@ -10,6 +10,7 @@ import importlib.util
 import io
 import os
 import pathlib
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -366,7 +367,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
         artifacts = {
             "ava": self.process_artifact("/test/ava"),
             "benchmark_helper": self.process_artifact("/test/helper"),
-            "benchmark_script": self.process_artifact("/test/benchmark.py"),
+            "benchmark_script": self.process_artifact("/test/harness/scripts/benchmark-backend.py"),
             "memory_helper": self.process_artifact("/test/memory.py"),
             "python": self.process_artifact("/test/python"),
             "fake_process_child": self.process_artifact("/test/process-child"),
@@ -446,9 +447,16 @@ class BenchmarkHarnessTests(unittest.TestCase):
             "completed_at_utc": "2026-01-01T00:00:01+00:00",
             "suite": "process-baseline",
             "provenance": {
-                "measured_checkout": {"commit": "1" * 40, "tree": "2" * 40, "dirty": False},
+                "measured_checkout": {"repository": "/test/source", "commit": "1" * 40, "tree": "2" * 40, "dirty": False},
                 "runtime_reference": {"commit": "1" * 40, "tree": "2" * 40, "exact_production_path_equality": True},
-                "harness": {"commit": "1" * 40, "tree": "2" * 40, "dirty": False, "contract_version": self.module.PROCESS_CONTRACT_VERSION},
+                "harness": {
+                    "repository": "/test/harness",
+                    "commit": "3" * 40,
+                    "tree": "4" * 40,
+                    "dirty": False,
+                    "benchmark_script_sha256": "0" * 64,
+                    "contract_version": self.module.PROCESS_CONTRACT_VERSION,
+                },
                 "family_sources": {},
                 "build": build,
                 "host": host,
@@ -661,6 +669,206 @@ class BenchmarkHarnessTests(unittest.TestCase):
             )
             with self.assertRaisesRegex(ValueError, "not executable"):
                 self.module.validate_arguments(args)
+
+    def test_measured_source_root_validation_is_process_only_and_precedes_execution(self) -> None:
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            output = root / "out.json"
+
+            non_process = self.parse_minimal_arguments("baseline", output)
+            non_process.measured_source_root = repository
+            with self.assertRaisesRegex(ValueError, "only with process suites"):
+                self.module.validate_arguments(non_process)
+
+            invalid_roots = [root / "missing", root / "incomplete", root / "not-git"]
+            (root / "incomplete").mkdir()
+            non_git = root / "not-git"
+            (non_git / "src").mkdir(parents=True)
+            (non_git / "cmake").mkdir()
+            (non_git / "CMakeLists.txt").write_text("cmake_minimum_required(VERSION 3.20)\n", encoding="utf-8")
+            (non_git / "config.h.in").write_text("\n", encoding="utf-8")
+            for invalid_root in invalid_roots:
+                with self.subTest(root=invalid_root.name):
+                    argv = [
+                        "--ava", sys.executable,
+                        "--benchmark-helper", sys.executable,
+                        "--measured-source-root", str(invalid_root),
+                        "--suite", "process-smoke",
+                        "--runs", "1",
+                        "--output", str(output),
+                    ]
+                    with mock.patch.object(self.module, "execute_process") as execute_process:
+                        status = self.module.main(argv)
+                    self.assertEqual(status, 2)
+                    self.assertFalse(output.exists())
+                    execute_process.assert_not_called()
+
+    def test_default_process_source_root_retains_script_repository_identity(self) -> None:
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            args = self.module.build_parser().parse_args(
+                [
+                    "--ava", sys.executable,
+                    "--benchmark-helper", sys.executable,
+                    "--suite", "process-smoke",
+                    "--runs", "1",
+                    "--output", str(pathlib.Path(temporary) / "out.json"),
+                ]
+            )
+            self.module.validate_arguments(args)
+        self.assertEqual(args.measured_source_root, repository)
+        provenance = self.module.process_source_provenance(args.measured_source_root, repository, "HEAD")
+        self.assertEqual(provenance["measured_checkout"]["repository"], str(repository))
+        self.assertEqual(provenance["harness"]["repository"], str(repository))
+        self.assertEqual(provenance["measured_checkout"]["commit"], provenance["harness"]["commit"])
+
+        non_process = self.parse_minimal_arguments("baseline", pathlib.Path("default-identities.json"))
+        self.module.validate_arguments(non_process)
+        self.assertIsNone(non_process.measured_source_root)
+
+    def test_explicit_measured_source_root_is_retained_in_exact_command_and_build_match(self) -> None:
+        repository = pathlib.Path(self.script).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            output = root / "out.json"
+            argv = [
+                "--ava", sys.executable,
+                "--benchmark-helper", sys.executable,
+                "--measured-source-root", str(repository),
+                "--suite", "process-smoke",
+                "--runs", "1",
+                "--output", str(output),
+            ]
+            with mock.patch.object(self.module, "execute_process", return_value=self.valid_process_document()) as execute_process:
+                status = self.module.main(argv)
+            self.assertEqual(status, 0)
+            executed_args = execute_process.call_args.args[0]
+            option_index = executed_args._exact_command.index("--measured-source-root")
+            self.assertEqual(executed_args._exact_command[option_index + 1], str(repository))
+
+            build = root / "build"
+            build.mkdir()
+            binary = build / "ava"
+            binary.write_bytes(b"binary")
+            (build / "CMakeCache.txt").write_text(
+                f"CMAKE_HOME_DIRECTORY:INTERNAL={repository}\nCMAKE_BUILD_TYPE:STRING=Release\n",
+                encoding="utf-8",
+            )
+            matching = self.module.build_metadata(binary, repository)
+            other_root = root / "other"
+            other_root.mkdir()
+            nonmatching = self.module.build_metadata(binary, other_root)
+            self.assertIs(matching["provenance"]["cmake_source_root_matches_recorded_source"], True)
+            self.assertIs(nonmatching["provenance"]["cmake_source_root_matches_recorded_source"], False)
+
+    def test_distinct_measured_worktrees_share_one_content_correct_harness(self) -> None:
+        harness_repository = pathlib.Path(self.script).resolve().parents[1]
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            repository = root / "repository"
+            repository.mkdir()
+
+            def git(*arguments: str) -> str:
+                completed = subprocess.run(
+                    ["git", "-C", str(repository), *arguments],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    check=True,
+                )
+                return completed.stdout.strip()
+
+            git("init")
+            git("config", "user.name", "Benchmark Self Test")
+            git("config", "user.email", "benchmark@example.invalid")
+            production_files = (
+                "src/ava/http/curl_transport.cpp",
+                "src/ava/http/curl_transport.h",
+                "src/ava/plugin/runner.cpp",
+                "src/ava/plugin/runner.h",
+                "src/ava/mcp/stdio_client.cpp",
+                "src/ava/mcp/stdio_client.h",
+                "src/ava/lsp/lsp_process.cpp",
+                "src/ava/lsp/lsp_client.h",
+                "src/ava/tools/bash_tool.cpp",
+                "src/ava/tools/bash_tool.h",
+                "CMakeLists.txt",
+                "cmake/fixture.cmake",
+                "config.h.in",
+            )
+            for relative in production_files:
+                path = repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(f"before:{relative}\n", encoding="utf-8")
+            git("add", ".")
+            git("commit", "-m", "before")
+            before_commit = git("rev-parse", "HEAD")
+            before_tree = git("rev-parse", "HEAD^{tree}")
+            (repository / "src/ava/http/curl_transport.cpp").write_text("after curl\n", encoding="utf-8")
+            git("add", "src/ava/http/curl_transport.cpp")
+            git("commit", "-m", "after")
+            after_commit = git("rev-parse", "HEAD")
+            after_tree = git("rev-parse", "HEAD^{tree}")
+
+            before_root = root / "before"
+            after_root = root / "after"
+            git("worktree", "add", "--detach", str(before_root), before_commit)
+            git("worktree", "add", "--detach", str(after_root), after_commit)
+            before_root = self.module.resolve_measured_source_root(before_root)
+            after_root = self.module.resolve_measured_source_root(after_root)
+
+            before_provenance = self.module.process_source_provenance(before_root, harness_repository, "HEAD")
+            after_provenance = self.module.process_source_provenance(after_root, harness_repository, "HEAD")
+            before_provenance["family_sources"] = self.module.family_source_identities(before_root)
+            after_provenance["family_sources"] = self.module.family_source_identities(after_root)
+
+            self.assertEqual(before_provenance["measured_checkout"]["repository"], str(before_root))
+            self.assertEqual(before_provenance["measured_checkout"]["commit"], before_commit)
+            self.assertEqual(before_provenance["measured_checkout"]["tree"], before_tree)
+            self.assertEqual(after_provenance["measured_checkout"]["repository"], str(after_root))
+            self.assertEqual(after_provenance["measured_checkout"]["commit"], after_commit)
+            self.assertEqual(after_provenance["measured_checkout"]["tree"], after_tree)
+            self.assertNotEqual(
+                before_provenance["family_sources"]["curl"]["blobs"][0]["object"],
+                after_provenance["family_sources"]["curl"]["blobs"][0]["object"],
+            )
+            self.assertEqual(before_provenance["harness"], after_provenance["harness"])
+
+            before, after = self.comparison_documents()
+            for document, measured in ((before, before_provenance), (after, after_provenance)):
+                document["provenance"]["measured_checkout"] = measured["measured_checkout"]
+                document["provenance"]["runtime_reference"] = measured["runtime_reference"]
+                document["provenance"]["harness"] = measured["harness"]
+                document["provenance"]["family_sources"] = measured["family_sources"]
+                document["artifacts"]["benchmark_script"] = self.module.file_identity_v3(
+                    harness_repository / "scripts" / "benchmark-backend.py"
+                )
+            self.assertEqual(
+                before["artifacts"]["benchmark_script"]["sha256"],
+                after["artifacts"]["benchmark_script"]["sha256"],
+            )
+            comparison = self.module.compare_process_documents(before, after)
+            self.assertEqual(comparison["status"], "measured")
+            self.assertNotIn("fixture_hashes", comparison.get("mismatches", []))
+
+    def test_process_schema_requires_independent_content_correct_harness_identity(self) -> None:
+        document = self.valid_process_document()
+        self.module.validate_process_document(document)
+
+        del document["provenance"]["harness"]["tree"]
+        with self.assertRaisesRegex(ValueError, "harness provenance lacks tree"):
+            self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        document["provenance"]["harness"]["benchmark_script_sha256"] = "f" * 64
+        with self.assertRaisesRegex(ValueError, "does not match harness content"):
+            self.module.validate_process_document(document)
+
+        document = self.valid_process_document()
+        document["artifacts"]["benchmark_script"]["path"] = "/test/source/scripts/benchmark-backend.py"
+        with self.assertRaisesRegex(ValueError, "not from the harness repository"):
+            self.module.validate_process_document(document)
 
     def test_process_smoke_threshold_failure_is_gating_but_not_a_delta_gate(self) -> None:
         document = self.valid_process_document()

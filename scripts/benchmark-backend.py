@@ -149,6 +149,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True, help="machine-readable JSON output")
     parser.add_argument("--report", type=Path, help="optional readable Markdown report")
     parser.add_argument("--runtime-reference", default="HEAD", help="Git revision used for production-path equality provenance")
+    parser.add_argument(
+        "--measured-source-root",
+        type=Path,
+        help="Git worktree containing the production source measured by a process suite (default: benchmark script repository)",
+    )
     parser.add_argument("--run-order", choices=("standalone", "before_then_after", "after_then_before"), default="standalone")
     parser.add_argument("--compare-to", type=Path, help="validated v3 legacy cohort to compare with this process-baseline result")
     parser.add_argument("--comparison-output", type=Path, help="optional v1 comparison JSON output (requires --compare-to)")
@@ -164,7 +169,48 @@ def resolve_file(path: Path, description: str, executable: bool = False) -> Path
     return resolved
 
 
+def resolve_measured_source_root(path: Path) -> Path:
+    resolved = path.expanduser().resolve()
+    if not resolved.is_dir():
+        raise ValueError(f"--measured-source-root is not a directory: {resolved}")
+    required_paths = {
+        "src": "directory",
+        "CMakeLists.txt": "file",
+        "cmake": "directory",
+        "config.h.in": "file",
+    }
+    missing = [
+        name
+        for name, kind in required_paths.items()
+        if not ((resolved / name).is_dir() if kind == "directory" else (resolved / name).is_file())
+    ]
+    if missing:
+        raise ValueError(f"--measured-source-root lacks required production paths: {', '.join(missing)}")
+    try:
+        completed = subprocess.run(
+            ["git", "-C", str(resolved), "rev-parse", "--show-toplevel", "--is-inside-work-tree"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise ValueError(f"--measured-source-root is not a Git worktree: {resolved}") from error
+    lines = completed.stdout.splitlines()
+    if completed.returncode != 0 or len(lines) != 2 or Path(lines[0]).resolve() != resolved or lines[1] != "true":
+        raise ValueError(f"--measured-source-root is not a Git worktree root: {resolved}")
+    return resolved
+
+
 def validate_arguments(args: argparse.Namespace) -> None:
+    process_suite = args.suite.startswith("process-")
+    if args.measured_source_root is not None and not process_suite:
+        raise ValueError("--measured-source-root is available only with process suites")
+    if process_suite:
+        source_root = args.measured_source_root or Path(__file__).resolve().parents[1]
+        args.measured_source_root = resolve_measured_source_root(source_root)
+
     args.ava = resolve_file(args.ava, "--ava", executable=True)
     if args.suite == "smoke" and args.benchmark_helper is None:
         raise ValueError("--suite smoke requires an executable --benchmark-helper")
@@ -1613,23 +1659,31 @@ def _git(repository: Path, *arguments: str) -> str:
     return completed.stdout.strip()
 
 
-def process_source_provenance(repository: Path, runtime_reference: str) -> dict[str, Any]:
-    checkout = git_identity(repository)
+def process_source_provenance(
+    measured_source_root: Path, harness_repository: Path, runtime_reference: str
+) -> dict[str, Any]:
+    checkout = git_identity(measured_source_root)
+    harness = git_identity(harness_repository)
+    harness_script = harness_repository / "scripts" / "benchmark-backend.py"
     production_paths = ("src", "CMakeLists.txt", "cmake", "config.h.in")
-    reference_commit = _git(repository, "rev-parse", f"{runtime_reference}^{{commit}}")
-    reference_tree = _git(repository, "rev-parse", f"{runtime_reference}^{{tree}}") if reference_commit != "unknown" else "unknown"
+    reference_commit = _git(measured_source_root, "rev-parse", f"{runtime_reference}^{{commit}}")
+    reference_tree = (
+        _git(measured_source_root, "rev-parse", f"{runtime_reference}^{{tree}}")
+        if reference_commit != "unknown"
+        else "unknown"
+    )
     if reference_commit == "unknown":
         production_equal: bool | None = None
     else:
         compared = subprocess.run(
-            ["git", "-C", str(repository), "diff", "--quiet", reference_commit, "--", *production_paths],
+            ["git", "-C", str(measured_source_root), "diff", "--quiet", reference_commit, "--", *production_paths],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             timeout=15,
             check=False,
         )
         production_equal = compared.returncode == 0 if compared.returncode in (0, 1) else None
-    production_status = _git(repository, "status", "--porcelain", "--", *production_paths)
+    production_status = _git(measured_source_root, "status", "--porcelain", "--", *production_paths)
     return {
         "measured_checkout": checkout,
         "runtime_reference": {
@@ -1641,9 +1695,11 @@ def process_source_provenance(repository: Path, runtime_reference: str) -> dict[
             "measured_production_paths_dirty": production_status not in ("", "unknown"),
         },
         "harness": {
-            "commit": checkout["commit"],
-            "tree": checkout["tree"],
-            "dirty": checkout["dirty"],
+            "repository": harness["repository"],
+            "commit": harness["commit"],
+            "tree": harness["tree"],
+            "dirty": harness["dirty"],
+            "benchmark_script_sha256": sha256_file(harness_script),
             "contract_version": PROCESS_CONTRACT_VERSION,
         },
     }
@@ -1961,7 +2017,8 @@ def process_smoke_checks(results: Sequence[dict[str, Any]], capabilities: dict[s
 
 
 def execute_process(args: argparse.Namespace) -> dict[str, Any]:
-    repository = Path(__file__).resolve().parents[1]
+    harness_repository = Path(__file__).resolve().parents[1]
+    measured_source_root = args.measured_source_root
     root = Path(tempfile.mkdtemp(prefix="ava-process-benchmark-"))
     project = root / "project"
     project.mkdir()
@@ -2053,9 +2110,9 @@ def execute_process(args: argparse.Namespace) -> dict[str, Any]:
             host["load_at_end"] = list(os.getloadavg())
         except OSError:
             host["load_at_end"] = [0.0, 0.0, 0.0]
-        source = process_source_provenance(repository, args.runtime_reference)
-        source["family_sources"] = family_source_identities(repository)
-        source["build"] = process_build_provenance(args.ava, repository, capabilities)
+        source = process_source_provenance(measured_source_root, harness_repository, args.runtime_reference)
+        source["family_sources"] = family_source_identities(measured_source_root)
+        source["build"] = process_build_provenance(args.ava, measured_source_root, capabilities)
         source["host"] = host
         source["driver"] = {
             "exact_command": list(args._exact_command),
@@ -2079,7 +2136,7 @@ def execute_process(args: argparse.Namespace) -> dict[str, Any]:
             "completed_at_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
             "suite": args.suite,
             "provenance": source,
-            "artifacts": process_artifact_inventory(args, repository),
+            "artifacts": process_artifact_inventory(args, harness_repository),
             "capabilities": capabilities,
             "results": results,
             "checks": [],
@@ -2116,13 +2173,19 @@ def validate_process_document(document: dict[str, Any]) -> None:
     for key in ("measured_checkout", "runtime_reference", "harness", "family_sources", "build", "host", "driver"):
         if key not in provenance:
             raise ValueError(f"process benchmark provenance lacks {key}")
-    for key in ("commit", "tree", "dirty"):
+    for key in ("repository", "commit", "tree", "dirty"):
         if key not in provenance["measured_checkout"]:
             raise ValueError(f"process measured checkout lacks {key}")
     for key in ("commit", "tree", "exact_production_path_equality"):
         if key not in provenance["runtime_reference"]:
             raise ValueError(f"process runtime reference lacks {key}")
-    if provenance["harness"].get("contract_version") != PROCESS_CONTRACT_VERSION:
+    harness = provenance["harness"]
+    for key in ("repository", "commit", "tree", "dirty", "benchmark_script_sha256"):
+        if key not in harness:
+            raise ValueError(f"process harness provenance lacks {key}")
+    if not isinstance(harness["repository"], str) or not harness["repository"]:
+        raise ValueError("process harness provenance has an invalid repository")
+    if harness.get("contract_version") != PROCESS_CONTRACT_VERSION:
         raise ValueError("process harness provenance has the wrong contract")
     if provenance["build"].get("best_effort_provenance", {}).get("git_commit_embedding_verified") is not False:
         raise ValueError("process build provenance must not claim verified source embedding")
@@ -2149,6 +2212,11 @@ def validate_process_document(document: dict[str, Any]) -> None:
         validate_file_identity(artifacts.get(key), key)
         if not isinstance(artifacts[key].get("mode"), int):
             raise ValueError(f"process artifact {key} lacks mode")
+    expected_script_path = (Path(harness["repository"]) / "scripts" / "benchmark-backend.py").resolve()
+    if Path(artifacts["benchmark_script"]["path"]).resolve() != expected_script_path:
+        raise ValueError("process benchmark script artifact is not from the harness repository")
+    if artifacts["benchmark_script"]["sha256"] != harness["benchmark_script_sha256"]:
+        raise ValueError("process benchmark script artifact does not match harness content")
     for key in ("fake_process_child", "fake_mcp_server", "fake_lsp_server", "fake_provider", "curl", "bash_direct_argv_executable"):
         if artifacts.get(key) is not None:
             validate_file_identity(artifacts[key], key)

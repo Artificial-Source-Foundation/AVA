@@ -116,6 +116,15 @@ test "$(git rev-parse --verify "$instrumentation_base^{commit}")" = \
 test "$(git rev-parse --verify "$instrumentation_integrity_commit^{commit}")" = \
   "$instrumentation_integrity_commit"
 
+: "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full family-migration commit ID}"
+family_migration_commit=$AVA_FAMILY_MIGRATION_COMMIT
+test "$(printf %s "$family_migration_commit" | wc -c)" -eq 40
+test "$(git rev-parse --verify "$family_migration_commit^{commit}")" = \
+  "$family_migration_commit"
+after_src=/tmp/ava-process-after-src
+git worktree add --detach "$after_src" "$family_migration_commit"
+test "$(git -C "$after_src" rev-parse HEAD)" = "$family_migration_commit"
+
 before_src=/tmp/ava-process-before-src
 before_build=/tmp/ava-process-before-build
 rm -rf "$before_build"
@@ -132,7 +141,8 @@ cmake -S "$before_src" -B "$before_build" -G Ninja \
 cmake --build "$before_build" --target \
   ava ava_backend_benchmark_helper ava_fake_mcp_server ava_fake_lsp_server
 
-"$before_src/scripts/benchmark-backend.py" \
+"$after_src/scripts/benchmark-backend.py" \
+  --measured-source-root "$before_src" \
   --ava "$before_build/ava" \
   --benchmark-helper "$before_build/tests/ava_backend_benchmark_helper" \
   --fake-mcp-server "$before_build/tests/ava_fake_mcp_server" \
@@ -148,24 +158,20 @@ cmake --build "$before_build" --target \
 
 The carrier intentionally has no `ava_fake_process_child` target, so no such argument appears in its command. Its neutral process cases are structured unsupported; its five family cases are real `legacy_local` lifecycle measurements. Keep this worktree and build until the after cohort is complete: their fake MCP/LSP executables and sample plugin are the common fixture bytes for both runs.
 
-For the after cohort, use a fresh worktree at the explicitly pinned, full family-migration commit and the identical generator, build type, compiler, feature flags, run count, and host boot. The migration commit changes only that family's declaration in `tests/backend_benchmark_authorities.cmake` to `supervised` while adapting its driver; authority is never supplied on the CMake command line. Build the application, helper, and process child. Although helper dependencies may also rebuild fake servers, do not use those independently built copies for evidence:
+The fresh after worktree is created and pinned before either cohort is collected so one reviewed harness executes both runs. Using identical harness bytes is required to keep the benchmark contract and fixture hash fixed; passing distinct `--measured-source-root` values is independently required so checkout, runtime-reference, family-source, and CMake provenance describe the binary under measurement rather than the harness checkout.
+
+For the after cohort, use the identical generator, build type, compiler, feature flags, run count, and host boot. The migration commit changes only that family's declaration in `tests/backend_benchmark_authorities.cmake` to `supervised` while adapting its driver; authority is never supplied on the CMake command line. Build the application, helper, and process child. Although helper dependencies may also rebuild fake servers, do not use those independently built copies for evidence:
 
 ```sh
-: "${AVA_FAMILY_MIGRATION_COMMIT:?set the reviewed full family-migration commit ID}"
-family_migration_commit=$AVA_FAMILY_MIGRATION_COMMIT
-test "$(printf %s "$family_migration_commit" | wc -c)" -eq 40
-test "$(git rev-parse --verify "$family_migration_commit^{commit}")" = \
-  "$family_migration_commit"
-after_src=/tmp/ava-process-after-src
 after_build=/tmp/ava-process-after-build
 rm -rf "$after_build"
-git worktree add --detach "$after_src" "$family_migration_commit"
 cmake -S "$after_src" -B "$after_build" -G Ninja \
   -DCMAKE_BUILD_TYPE=Release
 cmake --build "$after_build" --target \
   ava ava_backend_benchmark_helper ava_fake_process_child
 
 "$after_src/scripts/benchmark-backend.py" \
+  --measured-source-root "$after_src" \
   --ava "$after_build/ava" \
   --benchmark-helper "$after_build/tests/ava_backend_benchmark_helper" \
   --fake-process-child "$after_build/tests/ava_fake_process_child" \
@@ -203,7 +209,7 @@ The fixed family boundaries are one stdlib-Python loopback Curl request; todo sa
 
 ### Provenance, redaction, and comparison
 
-V3 records measured checkout commit/tree/dirty state; runtime reference and production-path equality; harness commit/tree/contract; family tree/blob IDs; CMake generator/version/cache hash/source root/build type/features; compiler path/hash/ID/version/flags; every used binary/script/fixture/plugin hash, size, mode, and mtime; OS/kernel/machine/CPU/count/RAM/page/Python; hashed boot ID; limits; monotonic resolution; start/end load; and exact driver commands and scale parameters. Paths occur only under provenance or artifacts. Provenance remains best effort: binaries do not embed a verified source commit.
+V3 records the measured source root and checkout commit/tree/dirty state; runtime reference and production-path equality; the independent harness repository, commit/tree/dirty state, contract, and script hash; family tree/blob IDs from the measured root; CMake generator/version/cache hash/source root/build type/features; compiler path/hash/ID/version/flags; every used binary/script/fixture/plugin hash, size, mode, and mtime; OS/kernel/machine/CPU/count/RAM/page/Python; hashed boot ID; limits; monotonic resolution; start/end load; and exact driver commands and scale parameters. Paths occur only under provenance or artifacts. Provenance remains best effort: binaries do not embed a verified source commit.
 
 Results and samples contain no PID, PGID, raw owner ID, descriptor, argv/command, executable/cwd path, URL, environment value, child output, protocol frame, prompt, or tool content. Redaction checks tokenize composite sample keys, so names such as `child_pid`, `request_url`, and `command_argv` are rejected without rejecting closed aggregates such as `pidfd_successes`, `stdout_bytes`, `record_count`, and `endpoint_eof`. Primary samples must be non-negative. Helper checks and metrics accept only numbers, booleans, and validated closed labels. Malformed, truncated, multi-object, dynamically reasoned, or content-bearing helper output is rejected.
 

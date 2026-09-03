@@ -1,10 +1,5 @@
 cmake_minimum_required(VERSION 3.10...4.3.2)
 
-# Compile all subdirectories with the same standard.
-set(CMAKE_CXX_STANDARD 23)
-set(CMAKE_CXX_STANDARD_REQUIRED OFF)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 project(ava-json-tests
         VERSION 0.0
         DESCRIPTION "Tests to see how nlohmann json works."

@@ -37,7 +37,7 @@ EXPECTED_GITLINK_REVISIONS = {
     "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
     "aicxx": "15c31e10fd36d522719552ce75d06a02017ad1d3",
     "utils": "07c67a53ea799ad70c673a0f191b4777eaed0be0",
-    "memory": "73588ae80867b0f41dae80f86a273c85b2751ff9",
+    "memory": "3db4fca16680755179ccbf25c6dec951492a9e6a",
     "threadsafe": "048ecec9a9b81c9957dac2daafc6c8d147ebc820",
     "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
     "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",

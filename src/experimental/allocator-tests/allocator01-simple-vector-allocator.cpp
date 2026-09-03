@@ -18,7 +18,6 @@
 // We assume that the size of every std::vector is the same, independent of what type it stores.
 // In fact, this value is expected to be three pointers: 24 bytes.
 static constexpr std::size_t element_size = sizeof(std::vector<int>);
-static constexpr std::size_t min_vectors_per_vector = 5;        // Change to 10, 21, ... if that number is *always* used.
 // This allocator will allow only allocations to store up to `max_vectors_per_vector` elements.
 static constexpr std::size_t max_vectors_per_vector = 21;       // If this is not enough then change it to 42, 85, 170, ...
 
@@ -49,9 +48,6 @@ constexpr int allocation_size_to_node_memory_resource_index(unsigned int size)
 static constexpr std::size_t number_of_allocation_sizes = allocation_size_to_node_memory_resource_index(largest_allocation) + 1;
 static constexpr std::size_t maximum_number_of_elements = allocation_size_to_elements(largest_allocation);
 static_assert(maximum_number_of_elements == max_vectors_per_vector, "max_vectors_per_vector can be larger without using more memory");
-static constexpr std::size_t number_of_initial_nmrs = allocation_size_to_node_memory_resource_index(elements_to_allocation_size(min_vectors_per_vector)) + 1;
-static_assert(number_of_initial_nmrs <= number_of_allocation_sizes, "min_vectors_per_vector must be less than or equal max_vectors_per_vector");
-static constexpr std::size_t number_of_required_once_flags = number_of_allocation_sizes - number_of_initial_nmrs + 1;
 
 // Allocate std::vector<T> objects for an outer std::vector.
 //
@@ -65,7 +61,7 @@ class VectorVectorAllocator
 
  private:
   static std::array<memory::NodeMemoryResource, number_of_allocation_sizes> nmrs_;
-  static std::array<std::once_flag, number_of_required_once_flags> initialize_nmr_once_;
+  static std::once_flag initialize_nmrs_once_;
 
  public:
   // Bind the shared size-class resources to mpp the first time this allocator specialization is constructed.
@@ -74,12 +70,12 @@ class VectorVectorAllocator
   // the first supplied pool remains the upstream resource for all later allocator copies and constructions.
   VectorVectorAllocator(memory::MemoryPagePool& mpp)
   {
-    // Pre-initialize only the first number_of_initial_nmrs NodeMemoryResource's.
-    std::call_once(initialize_nmr_once_[0], [&mpp] {
+    std::call_once(initialize_nmrs_once_, [&mpp] {
       std::size_t allocation_size = smallest_allocation;
-      for (int i = 0; i < number_of_initial_nmrs; ++i)
+      for (memory::NodeMemoryResource& nmr : nmrs_)
       {
-        nmrs_[i].init(&mpp, allocation_size);
+        // Note that this doesn't allocate any memory pages yet. That only happens once a NodeMemoryResource is first used.
+        nmr.init(&mpp, allocation_size);
         allocation_size *= 2;
       }
     });
@@ -97,17 +93,13 @@ class VectorVectorAllocator
   // Throws std::bad_alloc when the upstream page pool cannot supply another block.
   value_type* allocate(std::size_t n)
   {
+    // A zero-sized allocation must be supported by a conforming allocator. The result is unspecified; we choose to return nullptr.
+    if (AI_UNLIKELY(n == 0))
+      return nullptr;
     std::size_t const allocation_size = elements_to_allocation_size(n);
     int const index = allocation_size_to_node_memory_resource_index(allocation_size);
-    std::size_t const block_size = nmrs_[index].block_size();
-    if (AI_UNLIKELY(block_size == 0))
-    {
-      memory::MemoryPagePool* mpp = nmrs_[0].mpp();
-      memory::NodeMemoryResource& nmr = nmrs_[index];
-      std::call_once(initialize_nmr_once_[index - number_of_initial_nmrs + 1], [mpp, &nmr, allocation_size] {
-        nmr.init(mpp, allocation_size);
-      });
-    }
+    if (AI_UNLIKELY(index >= nmrs_.size()))
+      throw std::length_error("VectorVectorAllocator::allocate");
     std::cout << "Allocating " << allocation_size << " bytes; use index " << index << std::endl;
     void* const allocation = nmrs_[index].allocate(allocation_size);
     if (allocation == nullptr)
@@ -130,6 +122,9 @@ class VectorVectorAllocator
   // Return storage at p to the shared size-class resource selected by the corresponding n-object allocation.
   void deallocate(value_type* p, std::size_t n) noexcept
   {
+    // This allocator returns nullptr for zero-sized allocations, therefore we need to support deallocating that.
+    if (AI_UNLIKELY(p == nullptr))
+      return;
     std::size_t const allocation_size = elements_to_allocation_size(n);
 #if CW_DEBUG
     std::size_t const count = allocation_size_to_elements(allocation_size);
@@ -146,8 +141,9 @@ class VectorVectorAllocator
 template <typename T>
 std::array<memory::NodeMemoryResource, number_of_allocation_sizes> VectorVectorAllocator<T>::nmrs_;
 
+//static
 template <typename T>
-std::array<std::once_flag, number_of_required_once_flags> VectorVectorAllocator<T>::initialize_nmr_once_;
+std::once_flag VectorVectorAllocator<T>::initialize_nmrs_once_;
 
 template <typename T>
 constexpr bool operator==(VectorVectorAllocator<T> const&, VectorVectorAllocator<T> const&) noexcept
@@ -171,13 +167,15 @@ std::ostream& operator<<(std::ostream& os, std::vector<int> const& v)
 int main()
 {
   Debug(NAMESPACE_DEBUG::init());
+  Dout(dc::notice, "Debug output is turned on.");
+
   memory::MemoryPagePool mpp(0x8000);
 
   VectorVectorAllocator<int> alloc(mpp);
 
   using vec_type = std::vector<std::vector<int>, VectorVectorAllocator<int>>;
   vec_type vec(alloc);
-  vec.reserve(vec_type::allocator_type::optimal_capacity(7));
+//  vec.reserve(vec_type::allocator_type::optimal_capacity(7));
 
   std::cout << "Adding elements to vector:" << std::endl;
   vec.push_back(std::vector<int>{1});

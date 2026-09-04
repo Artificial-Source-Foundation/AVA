@@ -1969,7 +1969,7 @@ def run_package_tests(
         if provenance is None:
             raise RuntimeError("package provenance is missing")
         provenance_data = json.loads(provenance.read().decode("utf-8"))
-        if provenance_data.get("schema_version") != 2 or provenance_data.get("build_mode") != "supplied-binary":
+        if provenance_data.get("schema_version") != 3 or provenance_data.get("build_mode") != "supplied-binary":
             raise RuntimeError("package provenance has unexpected accepted-binary content")
         expected_architecture = {"x64": "x86_64", "arm64": "aarch64"}.get(package_architecture())
         if expected_architecture is not None and (

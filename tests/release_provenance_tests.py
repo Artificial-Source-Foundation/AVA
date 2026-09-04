@@ -25,14 +25,14 @@ SPEC.loader.exec_module(PROVENANCE)
 
 
 def clean_dependencies() -> list[dict[str, object]]:
+    revision = "f" * 40
     return [
         {
             "name": name,
             "path": path,
             "usage": PROVENANCE.DEPENDENCY_USAGE[name],
-            "gitlink_revision_expected": PROVENANCE.EXPECTED_GITLINK_REVISIONS[name],
-            "gitlink_revision_actual": PROVENANCE.EXPECTED_GITLINK_REVISIONS[name],
-            "worktree_revision": PROVENANCE.EXPECTED_GITLINK_REVISIONS[name],
+            "gitlink_revision_actual": revision,
+            "worktree_revision": revision,
             "worktree_state": "clean",
             "license_id": license_id,
             "license_file": license_file,
@@ -153,7 +153,7 @@ class ReleaseProvenanceTests(unittest.TestCase):
         first = self.collect()
         second = self.collect()
         self.assertEqual(first, second)
-        self.assertEqual(first["schema_version"], 2)
+        self.assertEqual(first["schema_version"], 3)
         self.assertEqual(first["ava_version"], "1.0.0")
         self.assertEqual(first["host_architecture"], "x86_64")
         self.assertIs(first["host_architecture_matches_binary"], True)
@@ -190,9 +190,9 @@ class ReleaseProvenanceTests(unittest.TestCase):
             binary = repo / "ava"
             binary.write_bytes(b"license hash fixture\n")
             with mock.patch.object(PROVENANCE, "DIRECT_DEPENDENCIES", (dependency,)), mock.patch.object(
-                PROVENANCE, "gitlink_revision", return_value=PROVENANCE.EXPECTED_GITLINK_REVISIONS[name]
+                PROVENANCE, "gitlink_revision", return_value="f" * 40
             ), mock.patch.object(
-                PROVENANCE, "run_git", return_value=PROVENANCE.EXPECTED_GITLINK_REVISIONS[name]
+                PROVENANCE, "run_git", return_value="f" * 40
             ), mock.patch.object(
                 PROVENANCE, "worktree_dirty", return_value=False
             ):
@@ -202,14 +202,13 @@ class ReleaseProvenanceTests(unittest.TestCase):
                     needed=sorted(PROVENANCE.HOST_DYNAMIC_ALLOWLIST),
                 )
         record = provenance["direct_dependencies"][0]
-        self.assertEqual(record["gitlink_revision_expected"], PROVENANCE.EXPECTED_GITLINK_REVISIONS[name])
-        self.assertEqual(record["gitlink_revision_actual"], PROVENANCE.EXPECTED_GITLINK_REVISIONS[name])
+        self.assertEqual(record["gitlink_revision_actual"], "f" * 40)
         self.assertEqual(record["license_sha256_expected"], PROVENANCE.EXPECTED_LICENSE_SHA256[name])
         self.assertEqual(record["license_sha256_actual"], hashlib.sha256(b"changed license evidence\n").hexdigest())
         self.assertFalse(provenance["release_qualified"])
         self.assertIn(f"dependency:{name}:license-sha256-mismatch", provenance["qualification_reasons"])
 
-    def test_gitlink_policy_mismatch_fails_closed(self) -> None:
+    def test_worktree_revision_must_match_committed_gitlink(self) -> None:
         dependency = PROVENANCE.DIRECT_DEPENDENCIES[0]
         name, relative_path, license_path, _license_id = dependency
         with tempfile.TemporaryDirectory() as directory:
@@ -218,69 +217,27 @@ class ReleaseProvenanceTests(unittest.TestCase):
             license_file.parent.mkdir(parents=True)
             license_file.write_bytes((SOURCE / relative_path / license_path).read_bytes())
             with mock.patch.object(PROVENANCE, "DIRECT_DEPENDENCIES", (dependency,)), mock.patch.object(
-                PROVENANCE, "gitlink_revision", return_value="f" * 40
-            ), mock.patch.object(PROVENANCE, "run_git", return_value="f" * 40), mock.patch.object(
+                PROVENANCE, "gitlink_revision", return_value="a" * 40
+            ), mock.patch.object(PROVENANCE, "run_git", return_value="b" * 40), mock.patch.object(
                 PROVENANCE, "worktree_dirty", return_value=False
             ):
-                _records, reasons = PROVENANCE.dependency_records(repo)
-        self.assertIn(f"dependency:{name}:gitlink-policy-mismatch", reasons)
+                records, reasons = PROVENANCE.dependency_records(repo)
+        self.assertEqual(records[0]["gitlink_revision_actual"], "a" * 40)
+        self.assertEqual(records[0]["worktree_revision"], "b" * 40)
+        self.assertIn(f"dependency:{name}:revision-mismatch", reasons)
 
     def test_worktree_state_includes_untracked_files(self) -> None:
         with mock.patch.object(PROVENANCE, "run_git", return_value="?? CMakeLists.txt\n") as run_git:
             self.assertTrue(PROVENANCE.worktree_dirty(SOURCE))
         run_git.assert_called_once_with(SOURCE, "status", "--porcelain", "--untracked-files=all")
 
-    def test_expected_gitlink_policy_covers_all_source_dependencies(self) -> None:
-        self.assertEqual(
-            PROVENANCE.EXPECTED_GITLINK_REVISIONS,
-            {
-                "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
-                "aicxx": "15c31e10fd36d522719552ce75d06a02017ad1d3",
-                "utils": "07c67a53ea799ad70c673a0f191b4777eaed0be0",
-                "memory": "3db4fca16680755179ccbf25c6dec951492a9e6a",
-                "threadsafe": "048ecec9a9b81c9957dac2daafc6c8d147ebc820",
-                "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
-                "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",
-            },
-        )
+    def test_dependency_metadata_covers_build_tool_usage(self) -> None:
         self.assertEqual(
             PROVENANCE.EXPECTED_LICENSE_SHA256["aicxx"],
             "dbe888a4dac5018ae7a4beb1ecfacd89de8d7abc7193024b95b1a0d2d6a45fe8",
         )
         records = clean_dependencies()
         self.assertEqual(next(record for record in records if record["name"] == "aicxx")["usage"], "build-tool")
-
-    def test_expected_gitlink_policy_matches_source_checkout(self) -> None:
-        probe = subprocess.run(
-            ["git", "-C", str(SOURCE), "rev-parse", "--is-inside-work-tree"],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        if probe.returncode != 0 or probe.stdout.strip() != "true":
-            self.skipTest("Git metadata is unavailable for the source checkout")
-
-        paths = [path for _name, path, _license_file, _license_id in PROVENANCE.DIRECT_DEPENDENCIES]
-        result = subprocess.run(
-            ["git", "-C", str(SOURCE), "ls-tree", "HEAD", "--", *paths],
-            text=True,
-            capture_output=True,
-            check=False,
-        )
-        self.assertEqual(result.returncode, 0, result.stderr)
-        revisions_by_path: dict[str, str] = {}
-        for line in result.stdout.splitlines():
-            metadata, separator, path = line.partition("\t")
-            fields = metadata.split()
-            self.assertEqual(separator, "\t")
-            self.assertEqual(fields[:2], ["160000", "commit"])
-            self.assertEqual(len(fields), 3)
-            revisions_by_path[path] = fields[2]
-        actual = {
-            name: revisions_by_path[path]
-            for name, path, _license_file, _license_id in PROVENANCE.DIRECT_DEPENDENCIES
-        }
-        self.assertEqual(actual, PROVENANCE.EXPECTED_GITLINK_REVISIONS)
 
     def test_elf_metadata_reads_loader_visible_needed_names_without_sections(self) -> None:
         # There are intentionally no section headers: the loader uses program

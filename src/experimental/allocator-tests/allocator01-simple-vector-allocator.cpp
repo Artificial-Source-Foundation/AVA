@@ -11,6 +11,8 @@
 #include <iostream>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <stdexcept>
 #include <type_traits>
 #include <vector>
 #include "debug.h"
@@ -59,6 +61,9 @@ class VectorVectorAllocator
   using pointer = value_type*;
   using size_type = std::size_t;
 
+  // This fails, for example, if T is bool.
+  static_assert(sizeof(value_type) == element_size, "VectorVectorAllocator is for elements of size 24 only.");
+
  private:
   static std::array<memory::NodeMemoryResource, number_of_allocation_sizes> nmrs_;
   static std::once_flag initialize_nmrs_once_;
@@ -91,16 +96,21 @@ class VectorVectorAllocator
   // Allocate uninitialized storage for n value_type objects from the shared resource for its power-of-two size class.
   //
   // Throws std::bad_alloc when the upstream page pool cannot supply another block.
+  // Throws std::length_error when the n is larger than maximum_number_of_elements.
   value_type* allocate(std::size_t n)
   {
     // A zero-sized allocation must be supported by a conforming allocator. The result is unspecified; we choose to return nullptr.
     if (AI_UNLIKELY(n == 0))
       return nullptr;
+    if (AI_UNLIKELY(n > maximum_number_of_elements))
+      throw std::length_error("VectorVectorAllocator::allocate");
     std::size_t const allocation_size = elements_to_allocation_size(n);
     int const index = allocation_size_to_node_memory_resource_index(allocation_size);
-    if (AI_UNLIKELY(index >= nmrs_.size()))
-      throw std::length_error("VectorVectorAllocator::allocate");
     std::cout << "Allocating " << allocation_size << " bytes; use index " << index << std::endl;
+    // Note: with 0 < n <= maximum_number_of_elements, allocation_size will be between elements_to_allocation_size(1) == smallest_allocation
+    // and elements_to_allocation_size(maximum_number_of_elements) == largest_allocation, and therefore index will be between
+    // allocation_size_to_node_memory_resource_index(smallest_allocation) == 0 and
+    // allocation_size_to_node_memory_resource_index(largest_allocation) == number_of_allocation_sizes - 1 --> 0 <= index < nmrs_.size().
     void* const allocation = nmrs_[index].allocate(allocation_size);
     if (allocation == nullptr)
       throw std::bad_alloc{};
@@ -109,6 +119,8 @@ class VectorVectorAllocator
 
   static std::size_t optimal_capacity(std::size_t n)
   {
+    // Do not call this function with an n larger than maximum_number_of_elements.
+    ASSERT(n <= maximum_number_of_elements);
     std::size_t const allocation_size = elements_to_allocation_size(n);
     return allocation_size_to_elements(allocation_size);
   }
@@ -141,7 +153,6 @@ class VectorVectorAllocator
 template <typename T>
 std::array<memory::NodeMemoryResource, number_of_allocation_sizes> VectorVectorAllocator<T>::nmrs_;
 
-//static
 template <typename T>
 std::once_flag VectorVectorAllocator<T>::initialize_nmrs_once_;
 
@@ -178,13 +189,8 @@ int main()
 //  vec.reserve(vec_type::allocator_type::optimal_capacity(7));
 
   std::cout << "Adding elements to vector:" << std::endl;
-  vec.push_back(std::vector<int>{1});
-  vec.push_back(std::vector<int>{2, 3});
-  vec.push_back(std::vector<int>{4, 5, 6, 7});
-  vec.push_back(std::vector<int>{8, 9, 10, 11, 12, 13, 14, 15});
-  vec.push_back(std::vector<int>{16, 17, 18, 19});
-  vec.push_back(std::vector<int>{20, 21});
-  vec.push_back(std::vector<int>{22});
+  for (int i = 0; i < max_vectors_per_vector; ++i)
+    vec.push_back(std::vector<int>{i});
 
   std::cout << "Vector contents: ";
   for (std::vector<int> v : vec)

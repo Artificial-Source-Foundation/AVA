@@ -1,6 +1,6 @@
 #include "sys.h"
 #include "memory/MemoryPagePool.h"
-#include "memory/GeometricAllocator.h"
+#include "memory/VectorAllocator.h"
 
 #include <iostream>
 #include <vector>
@@ -25,18 +25,19 @@ int main()
   Dout(dc::notice, "Debug output is turned on.");
 
   memory::MemoryPagePool mpp;
-  using VectorAllocator = memory::VectorAllocator<std::vector<int>>;
+  using element_type = std::vector<int>;
+  using VectorAllocator = memory::VectorAllocator<element_type, 24>;
   VectorAllocator alloc(mpp);
-  using vec_type = std::vector<std::vector<int>, VectorAllocator>;
+  using vec_type = std::vector<element_type, VectorAllocator>;
   vec_type vec(alloc);
 //  vec.reserve(vec_type::allocator_type::optimal_capacity(VectorAllocator::maximum_number_of_elements));
 
   std::cout << "Adding elements to vector:" << std::endl;
   for (int i = 0; i < 2 * VectorAllocator::maximum_number_of_elements; ++i)
-    vec.push_back(std::vector<int>{i});
+    vec.push_back(element_type{i});
 
   std::cout << "Vector contents: ";
-  for (std::vector<int> v : vec)
+  for (element_type const& v : vec)
   {
     std::cout << v << " ";
   }
@@ -47,4 +48,19 @@ int main()
 
   std::cout << "Clearing vector:" << std::endl;
   vec.clear();
+
+  ASSERT(mpp.block_size() / sizeof(element_type) == VectorAllocator::maximum_number_of_elements);
+
+  auto p0 = alloc.allocate(0);
+  auto p1 = alloc.allocate(1);
+  auto p2 = alloc.allocate(mpp.block_size() / sizeof(element_type));
+  std::size_t oc0 = vec_type::allocator_type::optimal_capacity(0);
+  std::size_t oc1 = vec_type::allocator_type::optimal_capacity(1);
+  std::size_t oc2 = vec_type::allocator_type::optimal_capacity(mpp.block_size() / sizeof(element_type));
+
+  VectorAllocator::rebind<char>::other alloc2(alloc);
+  std::vector<char, VectorAllocator::rebind<char>::other> vec2(alloc2);
+  vec2.reserve(11);
+
+  Dout(dc::notice, "Leaving main()...");
 }

@@ -10,3 +10,7 @@ project(ava-allocator-tests
 add_executable(allocator01 allocator01-simple-vector-allocator.cpp)
 target_link_libraries(allocator01 PRIVATE ${AICXX_OBJECTS_LIST})
 target_include_directories(allocator01 PRIVATE ${CMAKE_SOURCE_DIR}/src)
+
+add_executable(elements_to_allocation_size_test elements_to_allocation_size_test.cpp)
+target_link_libraries(elements_to_allocation_size_test PRIVATE ${AICXX_OBJECTS_LIST})
+target_include_directories(elements_to_allocation_size_test PRIVATE ${CMAKE_SOURCE_DIR}/src)

@@ -117,6 +117,29 @@ bool wait_for_path(std::filesystem::path const& path, std::chrono::milliseconds 
   return std::filesystem::exists(path);
 }
 
+// The fake child creates its marker before flushing the PID record, so path
+// existence alone can race the write. A complete marker is one newline-terminated
+// decimal PID line.
+bool pid_marker_complete(std::filesystem::path const& path)
+{
+  auto const text = read_text(path);
+  if (text.size() < 2 || text.back() != '\n')
+    return false;
+  return std::string_view(text).substr(0, text.size() - 1).find_first_not_of("0123456789") == std::string_view::npos;
+}
+
+bool wait_for_pid_marker(std::filesystem::path const& path, std::chrono::milliseconds timeout = 2s)
+{
+  auto const deadline = Clock::now() + timeout;
+  while (Clock::now() < deadline)
+  {
+    if (pid_marker_complete(path))
+      return true;
+    std::this_thread::sleep_for(10ms);
+  }
+  return pid_marker_complete(path);
+}
+
 bool process_is_live_for_test(std::string_view identity)
 {
 #if defined(__linux__)
@@ -648,51 +671,74 @@ void test_exec_confirmation_cancellation_classification()
   auto const pid_marker = root / "leader";
   std::filesystem::create_directories(root / "workspace");
   std::atomic_bool canceled = false;
+  std::atomic_bool marker_ready_in_hook = false;
   // The exec'd child publishes its real PID while spawn still owns exec confirmation;
-  // only after that marker is ready does cancellation become observable.
+  // only after the complete marker record is readable does cancellation become
+  // observable. Cancellation still flips on readiness failure so cleanup stays bounded.
   ava::process::testing::SupervisorTestAccess::set_after_gate_release_hook(*authority->supervisor, [&] {
-    static_cast<void>(wait_for_path(pid_marker));
+    marker_ready_in_hook = wait_for_pid_marker(pid_marker);
     canceled = true;
   });
   auto process = ava::plugin::PluginProcess::start(fake_manifest(root / "plugin", "live-destructor", pid_marker),
                                                    options_for(root / "workspace", authority->run, 2s, 500ms), [&] { return canceled.load(); });
   ava::process::testing::SupervisorTestAccess::clear_after_gate_release_hook(*authority->supervisor);
-  auto const marker_ready = wait_for_path(pid_marker);
-  auto const identity = marker_ready ? first_line(pid_marker) : std::string{};
+  auto const identity = first_line(pid_marker);
   auto const format = process ? std::string{} : process.error().format();
   auto snapshot = authority->supervisor->snapshot();
   auto records = plugin_records(*authority->supervisor);
   bool const group_reaped = wait_for_process_absent(identity);
+  expect(marker_ready_in_hook.load(), "exec-confirmation cancellation hook observes a complete child PID marker before canceling");
   expect(!process && process.error().message().find("plugin startup canceled") != std::string::npos && format.find("canceled: true") != std::string::npos &&
              format.find("reason: canceled") != std::string::npos,
          "cancellation after exec but before confirmation is classified as plugin startup cancellation: " + format);
   expect(records.size() == 1 && completely_settled(records.front()) && records.front().reason == ava::process::TerminationReasonV1::Canceled &&
              snapshot.live_records == 0,
          "exec-confirmation cancellation settles Canceled exactly once with complete cleanup");
-  expect(marker_ready && group_reaped, "exec-confirmation cancellation leaves no live plugin process or group member");
+  expect(group_reaped, "exec-confirmation cancellation leaves no live plugin process or group member");
   finish_supervisor(*authority);
 
-  auto exec_authority = make_authority();
-  if (!exec_authority)
+  auto stop_authority = make_authority();
+  if (!stop_authority)
     return;
-  auto const exec_root = test_root("exec-failure-late-cancel");
-  std::filesystem::create_directories(exec_root / "workspace");
-  auto const invalid_image = exec_root / "invalid-image";
-  write_text(invalid_image, "not an executable image\n");
-  std::filesystem::permissions(invalid_image, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
-  std::atomic_bool late_cancel = false;
-  auto manifest = fake_manifest(exec_root / "plugin", "normal");
-  manifest.entrypoint.command = invalid_image.string();
-  auto failed =
-      ava::plugin::PluginProcess::start(std::move(manifest), options_for(exec_root / "workspace", exec_authority->run), [&] { return late_cancel.load(); });
-  late_cancel = true;
-  auto exec_format = failed ? std::string{} : failed.error().format();
-  auto exec_records = plugin_records(*exec_authority->supervisor);
-  expect(!failed && exec_format.find("exec syscall returned") != std::string::npos && failed.error().message().find("canceled") == std::string::npos &&
-             exec_format.find("canceled: true") == std::string::npos && exec_format.find("reason: canceled") == std::string::npos && exec_records.size() == 1 &&
-             completely_settled(exec_records.front()) && exec_records.front().reason == ava::process::TerminationReasonV1::ExecFailed,
-         "a non-canceled first cause keeps its own classification when cancellation only flips after settlement: " + exec_format);
-  finish_supervisor(*exec_authority);
+  auto const stop_root = test_root("owner-stop-before-late-cancel");
+  auto const stop_marker = stop_root / "leader";
+  std::filesystem::create_directories(stop_root / "workspace");
+  std::atomic_bool cancel = false;
+  std::atomic_size_t cancel_true_polls = 0;
+  std::atomic_bool stop_committed = false;
+  // A synchronous owner stop commits the first termination cause once the exec'd
+  // child is up; only then does the cancel callback become observable, while spawn
+  // still owns exec confirmation and the launch wrapper has not classified anything.
+  ava::process::testing::SupervisorTestAccess::set_after_gate_release_hook(*stop_authority->supervisor, [&] {
+    if (wait_for_pid_marker(stop_marker))
+    {
+      auto stopped =
+          stop_authority->supervisor->request_stop(stop_authority->run.owner_prefix(), ava::process::TerminationReasonV1::OwnerShutdown, Clock::now() + 2s);
+      stop_committed = stopped && stopped->matched == 1;
+    }
+    cancel = true;
+  });
+  auto failed = ava::plugin::PluginProcess::start(fake_manifest(stop_root / "plugin", "live-destructor", stop_marker),
+                                                  options_for(stop_root / "workspace", stop_authority->run, 2s, 500ms), [&] {
+                                                    bool const value = cancel.load();
+                                                    if (value)
+                                                      cancel_true_polls.fetch_add(1);
+                                                    return value;
+                                                  });
+  ava::process::testing::SupervisorTestAccess::clear_after_gate_release_hook(*stop_authority->supervisor);
+  auto const stop_identity = first_line(stop_marker);
+  auto const stop_format = failed ? std::string{} : failed.error().format();
+  auto stop_records = plugin_records(*stop_authority->supervisor);
+  bool const stop_reaped = wait_for_process_absent(stop_identity);
+  expect(stop_committed && cancel_true_polls > 0, "owner shutdown commits as the first cause and the cancel callback turns true before launch returns");
+  expect(!failed && failed.error().message().find("canceled") == std::string::npos && stop_format.find("canceled: true") == std::string::npos &&
+             stop_format.find("reason: canceled") == std::string::npos && stop_format.find("reason: owner_shutdown") != std::string::npos,
+         "a committed owner shutdown keeps its structured first cause when cancellation arrives before launch returns: " + stop_format);
+  expect(stop_records.size() == 1 && completely_settled(stop_records.front()) &&
+             stop_records.front().reason == ava::process::TerminationReasonV1::OwnerShutdown && stop_authority->supervisor->snapshot().live_records == 0 &&
+             stop_reaped,
+         "owner shutdown first cause settles completely once with the child reaped despite late cancellation");
+  finish_supervisor(*stop_authority);
 }
 
 void test_eof_term_refusal_and_natural_descendant_cleanup()

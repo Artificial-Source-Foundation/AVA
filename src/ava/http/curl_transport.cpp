@@ -499,6 +499,7 @@ class CurlRequest final
       request_cleanup();
 
       drain_stdout(supervisor, handle, output, output_open, failure);
+      request_cleanup();
       drain_stderr(supervisor, handle, error_output, error_open, failure);
       request_cleanup();
 
@@ -515,6 +516,7 @@ class CurlRequest final
 
       if (terminal_status && output_open)
         drain_stdout(supervisor, handle, output, output_open, failure);
+      request_cleanup();
       if (terminal_status && error_open)
         drain_stderr(supervisor, handle, error_output, error_open, failure);
       request_cleanup();
@@ -568,6 +570,7 @@ class CurlRequest final
     while (output_open)
     {
       auto const progressed = drain_stdout(supervisor, handle, output, output_open, failure);
+      request_cleanup();
       if (!progressed)
         break;
     }
@@ -788,6 +791,8 @@ class CurlRequest final
       }
       if (auto accounted = supervisor.account_output(handle, ava::process::StreamKindV1::StandardOutput, bytes, truncated); !accounted && !failure)
         set_failure(failure, ava::process::TerminationReasonV1::ProtocolFailure, protocol_error("failed to account curl output"));
+      if (failure)
+        break;
     }
     return progressed;
   }

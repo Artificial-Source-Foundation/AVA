@@ -196,10 +196,9 @@ int main(int argc, char** argv)
   if (url.find("/output-limit") != std::string::npos)
   {
     std::string output(32U * 1024U, 'x');
-    for (std::size_t bytes = 0; bytes < 8U * 1024U * 1024U + 4096U; bytes += output.size())
-      if (!write_all(STDOUT_FILENO, output))
-        break;
-    write_status(200);
+    while (write_all(STDOUT_FILENO, output))
+    {
+    }
     return 0;
   }
   if (url.find("/stderr-limit") != std::string::npos)

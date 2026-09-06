@@ -479,7 +479,11 @@ void test_mcp_path_and_reserved_input_validation()
   auto two_paths = ava::process::make_mcp_environment_v1("/logical", {{"PATH", "/one"}, {"PATH", "/two"}});
   bool bad_paths_rejected = true;
   for (auto const path : std::array<std::string_view, 6>{"", "relative", "/one:relative", "/one::/two", ":/two", "/one:"})
-    bad_paths_rejected = bad_paths_rejected && !ava::process::make_mcp_environment_v1("/logical", {{"PATH", std::string(path)}});
+  {
+    std::vector<EnvironmentVariableV1> variables{{"PATH", std::string(path)}};
+    auto result = ava::process::make_mcp_environment_v1("/logical", variables);
+    bad_paths_rejected = bad_paths_rejected && !result;
+  }
 
   expect(default_path &&
              assignments(*default_path) ==

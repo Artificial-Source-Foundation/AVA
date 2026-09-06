@@ -789,8 +789,10 @@ if(Python3_Interpreter_FOUND)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_test.py
             --script ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py)
+  # The 70-case self-test takes about 15 seconds even without parallel CTest
+  # load; allow scheduling headroom without changing any benchmark budgets.
   set_tests_properties(ava_benchmark.harness_self_test PROPERTIES
-    TIMEOUT 15
+    TIMEOUT 30
     LABELS "benchmark;offline;self-test"
     ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 

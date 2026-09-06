@@ -481,26 +481,26 @@ void test_project_primary_revocation_removes_authority_without_broadening_tools(
   }
 
   write_global_primary();
-  run_trust("/trust project", "/trust project re-enables the project primary after clear");
+  (void)run_trust("/trust project", "/trust project re-enables the project primary after clear");
   expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
                            "project primary is reselected after clear when trust is explicitly enabled again");
-  run_trust("/trust untrust", "/trust untrust revokes a reselected project primary");
+  (void)run_trust("/trust untrust", "/trust untrust revokes a reselected project primary");
   expect_project_authority_absent(true, "/trust untrust removes project authority and preserves the valid global primary");
 
   auto externally_trusted = ava::app::set_project_trust_decision(paths, workspace, true);
   expect(externally_trusted.has_value(), "project-primary fixture externally re-enables trust for reload coverage");
-  run_trust("/reload trust", "/reload trust applies external trust enablement");
+  (void)run_trust("/reload trust", "/reload trust applies external trust enablement");
   expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
                            "/reload trust re-resolves the requested primary from the newly permitted project catalog");
 
   write_project_primary(kReloadedProjectCanary, "inherit");
-  run_trust("/reload trust", "/reload trust refreshes a trusted primary definition");
+  (void)run_trust("/reload trust", "/reload trust refreshes a trusted primary definition");
   expect_project_selection(kReloadedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
                            "/reload trust never accepts the cached project definition across a trust reload");
 
   auto externally_denied = ava::app::set_project_trust_decision(paths, workspace, false);
   expect(externally_denied.has_value(), "project-primary fixture externally denies trust for reload coverage");
-  run_trust("/reload trust", "/reload trust applies external denial");
+  (void)run_trust("/reload trust", "/reload trust applies external denial");
   expect_project_authority_absent(true, "/reload trust to untrusted atomically replaces project authority with the permitted global primary");
 
   ava::provider::OpenAIProvider const provider("https://api.example.test");

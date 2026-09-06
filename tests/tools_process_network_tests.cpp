@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "tests/support/process_group_test_support.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/test_timeout.h"
 #include "ava/containment/containment.h"
@@ -19,7 +20,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -55,18 +55,10 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   return static_cast<pid_t>(value);
 }
 
-bool process_group_exists(pid_t pgid)
-{
-  errno = 0;
-  if (::kill(-pgid, 0) == 0)
-    return true;
-  return errno != ESRCH;
-}
-
 bool wait_for_process_group_exit(pid_t pgid)
 {
   auto const deadline = ava::tests::now_plus_seconds(5);
-  while (process_group_exists(pgid))
+  while (ava::test::process_group_has_live_member(pgid))
   {
     if (std::chrono::steady_clock::now() >= deadline)
       return false;

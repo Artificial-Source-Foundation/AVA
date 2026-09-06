@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
+#include "tests/support/process_group_test_support.h"
 #include "tests/support/test_harness.h"
 #include "tests/support/test_timeout.h"
 #include "ava/app/headless_policy.h"
@@ -19,7 +20,6 @@
 #include "ava/core/path.h"
 
 #include <algorithm>
-#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -30,7 +30,6 @@
 #include <thread>
 #include <type_traits>
 #include <vector>
-#include <signal.h>
 #include <sys/types.h>
 
 #ifndef AVA_FAKE_MCP_SERVER_PATH
@@ -73,24 +72,16 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   return static_cast<pid_t>(value);
 }
 
-bool process_group_exists(pid_t pgid)
-{
-  errno = 0;
-  if (::kill(-pgid, 0) == 0)
-    return true;
-  return errno != ESRCH;
-}
-
 bool wait_for_process_group_exit(pid_t pgid)
 {
   auto const deadline = ava::tests::now_plus_seconds(5);
   while (std::chrono::steady_clock::now() < deadline)
   {
-    if (!process_group_exists(pgid))
+    if (!ava::test::process_group_has_live_member(pgid))
       return true;
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  return !process_group_exists(pgid);
+  return !ava::test::process_group_has_live_member(pgid);
 }
 
 std::string mcp_config_json(std::string id, std::string command, bool enabled = true, std::string args_json = "[]")

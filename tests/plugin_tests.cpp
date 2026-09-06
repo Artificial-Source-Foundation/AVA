@@ -950,9 +950,16 @@ void test_plugin_runner_contained_failures()
       ava::plugin::PluginProcess::start(runner_manifest(startup_cancel_dir, "com.example.startupcancel", "plugin.sh"), startup_cancel_options,
                                         [&] { return read_pid_file_for_test(startup_cancel_pgid_file).has_value(); });
   auto const startup_cancel_pgid = read_pid_file_for_test(startup_cancel_pgid_file);
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid &&
-             wait_for_process_group_exit(*startup_cancel_pgid),
-         "plugin runner cancels hung startup and terminates the plugin process group before timeout");
+  auto const startup_cancel_category = startup_canceled ? std::string{} : ava::core::to_string(startup_canceled.error().category());
+  std::string const startup_cancel_message = startup_canceled ? std::string{} : startup_canceled.error().message();
+  std::string const startup_cancel_format = startup_canceled ? std::string{} : startup_canceled.error().format();
+  bool const startup_cancel_group_exited = startup_cancel_pgid && wait_for_process_group_exit(*startup_cancel_pgid);
+  expect(!startup_canceled, "canceled plugin startup returns a failed result instead of a process");
+  expect(!startup_canceled && startup_cancel_message.find("canceled") != std::string::npos && startup_cancel_format.find("canceled: true") != std::string::npos,
+         "canceled plugin startup keeps a stable cancellation category, message, and context [category=" + startup_cancel_category +
+             "]: " + startup_cancel_format);
+  expect(startup_cancel_pgid.has_value(), "canceled plugin startup child publishes its process-group marker");
+  expect(startup_cancel_group_exited, "canceled plugin startup terminates the plugin process group before timeout");
 
   auto const exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",

@@ -211,7 +211,17 @@ ava::core::VoidResult PluginProcess::launch(CancelCallback const& cancel_request
                                                             .stderr_mode = ava::process::StreamModeV1::Capture,
                                                             .cancel_requested = cancel_requested});
   if (!spawned)
-    return std::unexpected(std::move(spawned.error()));
+  {
+    auto error = std::move(spawned.error());
+    bool const startup_canceled = std::ranges::any_of(error.context(), [](ava::core::ErrorContext const& context) {
+      return context.key == "reason" && context.value == ava::process::to_string(ava::process::TerminationReasonV1::Canceled);
+    });
+    if (!startup_canceled)
+      return std::unexpected(std::move(error));
+    auto canceled = canceled_error("plugin startup canceled", manifest_);
+    canceled.with_context("reason", std::string(ava::process::to_string(ava::process::TerminationReasonV1::Canceled)));
+    return std::unexpected(std::move(canceled));
+  }
 
   process_handle_ = std::move(spawned->handle);
   if (spawned->standard_input)

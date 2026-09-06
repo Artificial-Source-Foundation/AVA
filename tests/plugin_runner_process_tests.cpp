@@ -450,7 +450,9 @@ void test_prelaunch_authority_cancel_and_discovery_are_process_free()
                                                            [&] { return cancellation_observations.fetch_add(1) + 1 >= 3; });
   auto after_reserved_cancel = authority->supervisor->snapshot();
   auto reserved_records = plugin_records(*authority->supervisor);
-  expect(!reserved_cancel && reserved_cancel.error().format().find("reason: canceled") != std::string::npos && cancellation_observations == 3 &&
+  expect(!reserved_cancel && reserved_cancel.error().message().find("plugin startup canceled") != std::string::npos &&
+             reserved_cancel.error().format().find("canceled: true") != std::string::npos &&
+             reserved_cancel.error().format().find("reason: canceled") != std::string::npos && cancellation_observations == 3 &&
              !after_reserved_cancel.monitor_started && after_reserved_cancel.live_records == 0 && reserved_records.size() == 1 &&
              reserved_records.front().state == ava::process::ProcessStateV1::Finished &&
              reserved_records.front().reason == ava::process::TerminationReasonV1::Canceled &&
@@ -628,11 +630,69 @@ void test_single_startup_budget_and_spawn_cancellation()
   ava::process::testing::SupervisorTestAccess::clear_after_fork_before_release_hook(*cancel_authority->supervisor);
   auto cancel_snapshot = cancel_authority->supervisor->snapshot();
   auto cancel_records = plugin_records(*cancel_authority->supervisor);
-  expect(reached_gate && prompt && !canceled_process && canceled_process.error().format().find("reason: canceled") != std::string::npos &&
-             cancel_elapsed < 1s && !std::filesystem::exists(exec_marker) && cancel_snapshot.live_records == 0 && cancel_records.size() == 1 &&
-             completely_settled(cancel_records.front()) && cancel_records.front().reason == ava::process::TerminationReasonV1::Canceled,
+  expect(reached_gate && prompt && !canceled_process && canceled_process.error().message().find("plugin startup canceled") != std::string::npos &&
+             canceled_process.error().format().find("canceled: true") != std::string::npos &&
+             canceled_process.error().format().find("reason: canceled") != std::string::npos && cancel_elapsed < 1s && !std::filesystem::exists(exec_marker) &&
+             cancel_snapshot.live_records == 0 && cancel_records.size() == 1 && completely_settled(cancel_records.front()) &&
+             cancel_records.front().reason == ava::process::TerminationReasonV1::Canceled,
          "parent cancellation during common spawn commits Canceled before gate release and settles promptly without exec side effects");
   finish_supervisor(*cancel_authority);
+}
+
+void test_exec_confirmation_cancellation_classification()
+{
+  auto authority = make_authority();
+  if (!authority)
+    return;
+  auto const root = test_root("exec-confirmation-cancel");
+  auto const pid_marker = root / "leader";
+  std::filesystem::create_directories(root / "workspace");
+  std::atomic_bool canceled = false;
+  // The exec'd child publishes its real PID while spawn still owns exec confirmation;
+  // only after that marker is ready does cancellation become observable.
+  ava::process::testing::SupervisorTestAccess::set_after_gate_release_hook(*authority->supervisor, [&] {
+    static_cast<void>(wait_for_path(pid_marker));
+    canceled = true;
+  });
+  auto process = ava::plugin::PluginProcess::start(fake_manifest(root / "plugin", "live-destructor", pid_marker),
+                                                   options_for(root / "workspace", authority->run, 2s, 500ms), [&] { return canceled.load(); });
+  ava::process::testing::SupervisorTestAccess::clear_after_gate_release_hook(*authority->supervisor);
+  auto const marker_ready = wait_for_path(pid_marker);
+  auto const identity = marker_ready ? first_line(pid_marker) : std::string{};
+  auto const format = process ? std::string{} : process.error().format();
+  auto snapshot = authority->supervisor->snapshot();
+  auto records = plugin_records(*authority->supervisor);
+  bool const group_reaped = wait_for_process_absent(identity);
+  expect(!process && process.error().message().find("plugin startup canceled") != std::string::npos && format.find("canceled: true") != std::string::npos &&
+             format.find("reason: canceled") != std::string::npos,
+         "cancellation after exec but before confirmation is classified as plugin startup cancellation: " + format);
+  expect(records.size() == 1 && completely_settled(records.front()) && records.front().reason == ava::process::TerminationReasonV1::Canceled &&
+             snapshot.live_records == 0,
+         "exec-confirmation cancellation settles Canceled exactly once with complete cleanup");
+  expect(marker_ready && group_reaped, "exec-confirmation cancellation leaves no live plugin process or group member");
+  finish_supervisor(*authority);
+
+  auto exec_authority = make_authority();
+  if (!exec_authority)
+    return;
+  auto const exec_root = test_root("exec-failure-late-cancel");
+  std::filesystem::create_directories(exec_root / "workspace");
+  auto const invalid_image = exec_root / "invalid-image";
+  write_text(invalid_image, "not an executable image\n");
+  std::filesystem::permissions(invalid_image, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
+  std::atomic_bool late_cancel = false;
+  auto manifest = fake_manifest(exec_root / "plugin", "normal");
+  manifest.entrypoint.command = invalid_image.string();
+  auto failed =
+      ava::plugin::PluginProcess::start(std::move(manifest), options_for(exec_root / "workspace", exec_authority->run), [&] { return late_cancel.load(); });
+  late_cancel = true;
+  auto exec_format = failed ? std::string{} : failed.error().format();
+  auto exec_records = plugin_records(*exec_authority->supervisor);
+  expect(!failed && exec_format.find("exec syscall returned") != std::string::npos && failed.error().message().find("canceled") == std::string::npos &&
+             exec_format.find("canceled: true") == std::string::npos && exec_format.find("reason: canceled") == std::string::npos && exec_records.size() == 1 &&
+             completely_settled(exec_records.front()) && exec_records.front().reason == ava::process::TerminationReasonV1::ExecFailed,
+         "a non-canceled first cause keeps its own classification when cancellation only flips after settlement: " + exec_format);
+  finish_supervisor(*exec_authority);
 }
 
 void test_eof_term_refusal_and_natural_descendant_cleanup()
@@ -836,6 +896,7 @@ void run_plugin_runner_process_tests()
   test_failure_reason_mapping_and_output_accounting();
   test_outbound_and_queued_protocol_memory_bounds();
   test_single_startup_budget_and_spawn_cancellation();
+  test_exec_confirmation_cancellation_classification();
   test_eof_term_refusal_and_natural_descendant_cleanup();
   test_live_destructor_and_late_cleanup_error_settlement();
   test_owner_prefix_isolation_for_concurrent_operations();

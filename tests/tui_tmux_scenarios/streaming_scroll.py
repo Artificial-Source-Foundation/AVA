@@ -174,7 +174,7 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "exercise deterministic streaming scroll")
     wait_for(tmux_exe, session, r"exercise deterministic streaming scroll", "streaming-scroll prompt draft")
     send_keys(tmux_exe, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "streaming-scroll provider request")
+    _wait_for_normal_turn_request_count(provider, 1, "streaming-scroll provider request")
 
     draft = "STREAM-DRAFT-RESPONSIVE"
     same_direction_suffix = "-WHEEL-SAME"

@@ -16,6 +16,8 @@ import sys
 import termios
 import time
 
+from fake_provider import launch_fake_provider
+
 
 SKIP = 77
 MAX_CAPTURE_BYTES = 2 * 1024 * 1024
@@ -176,16 +178,6 @@ def terminate_process(process: subprocess.Popen[bytes], master_fd: int | None = 
         pass
 
 
-def wait_for_file(path: pathlib.Path, process: subprocess.Popen[bytes], label: str, timeout: float = 8.0) -> None:
-    deadline = time.monotonic() + timeout
-    while not path.exists():
-        if process.poll() is not None:
-            raise RuntimeError(f"{label} exited before creating {path}")
-        if time.monotonic() >= deadline:
-            raise RuntimeError(f"timed out waiting for {label} to create {path}")
-        select.select([], [], [], min(0.05, max(0.0, deadline - time.monotonic())))
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--ava", required=True)
@@ -230,26 +222,17 @@ def main() -> int:
         encoding="utf-8",
     )
 
-    port_file = root / "provider.port"
-    request_log = root / "provider-requests.log"
-    provider = subprocess.Popen(
-        [
-            str(fake_provider_exe),
-            str(port_file),
-            str(request_log),
-            "0",
-            "markdown-links",
-            "",
-        ],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        start_new_session=True,
-        env=allowlisted_environment(),
+    provider = launch_fake_provider(
+        fake_provider_exe,
+        root,
+        prefix="provider",
+        delay_ms=0,
+        scenario="markdown-links",
+        environment=allowlisted_environment(),
     )
+    port = provider.port
     master_fd = -1
     try:
-        wait_for_file(port_file, provider, "fake provider")
-        port = port_file.read_text(encoding="utf-8").strip()
 
         env = allowlisted_environment()
         env.update(
@@ -384,7 +367,7 @@ def main() -> int:
     finally:
         if master_fd >= 0:
             os.close(master_fd)
-        terminate_process(provider)
+        provider.stop()
 
 
 if __name__ == "__main__":

@@ -10,6 +10,19 @@ if(NOT DEFINED AVA_CLI_TEST_ROOT)
   message(FATAL_ERROR "AVA_CLI_TEST_ROOT is required")
 endif()
 
+# The fake provider is launched through the shared Python owner/broker so every
+# harness has identical process-gate wiring and process-group cleanup. Direct
+# (non-CTest) invocations fall back to the script directory and PATH python3.
+if(NOT DEFINED AVA_FAKE_PROVIDER_PY OR AVA_FAKE_PROVIDER_PY STREQUAL "")
+  get_filename_component(AVA_FAKE_PROVIDER_PY "${CMAKE_CURRENT_LIST_DIR}/fake_provider.py" ABSOLUTE)
+endif()
+if(NOT DEFINED AVA_FAKE_PROVIDER_SH OR AVA_FAKE_PROVIDER_SH STREQUAL "")
+  get_filename_component(AVA_FAKE_PROVIDER_SH "${CMAKE_CURRENT_LIST_DIR}/fake_provider_shell.sh" ABSOLUTE)
+endif()
+if(NOT DEFINED AVA_PYTHON OR AVA_PYTHON STREQUAL "")
+  find_program(AVA_PYTHON NAMES python3 REQUIRED)
+endif()
+
 # Timeouts for this driver. Honors AVA_DEBUG_NO_TIMEOUT at runtime (this
 # script runs via `cmake -P`, so $ENV{...} is live) so a hung driver is not
 # killed -- and does not kill its `ava` subprocess via the driver's EXIT
@@ -34,8 +47,8 @@ set(HOME_DIR "${TEST_ROOT}/home")
 set(CONFIG_DIR "${TEST_ROOT}/config")
 set(STATE_DIR "${TEST_ROOT}/state")
 set(DATA_DIR "${TEST_ROOT}/data")
-set(PORT_FILE "${TEST_ROOT}/provider-port")
-set(REQUEST_LOG "${TEST_ROOT}/provider-request.log")
+set(PORT_FILE "${TEST_ROOT}/provider.port")
+set(REQUEST_LOG "${TEST_ROOT}/provider-requests.log")
 set(PROVIDER_OUT "${TEST_ROOT}/provider.out")
 set(PROVIDER_ERR "${TEST_ROOT}/provider.err")
 set(AVA_OUT "${TEST_ROOT}/ava.out")
@@ -54,45 +67,29 @@ file(WRITE "${CONFIG_DIR}/ava/models.json"
 file(WRITE "${DRIVER_FILE}"
 "#!/bin/sh\n"
 "set -u\n"
-"provider_pid=\n"
+"AVA_PYTHON=\"${AVA_PYTHON}\"\n"
+"AVA_FAKE_PROVIDER_PY=\"${AVA_FAKE_PROVIDER_PY}\"\n"
+"AVA_FAKE_PROVIDER_SH=\"${AVA_FAKE_PROVIDER_SH}\"\n"
+"AVA_FAKE_PROVIDER_EXE=\"${AVA_FAKE_PROVIDER_EXE}\"\n"
+". \"${AVA_FAKE_PROVIDER_SH}\"\n"
 "cleanup() {\n"
-"  if [ -n \"$provider_pid\" ]; then kill \"$provider_pid\" 2>/dev/null || true; fi\n"
+"  fake_provider_stop >/dev/null 2>&1 || true\n"
 "}\n"
 "trap cleanup EXIT INT TERM\n"
 "rm -f \"${PORT_FILE}\" \"${REQUEST_LOG}\" \"${PROVIDER_OUT}\" \"${PROVIDER_ERR}\" \"${AVA_OUT}\" \"${AVA_ERR}\"\n"
-"\"${AVA_FAKE_PROVIDER_EXE}\" \"${PORT_FILE}\" \"${REQUEST_LOG}\" 0 > \"${PROVIDER_OUT}\" 2> \"${PROVIDER_ERR}\" &\n"
-"provider_pid=$!\n"
-"i=0\n"
-"while [ ! -s \"${PORT_FILE}\" ]; do\n"
-"  if ! kill -0 \"$provider_pid\" 2>/dev/null; then\n"
-"    echo \"fake provider exited before writing a port\" >&2\n"
-"    cat \"${PROVIDER_ERR}\" >&2 2>/dev/null || true\n"
-"    exit 1\n"
-"  fi\n"
-"  i=$((i + 1))\n"
-"  if [ \"$i\" -gt ${AVA_POLL_200} ]; then echo \"timed out waiting for fake provider port\" >&2; exit 1; fi\n"
-"  sleep 0.05\n"
-"done\n"
-"port=$(cat \"${PORT_FILE}\")\n"
+"fake_provider_start \"${TEST_ROOT}\" provider 0 text unused || exit 1\n"
+"port=$FAKE_PROVIDER_PORT\n"
 "HOME=\"${HOME_DIR}\" XDG_CONFIG_HOME=\"${CONFIG_DIR}\" XDG_STATE_HOME=\"${STATE_DIR}\" XDG_DATA_HOME=\"${DATA_DIR}\" NO_COLOR=1 MOONSHOT_API_KEY=test-key MOONSHOT_BASE_URL=\"http://127.0.0.1:$port\" \"${AVA_EXE}\" --mode json \"hello mode json\" > \"${AVA_OUT}\" 2> \"${AVA_ERR}\"\n"
 "ava_status=$?\n"
 "if [ \"$ava_status\" -ne 0 ]; then\n"
-"  kill \"$provider_pid\" 2>/dev/null || true\n"
-"  wait \"$provider_pid\" 2>/dev/null || true\n"
-"  provider_pid=\n"
 "  echo \"ava --mode json exited with $ava_status\" >&2\n"
 "  cat \"${AVA_OUT}\" >&2 2>/dev/null || true\n"
 "  cat \"${AVA_ERR}\" >&2 2>/dev/null || true\n"
 "  exit \"$ava_status\"\n"
 "fi\n"
-"wait \"$provider_pid\"\n"
-"provider_status=$?\n"
-"provider_pid=\n"
-"if [ \"$provider_status\" -ne 0 ]; then\n"
-"  echo \"fake provider exited with $provider_status\" >&2\n"
-"  cat \"${PROVIDER_ERR}\" >&2 2>/dev/null || true\n"
-"  exit \"$provider_status\"\n"
-"fi\n")
+"fake_provider_wait 0 ${AVA_TIMEOUT_30} || exit 1\n"
+"fake_provider_stop || exit 1\n"
+)
 
 execute_process(
   COMMAND /bin/sh "${DRIVER_FILE}"

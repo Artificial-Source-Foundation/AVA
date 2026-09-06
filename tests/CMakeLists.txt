@@ -1,6 +1,7 @@
 option(AVA_REQUIRE_ACP_SDK_INTEROP "Require installed official ACP SDK interoperability dependencies" OFF)
 option(AVA_ENABLE_ACPX_INTEROP "Enable the opt-in acpx interoperability smoke" OFF)
 find_program(AVA_NODE_EXECUTABLE NAMES node DOC "Node.js executable used only by ACP interoperability tests")
+find_package(Python3 COMPONENTS Interpreter QUIET)
 
 if(AVA_REQUIRE_ACP_SDK_INTEROP AND NOT AVA_NODE_EXECUTABLE)
   message(FATAL_ERROR "AVA_REQUIRE_ACP_SDK_INTEROP requires Node.js and installed tests/acp-sdk packages")
@@ -421,6 +422,10 @@ if(AVA_NODE_EXECUTABLE)
     ${CMAKE_CURRENT_SOURCE_DIR}/acp-sdk/interop.mjs
     --ava $<TARGET_FILE:ava>
     --fake-provider $<TARGET_FILE:ava_fake_provider_server>)
+  if(Python3_Interpreter_FOUND)
+    # The cancellation scenario drives the shared Python fake-provider broker.
+    list(APPEND AVA_ACP_SDK_INTEROP_COMMAND --python ${Python3_EXECUTABLE})
+  endif()
   if(AVA_REQUIRE_ACP_SDK_INTEROP)
     list(APPEND AVA_ACP_SDK_INTEROP_COMMAND --required)
   endif()
@@ -472,6 +477,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-prompt-overrides
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_prompt_overrides.cmake)
 
@@ -480,6 +488,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-positional-prompt
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_positional_prompt.cmake)
 
@@ -488,6 +499,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-no-session
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_no_session.cmake)
 
@@ -496,6 +510,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-session-startup-options
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_session_startup_options.cmake)
 
@@ -504,6 +521,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-print-file-args
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_print_file_args.cmake)
 
@@ -525,6 +545,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-mode-json-alias
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_mode_json_alias.cmake)
 
@@ -533,6 +556,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-tool-visibility
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_tool_visibility.cmake)
 
@@ -541,6 +567,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-compact-success
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_compact_success.cmake)
 
@@ -549,6 +578,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-active-run-rejection
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_active_run_rejection.cmake)
 
@@ -557,6 +589,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-permission-reply
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_permission_reply.cmake)
 
@@ -565,6 +600,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-permission-grant
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_permission_grant.cmake)
 
@@ -573,6 +611,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-permission-grant-lifecycle
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_permission_grant_lifecycle.cmake)
 
@@ -581,6 +622,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-question-reply
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_question_reply.cmake)
 
@@ -589,6 +633,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-question-reply-multi
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_question_reply_multi.cmake)
 
@@ -597,6 +644,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-provider-error
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_provider_error.cmake)
 
@@ -605,6 +655,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-tool-failure
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_tool_failure.cmake)
 
@@ -613,6 +666,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-performance-smoke
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_performance_smoke.cmake)
 
@@ -621,6 +677,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-e2e-model-smoke
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_e2e_model_smoke.cmake)
 set_tests_properties(ava_cli.headless_e2e_model_smoke PROPERTIES TIMEOUT 60)
@@ -630,6 +689,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-bash-process-cleanup
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_bash_process_cleanup.cmake)
 set_tests_properties(ava_cli.headless_rpc_bash_process_cleanup PROPERTIES TIMEOUT 75)
@@ -661,6 +723,9 @@ add_test(
   COMMAND ${CMAKE_COMMAND}
           -DAVA_EXE=$<TARGET_FILE:ava>
           -DAVA_FAKE_PROVIDER_EXE=$<TARGET_FILE:ava_fake_provider_server>
+          -DAVA_PYTHON=${Python3_EXECUTABLE}
+          -DAVA_FAKE_PROVIDER_PY=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider.py
+          -DAVA_FAKE_PROVIDER_SH=${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_shell.sh
           -DAVA_FAKE_MCP_SERVER_EXE=$<TARGET_FILE:ava_fake_mcp_server>
           -DAVA_CLI_TEST_ROOT=${CMAKE_BINARY_DIR}/cli-headless-rpc-command-registry
           -P ${CMAKE_CURRENT_SOURCE_DIR}/cli_headless_rpc_command_registry.cmake)
@@ -711,6 +776,13 @@ if(Python3_Interpreter_FOUND)
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/test_timing_trace_test.py)
   set_tests_properties(ava_tests.test_timing_trace PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.fake_provider_owner
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/fake_provider_test.py
+            --provider $<TARGET_FILE:ava_fake_provider_server>)
+  set_tests_properties(ava_tests.fake_provider_owner PROPERTIES TIMEOUT 30 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
     NAME ava_benchmark.harness_self_test

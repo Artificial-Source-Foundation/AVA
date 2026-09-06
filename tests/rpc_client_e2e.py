@@ -15,7 +15,7 @@ import threading
 import time
 from typing import Any
 
-from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
+from fake_provider import FakeProvider, launch_fake_provider
 from timeout_support import test_timeout
 
 
@@ -42,8 +42,7 @@ def main() -> int:
     shutil.rmtree(root, ignore_errors=True)
     root.mkdir(parents=True)
     clients: list[AvaRpcClient] = []
-    providers: list[subprocess.Popen[bytes]] = []
-    provider_gates: dict[subprocess.Popen[bytes], ProcessGateSet] = {}
+    providers: list[FakeProvider] = []
     worker_threads: list[threading.Thread] = []
 
     def base_environment(case: pathlib.Path) -> dict[str, str]:
@@ -62,38 +61,20 @@ def main() -> int:
         (case / "config/ava").chmod(0o700)
         return env
 
-    def start_provider(case: pathlib.Path, scenario: str, target: str = "", delay_ms: int = 0) -> tuple[subprocess.Popen[bytes], dict[str, str]]:
+    def start_provider(case: pathlib.Path, scenario: str, target: str = "", delay_ms: int = 0) -> tuple[FakeProvider, dict[str, str]]:
         env = base_environment(case)
-        port_file = case / "provider.port"
-        request_log = case / "provider.requests"
-        command = [str(args.fake_provider), str(port_file), str(request_log), str(delay_ms)]
-        if scenario != "text" or target:
-            command += [scenario, target]
-        gate_pair = create_process_gate_pair()
-        provider_environment = os.environ.copy()
-        provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
-        try:
-            provider = subprocess.Popen(
-                command,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                env=provider_environment,
-                pass_fds=(gate_pair.child_fd,),
-            )
-        except BaseException:
-            gate_pair.close()
-            raise
-        gate_pair.close_child_endpoint()
+        provider = launch_fake_provider(
+            args.fake_provider,
+            case,
+            prefix="provider",
+            delay_ms=delay_ms,
+            scenario=scenario,
+            target=target,
+            startup_timeout=test_timeout(5),
+        )
         providers.append(provider)
-        provider_gates[provider] = gate_pair.gates
-        try:
-            wait_for(lambda: port_file.exists() and port_file.stat().st_size > 0, 5, "fake provider did not publish port")
-            port = port_file.read_text(encoding="ascii").strip()
-        except BaseException:
-            cleanup_process(provider)
-            raise
         env["MOONSHOT_API_KEY"] = "rpc-client-test-key"
-        env["MOONSHOT_BASE_URL"] = f"http://127.0.0.1:{port}"
+        env["MOONSHOT_BASE_URL"] = f"http://127.0.0.1:{provider.port}"
         model = {
             "default_provider": "moonshot",
             "default_model": "rpc-client-fake",
@@ -128,16 +109,8 @@ def main() -> int:
         clients.append(client)
         return client
 
-    def finish_provider(provider: subprocess.Popen[bytes], timeout: float = 8) -> None:
-        try:
-            status = provider.wait(timeout=test_timeout(timeout))
-        except subprocess.TimeoutExpired:
-            cleanup_process(provider)
-            raise AssertionError("fake provider did not finish")
-        if status != 0:
-            stderr = provider.stderr.read().decode("utf-8", errors="replace") if provider.stderr else ""
-            raise AssertionError(f"fake provider failed ({status}): {stderr}")
-        provider_gates.pop(provider).close()
+    def finish_provider(provider: FakeProvider, timeout: float = 8) -> None:
+        provider.finish(timeout=test_timeout(timeout))
 
     try:
         # Local state, malformed recovery, session operation, protocol discovery, clean EOF.
@@ -220,7 +193,7 @@ def main() -> int:
         prompt_thread = threading.Thread(target=run_prompt)
         worker_threads.append(prompt_thread)
         prompt_thread.start()
-        provider_gates[provider].wait(0, test_timeout(5))
+        provider.wait_for_request(0, "delayed cancel provider request", timeout=test_timeout(5))
         canceled = client.request("cancel", request_id="cancel", timeout=test_timeout(5))
         prompt_thread.join(timeout=test_timeout(8))
         assert not prompt_thread.is_alive() and canceled["active_run"] is True
@@ -232,7 +205,7 @@ def main() -> int:
         cancel_events = client.events_by_request["cancel-prompt"]
         assert any(event["name"] == "canceled" for event in cancel_events)
         assert all(event["name"] != "done" for event in cancel_events)
-        provider_gates[provider].open(0)
+        provider.release_request(0)
         assert client.close(timeout=test_timeout(5)) == 0
         finish_provider(provider)
 
@@ -254,7 +227,7 @@ def main() -> int:
         compact_thread = threading.Thread(target=run_compact)
         worker_threads.append(compact_thread)
         compact_thread.start()
-        provider_gates[provider].wait(1, test_timeout(5))
+        provider.wait_for_request(1, "delayed compact provider request", timeout=test_timeout(5))
         cancel_started = time.monotonic()
         canceled = client.request("cancel", request_id="compact-cancel-request", timeout=test_timeout(2))
         compact_thread.join(timeout=1.2)
@@ -263,9 +236,9 @@ def main() -> int:
         assert not compact_thread.is_alive() and cancel_elapsed < 1.2
         assert len(compact_outcome) == 1 and isinstance(compact_outcome[0], RpcError)
         assert compact_outcome[0].error["code"] == "canceled"
-        provider_gates[provider].open(1)
+        provider.release_request(1)
         assert client.close(timeout=test_timeout(5)) == 0
-        cleanup_process(provider)
+        provider.stop()
         return 0
     finally:
         for client in reversed(clients):
@@ -276,10 +249,7 @@ def main() -> int:
                 except subprocess.TimeoutExpired:
                     cleanup_process(client.process)
         for provider in reversed(providers):
-            cleanup_process(provider)
-            gates = provider_gates.pop(provider, None)
-            if gates is not None:
-                gates.close()
+            provider.stop()
         for thread in worker_threads:
             thread.join(timeout=3)
 

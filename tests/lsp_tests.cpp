@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "tests/support/process_group_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/agent/tool_dispatcher.h"
 #include "ava/tools/file_tools.h"
@@ -30,6 +31,8 @@
 #include <unistd.h>
 
 namespace {
+
+using ava::test::wait_for_process_group_exit;
 
 #ifndef AVA_FAKE_LSP_SERVER_PATH
 #define AVA_FAKE_LSP_SERVER_PATH ""
@@ -177,68 +180,6 @@ std::optional<ProcessMarker> wait_for_process_marker_for_test(std::filesystem::p
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   return read_process_marker_for_test(path);
-}
-
-bool process_group_exists(pid_t pgid)
-{
-  errno = 0;
-  if (::kill(-pgid, 0) == 0)
-    return true;
-  return errno != ESRCH;
-}
-
-// kill(-pgid, 0) also reports orphaned zombies that only an external reaper can
-// collect. Teardown guarantees that no descendant can execute, so inspect that
-// property directly when procfs is available.
-std::optional<bool> process_group_has_non_zombie_member(pid_t pgid)
-{
-  std::error_code error;
-  std::filesystem::directory_iterator entry("/proc", error);
-  if (error)
-    return std::nullopt;
-
-  for (std::filesystem::directory_iterator end; entry != end; entry.increment(error))
-  {
-    if (error)
-      return std::nullopt;
-    auto const name = entry->path().filename().string();
-    if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos)
-      continue;
-
-    std::ifstream stat_file(entry->path() / "stat", std::ios::binary);
-    std::string stat;
-    std::getline(stat_file, stat);
-    auto const command_end = stat.rfind(") ");
-    if (!stat_file || command_end == std::string::npos)
-      continue;
-
-    std::istringstream fields(stat.substr(command_end + 2));
-    char state = '\0';
-    long long parent_pid = 0;
-    long long process_group = 0;
-    fields >> state >> parent_pid >> process_group;
-    if (fields && process_group == pgid && state != 'Z' && state != 'X')
-      return true;
-  }
-  return error ? std::nullopt : std::optional<bool>{false};
-}
-
-bool process_group_has_live_member(pid_t pgid)
-{
-  if (auto const has_non_zombie = process_group_has_non_zombie_member(pgid))
-    return *has_non_zombie;
-  return process_group_exists(pgid);
-}
-
-bool wait_for_process_group_exit(pid_t pgid)
-{
-  for (int index = 0; index < 100; ++index)
-  {
-    if (!process_group_has_live_member(pgid))
-      return true;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  return !process_group_has_live_member(pgid);
 }
 
 class TestOwnedProcessGroupCleanup final
@@ -742,7 +683,8 @@ void test_lsp_manager_closed_standard_fds()
   do
   {
     waited = waitpid(test_child, &status, 0);
-  } while (waited < 0 && errno == EINTR);
+  }
+  while (waited < 0 && errno == EINTR);
   expect(waited == test_child && WIFEXITED(status) && WEXITSTATUS(status) == 0,
          "LSP initializes and requests diagnostics when an isolated helper starts with fds 0, 1, and 2 closed");
 }
@@ -1668,7 +1610,8 @@ void test_lsp_builtin_launch_identity_roots_and_deduplication()
 
   std::istringstream launches(read_text_file_for_test(launch_marker));
   std::vector<std::string> roots;
-  for (std::string line; std::getline(launches, line);) roots.push_back(line);
+  for (std::string line; std::getline(launches, line);)
+    roots.push_back(line);
   expect(a_first && a_second && b_first && concurrent_one && concurrent_two && roots.size() == 3 &&
              std::ranges::count(roots, (workspace / "a").string()) == 1 && std::ranges::count(roots, (workspace / "b").string()) == 1 &&
              std::ranges::count(roots, (workspace / "c").string()) == 1,

@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
+#include "tests/support/process_group_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_plugins.h"
@@ -51,6 +52,8 @@
 #endif
 
 namespace {
+
+using ava::test::wait_for_process_group_exit;
 
 using PluginDescriptorExecutor = decltype(ava::plugin::PluginBrokeredTool::executor);
 static_assert(
@@ -124,25 +127,6 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   if (!file || value <= 0)
     return std::nullopt;
   return static_cast<pid_t>(value);
-}
-
-bool process_group_exists(pid_t pgid)
-{
-  errno = 0;
-  if (::kill(-pgid, 0) == 0)
-    return true;
-  return errno != ESRCH;
-}
-
-bool wait_for_process_group_exit(pid_t pgid)
-{
-  for (int index = 0; index < 100; ++index)
-  {
-    if (!process_group_exists(pgid))
-      return true;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  return !process_group_exists(pgid);
 }
 
 std::string shell_single_quote(std::string_view value)

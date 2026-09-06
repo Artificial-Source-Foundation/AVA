@@ -1,5 +1,6 @@
 option(AVA_REQUIRE_ACP_SDK_INTEROP "Require installed official ACP SDK interoperability dependencies" OFF)
 option(AVA_ENABLE_ACPX_INTEROP "Enable the opt-in acpx interoperability smoke" OFF)
+include(${CMAKE_CURRENT_SOURCE_DIR}/test_timeout_policy.cmake)
 find_program(AVA_NODE_EXECUTABLE NAMES node DOC "Node.js executable used only by ACP interoperability tests")
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -922,6 +923,32 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.module_dependency_rules_self_test PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.test_timeout_policy
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/test_timeout_policy_test.py
+            --helper ${CMAKE_CURRENT_SOURCE_DIR}/test_timeout_policy.cmake
+            --cmake ${CMAKE_COMMAND})
+  set_tests_properties(ava_tests.test_timeout_policy PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
+    NAME ava_tests.junit_summary
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/summarize_test_results_test.py
+            --script ${CMAKE_SOURCE_DIR}/scripts/summarize-test-results.py)
+  set_tests_properties(ava_tests.junit_summary PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  find_program(AVA_NINJA_EXECUTABLE NAMES ninja DOC "Ninja executable used by the C++ module-flag guard fixture test")
+  if(AVA_NINJA_EXECUTABLE)
+    add_test(
+      NAME ava_build.no_cxx_module_flags_guard
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/guard_no_cxx_modules_test.py
+              --script ${CMAKE_SOURCE_DIR}/scripts/guard-no-cxx-modules.sh
+              --ninja ${AVA_NINJA_EXECUTABLE})
+    set_tests_properties(ava_build.no_cxx_module_flags_guard PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endif()
+
+  add_test(
     NAME ava_tests.curl_transport_static_contract
     COMMAND ${CMAKE_COMMAND}
             -DAVA_CURL_TRANSPORT_SOURCE=${CMAKE_SOURCE_DIR}/src/ava/http/curl_transport.cpp
@@ -1315,33 +1342,9 @@ if(AVA_AVA_LAUNCHING_TESTS)
   set_property(TEST ${AVA_AVA_LAUNCHING_TESTS} APPEND PROPERTY ENVIRONMENT "LIBCWD_NO_STARTUP_MSGS=1;AVA_NO_DEBUG_OUTPUT=1")
 endif()
 
-# --- Debug knob: disable CTest per-test timeouts -------------------------
-# Setting AVA_DEBUG_NO_TIMEOUT in the environment at *configure* time
-# (e.g. `AVA_DEBUG_NO_TIMEOUT=1 aap-configure`) raises every CTest per-test
-# TIMEOUT in this directory so ctest no longer SIGTERMs a hung or
-# step-debugged test while a debugger is attached. Optional
-# AVA_DEBUG_NO_TIMEOUT_SECONDS overrides the one-hour default, which is the
-# literal floor requested by the knob ("at least one hour, or effectively
-# never"); set it to a very large value to approximate "never time out".
-#
-# This is configure-time only because CTest bakes TIMEOUT into
-# CTestTestfile.cmake at generate time; toggle the variable and re-run
-# aap-configure (aap-test alone cannot change it).
-#
-# Only the ctest kill-timer is touched. In-test deadlines (condition_variable
-# waits, execute_process TIMEOUTs, futures) are intentionally left
-# as-authored: many of them encode negative assertions ("this must not happen")
-# and inflating them blindly would turn green tests into multi-hour hangs.
-if(DEFINED ENV{AVA_DEBUG_NO_TIMEOUT})
-  set(AVA_DEBUG_NO_TIMEOUT_SECONDS "$ENV{AVA_DEBUG_NO_TIMEOUT_SECONDS}")
-  if(AVA_DEBUG_NO_TIMEOUT_SECONDS STREQUAL "" OR NOT AVA_DEBUG_NO_TIMEOUT_SECONDS MATCHES "^[1-9][0-9]*$")
-    set(AVA_DEBUG_NO_TIMEOUT_SECONDS 3600)
-  endif()
-  if(AVA_REGISTERED_TESTS)
-    list(LENGTH AVA_REGISTERED_TESTS AVA_DEBUG_NO_TIMEOUT_COUNT)
-    set_property(TEST ${AVA_REGISTERED_TESTS} PROPERTY TIMEOUT ${AVA_DEBUG_NO_TIMEOUT_SECONDS})
-    message(STATUS
-      "${Red}AVA_DEBUG_NO_TIMEOUT: raised CTest TIMEOUT to ${AVA_DEBUG_NO_TIMEOUT_SECONDS}s for "
-      "${AVA_DEBUG_NO_TIMEOUT_COUNT} test(s); rerun configure without it to restore normal timeouts.${ColourReset}")
-  endif()
-endif()
+# Apply the finite default per-test TIMEOUT (120s) to every registered test
+# without an explicit limit, then the configure-time AVA_DEBUG_NO_TIMEOUT
+# debug override. Both layers live in test_timeout_policy.cmake so the
+# focused ava_tests.test_timeout_policy self-test exercises the real policy;
+# see that file for the debug-knob semantics and rationale.
+ava_apply_test_timeout_policy(${AVA_REGISTERED_TESTS})

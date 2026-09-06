@@ -20,6 +20,8 @@ The build and test runners default to the `build` tree, detect the available log
 
 Do not use `cmake --build build --target test --parallel N` to request parallel test execution: it only parallelizes the build tool around one CTest command and does not propagate `N` to CTest. Use `scripts/run-tests.sh --build-dir build --jobs N` for the locked runner, or `ctest --test-dir build --parallel N` when directly diagnosing CTest behavior without the script's build-tree safety lock.
 
+Every registered CTest carries a finite outer timeout: tests that set no explicit `TIMEOUT` receive a 120-second default at configure time, and explicit narrower or longer limits are preserved unchanged. These are only CTest kill-timers; in-test deadlines stay as-authored. For debugger sessions, setting `AVA_DEBUG_NO_TIMEOUT` in the *configure* environment (for example `AVA_DEBUG_NO_TIMEOUT=1` on the configure command) raises every per-test CTest timeout to one hour, or to `AVA_DEBUG_NO_TIMEOUT_SECONDS` when that is a positive integer; rerun configure without it to restore normal timeouts.
+
 The test suite is built as `build/tests/ava_tests` and registered as focused `ava_tests.<suite>` CTests from sources under `tests/`. The LSP and MCP tests also build and use fake servers from `tests/support/`.
 
 The 2026-08-23 tested source-build matrix is Ubuntu 24.04.4 x64 with GCC 13.3: BetaTest/Unix Makefiles and Release/Ninja both passed full CTest. Clang 18 was environment-blocked, not qualified; MSVC, Windows, macOS, and AArch64 have no accepted native candidate evidence. Multi-config is not release-qualified. The audited x64 artifact requires BMI2, `GLIBC_2.38`, `GLIBCXX_3.4.32`, `CXXABI_1.3.13`, `libncursesw.so.6`, `libtinfo.so.6`, and `curl`, but exact retained bytes still need minimum-host smoke. This matrix does not qualify a dirty working tree or any future artifact; see the [release ledger](https://github.com/Artificial-Source/AVA/blob/develop/docs/product/release-readiness.md).
@@ -154,6 +156,17 @@ Do not call a build-type-omitting direct sanitizer configure equivalent. A cache
 The explicit sanitizer cap avoids multiplying ASan/UBSan memory demand on smaller CI and developer hosts; raise it locally after measuring available memory.
 
 The sanitizer preset enables AddressSanitizer and UndefinedBehaviorSanitizer for supported non-MSVC builds.
+
+## CI Compiler Cache
+
+CI build jobs reuse compiler output through the distro `ccache` package, which is a build-only dependency and never enters the packaged artifact. Only the ccache object store under the runner's temporary directory is cached; no build tree, binary, or secret is ever cached. The correctness boundaries are:
+
+- Cache key prefixes encode OS, architecture, compiler, and configuration (Debug, Release, ASan/UBSan, TSan, SDK, acpx), so incompatible objects never share a cache. The immutable primary key includes the commit SHA; restore keys stay within the same prefix. Pull requests restore read-only; only successful trusted push and `workflow_dispatch` runs save.
+- `compiler_check = content` and a 1 GiB size cap are pinned, and all other settings keep ccache's strict defaults: no `sloppiness`, directory hashing enabled, no `base_dir` path rewriting, and no hard links. The policy file is rewritten fresh on every run outside the cached object tree so a restored cache cannot relax it.
+- Cacheable CI configure commands pass `-DCMAKE_CXX_SCAN_FOR_MODULES=OFF`: ccache 4.9.1 does not support caching compilations that carry C++ module dependency-scanning flags (`-fmodules-ts`, `-fmodule-mapper=`, `-fdeps-format=`), which GCC 16/Ninja generates otherwise, so those flags are an unsupported cache configuration for CI. [`scripts/guard-no-cxx-modules.sh`](https://github.com/Artificial-Source/AVA/blob/develop/scripts/guard-no-cxx-modules.sh) inspects the effective `ninja -t commands` output before every cached build and fails the job if any module flag survives — including one reintroduced by an explicit `CXX_MODULES` `FILE_SET`, which scans even with the variable `OFF`. Local and default configures are unchanged, and this codebase builds from traditional headers.
+- Strict release packaging stays uncached: the package steps invoke `scripts/package-linux.sh` with `CCACHE_DISABLE=1`, so the fresh private configure keeps its default module scanning and qualification inputs. No packaging speedup is claimed.
+
+Each cached build zeroes statistics with `ccache -z` immediately before compiling and prints `ccache -s` afterwards, even on failure, so cold/warm behavior is visible in the job log. Do not record before/after speed percentages without that measured evidence.
 
 ## Formatting And Static Checks
 
@@ -333,6 +346,42 @@ AVA_TUI_KITTY_IMAGE_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.kitty_image_smoke
 AVA_TUI_ITERM2_IMAGE_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.iterm2_image_smoke$'
 AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.terminal_lifecycle_smoke$'
 AVA_TUI_OSC8_SMOKE=1 scripts/run-tests.sh -R '^ava_tui\.osc8_smoke$'
+```
+
+## JUnit Test Result Summaries And Required Terminal Gates
+
+CI test steps write CTest JUnit XML with `--output-junit` and summarize it through [`scripts/summarize-test-results.py`](https://github.com/Artificial-Source/AVA/blob/develop/scripts/summarize-test-results.py). The summary prints only test counts (passed/failed/skipped), the elapsed suite time when the XML supplies it, and a bounded list of the slowest test names and times. It never prints stdout, stderr, or failure body content, and it escapes and length-limits test names. CTest exit statuses are unchanged; the summary step runs with `if: always()` and itself fails clearly on a missing, malformed, or empty JUnit file, so an absent summary can never masquerade as a successful test run.
+
+For required terminal gates the summary becomes strict: `--require NAME` demands that a test executed exactly once and passed, `--require-count N` pins the exact total, and `--require-no-skips` forbids skips. Under any of these options, failed tests also fail the gate, so a harness skip (CTest skip return code 77) or failure cannot look green the way a bare `--no-tests=error` run could.
+
+The routine CI Release leg runs four required real-terminal tests with tmux installed — `ava_tui.terminal_lifecycle_smoke` plus the tmux scenarios `main_editor_input`, `main_permission_flow`, and `active_run` — capped at two jobs. The equivalent local gate is:
+
+```sh
+AVA_TUI_TMUX_SMOKE=1 AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 \
+  scripts/run-tests.sh --build-dir build --jobs 2 --no-tests=error \
+  --output-junit /tmp/ava-junit-terminal.xml \
+  -R '^(ava_tui[.]terminal_lifecycle_smoke|ava_tui[.]tmux_smoke_(main_editor_input|main_permission_flow|active_run))$'
+python3 scripts/summarize-test-results.py /tmp/ava-junit-terminal.xml \
+  --require-count 4 --require-no-skips \
+  --require ava_tui.terminal_lifecycle_smoke \
+  --require ava_tui.tmux_smoke_main_editor_input \
+  --require ava_tui.tmux_smoke_main_permission_flow \
+  --require ava_tui.tmux_smoke_active_run
+```
+
+The full release-candidate terminal gate runs for `workflow_dispatch` runs with `full_terminal` enabled and for `v*` version tag pushes. It executes all 23 tmux scenarios (`--jobs 4`) plus the four direct-PTY tests `terminal_lifecycle_smoke`, `kitty_image_smoke`, `iterm2_image_smoke`, and `osc8_smoke` (`--jobs 2`) — 27 tests total — with `AVA_TUI_TMUX_SMOKE`, `AVA_TUI_TERMINAL_LIFECYCLE_SMOKE`, `AVA_TUI_KITTY_IMAGE_SMOKE`, `AVA_TUI_ITERM2_IMAGE_SMOKE`, and `AVA_TUI_OSC8_SMOKE` set, and the strict summary requires all 27 to have executed and passed with no skips. Routine runs execute either the small selection or the full wave, never both. The full wave is also the local release-candidate closure command:
+
+```sh
+AVA_TUI_TMUX_SMOKE=1 scripts/run-tests.sh --build-dir build --jobs 4 --no-tests=error \
+  --output-junit /tmp/ava-junit-terminal-tmux.xml -R '^ava_tui[.]tmux_smoke_'
+AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 AVA_TUI_KITTY_IMAGE_SMOKE=1 \
+AVA_TUI_ITERM2_IMAGE_SMOKE=1 AVA_TUI_OSC8_SMOKE=1 \
+  scripts/run-tests.sh --build-dir build --jobs 2 --no-tests=error \
+  --output-junit /tmp/ava-junit-terminal-pty.xml \
+  -R '^ava_tui[.](terminal_lifecycle_smoke|kitty_image_smoke|iterm2_image_smoke|osc8_smoke)$'
+python3 scripts/summarize-test-results.py \
+  /tmp/ava-junit-terminal-tmux.xml /tmp/ava-junit-terminal-pty.xml \
+  --require-count 27 --require-no-skips
 ```
 
 The tmux family dispatches the 23 independent scenarios listed in the [MVP capability release evidence](#mvp-capability-release-evidence) table, including `nested_settings_preview`, `startup_overview`, `branch_summary`, `plugin_ui`, and `mermaid`. Each gets a guarded leaf under `build/tui-tmux-smoke/<scenario>/`, its own HOME/XDG/workspace, private config-free tmux socket, and separate evidence directory at `build/tui-tmux-smoke/<scenario>/evidence/`. Drivers enforce a 50-second internal deadline, clean private tmux/provider process groups on SIGINT or SIGTERM, and receive a 10-second graceful-cleanup window before CTest's 60-second outer timeout. The fake-provider request logs remain under each scenario root, including active/restore and the two question-tool runs. Where scenarios assert delivered conversation turns, local request-log accounting excludes only requests whose system prompt exactly matches the stable title-generation prompt; the complete raw log remains available for content checks and diagnostics report both normal-turn and total-request counts.

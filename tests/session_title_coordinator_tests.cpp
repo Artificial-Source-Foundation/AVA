@@ -10,6 +10,7 @@
 #include "ava/app/session_title_coordinator.h"
 #include "ava/config/session_title_config.h"
 #include "ava/session/assistant_output.h"
+#include "ava/session/compaction.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
@@ -303,7 +304,7 @@ void test_metadata_manual_precedence_and_summary_projection()
     with_generated.push_back(*generated_entry);
     auto with_manual = snapshot;
     with_manual.push_back(*manual_entry);
-    expect(ava::app::same_session_snapshot(snapshot, with_generated) && !ava::app::same_session_snapshot(snapshot, with_manual),
+    expect(ava::session::compaction_snapshot_matches(snapshot, with_generated) && !ava::session::compaction_snapshot_matches(snapshot, with_manual),
            "in-flight compaction tolerates only context-neutral automatic title metadata");
   }
 }

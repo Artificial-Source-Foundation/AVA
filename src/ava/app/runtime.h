@@ -68,8 +68,6 @@ struct PreparedCompactionContext
 
 [[nodiscard]] ava::core::Error offline_provider_error(std::string_view action);
 
-[[nodiscard]] bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual);
-
 [[nodiscard]] ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries);
 
 [[nodiscard]] ava::core::Result<ava::session::CompactionConfig> resolve_compaction_config(runtime::session_ts const& unlocked_session,

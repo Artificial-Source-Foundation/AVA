@@ -362,11 +362,6 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
 
 }  // namespace
 
-bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual)
-{
-  return ava::session::compaction_snapshot_matches(expected, actual);
-}
-
 ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session changed during context compaction after retry");

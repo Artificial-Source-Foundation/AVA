@@ -144,7 +144,7 @@ ava::core::VoidResult ToolRegistry::register_tool(RegisteredTool tool)
     return std::unexpected(std::move(error));
   }
 
-  tools_.push_back(tool);
+  tools_.push_back(std::move(tool));
   return {};
 }
 

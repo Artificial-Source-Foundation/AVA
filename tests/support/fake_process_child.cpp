@@ -226,17 +226,33 @@ int main(int argc, char** argv)
   }
   if (mode == "leader-exits-first")
   {
+    int readiness_pipe[2];
+    if (::pipe(readiness_pipe) != 0)
+      return 4;
+
     pid_t const descendant = ::fork();
     if (descendant < 0)
+    {
+      static_cast<void>(::close(readiness_pipe[0]));
+      static_cast<void>(::close(readiness_pipe[1]));
       return 4;
+    }
     if (descendant == 0)
     {
+      static_cast<void>(::close(readiness_pipe[0]));
       ignore_term();
-      if (!write_text(status_fd, "DESCENDANT_READY\n"))
+      bool const ready = write_text(status_fd, "DESCENDANT_READY\n");
+      bool const signaled = ready && write_text(readiness_pipe[1], "1");
+      static_cast<void>(::close(readiness_pipe[1]));
+      if (!signaled)
         _exit(5);
       wait_forever();
     }
-    if (!write_text(status_fd, "LEADER_EXITING\n"))
+
+    static_cast<void>(::close(readiness_pipe[1]));
+    bool const descendant_ready = read_control_byte(readiness_pipe[0]);
+    static_cast<void>(::close(readiness_pipe[0]));
+    if (!descendant_ready || !write_text(status_fd, "LEADER_EXITING\n"))
       return 3;
     return 0;
   }

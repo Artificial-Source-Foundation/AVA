@@ -318,10 +318,11 @@ void test_concurrent_reservation_stop_race()
 
   std::atomic<std::size_t> next{0};
   std::atomic<std::size_t> accepted{0};
+  std::vector<std::vector<ava::process::Reservation>> reservations(8);
   std::vector<std::thread> workers;
   for (int worker = 0; worker < 8; ++worker)
   {
-    workers.emplace_back([&] {
+    workers.emplace_back([&, worker] {
       while (true)
       {
         auto const index = next.fetch_add(1);
@@ -330,6 +331,7 @@ void test_concurrent_reservation_stop_race()
         auto reservation = supervisor.reserve(owners[index], ava::process::ProcessRoleV1::ClipboardHelper);
         if (reservation)
         {
+          reservations[worker].push_back(std::move(*reservation));
           ++accepted;
           std::this_thread::yield();
         }
@@ -340,8 +342,14 @@ void test_concurrent_reservation_stop_race()
   for (auto& worker : workers)
     worker.join();
   auto snapshot = supervisor.snapshot();
-  expect(accepted.load() <= ava::process::kMaxLiveProcessRecordsV1 && snapshot.live_records == 0 && !snapshot.accepting && !snapshot.monitor_started,
-         "concurrent reservation versus stop_accepting never exceeds capacity and abandoned winners release cleanly");
+  expect(
+      accepted.load() <= ava::process::kMaxLiveProcessRecordsV1 && snapshot.live_records == accepted.load() && !snapshot.accepting && !snapshot.monitor_started,
+      "concurrent reservation versus stop_accepting never exceeds live capacity");
+  for (auto& worker_reservations : reservations)
+    worker_reservations.clear();
+  snapshot = supervisor.snapshot();
+  expect(snapshot.live_records == 0 && !snapshot.accepting && !snapshot.monitor_started,
+         "concurrent reservation versus stop_accepting abandoned winners release cleanly");
 }
 
 void test_reservation_shutdown_race()

@@ -56,6 +56,12 @@ AVA_TUI_TMUX_SMOKE=1 AVA_TEST_TIMING_DIR="$PWD/build/test-timings" \
 
 Use a distinct or empty timing directory when comparing runs, or group records by their `run_id`. The trace measures harness-visible phases; it does not enable libcwd output and has no chronological merge contract with files under `AVA_DEBUG_OUTPUT_DIR`. Instrument AVA itself only when these harness records expose unexplained time between an input or provider event and the corresponding observable state.
 
+## Deterministic Fake-Provider Tests
+
+The shared test-only owner in [`tests/fake_provider.py`](../../tests/fake_provider.py) launches the fake provider with its process-gate descriptor and owns startup and cleanup. Python harnesses import that owner; Node and shell harnesses use its broker, with [`fake_provider_shell.sh`](../../tests/fake_provider_shell.sh) providing the POSIX shell client. The focused lifecycle test is `ava_tests.fake_provider_owner`.
+
+For cancellation or active-run assertions, use a gate-delayed scenario, wait for the exact zero-based request with `wait_for_request`, observe the competing operation, and only then release the response or stop the fixture. A numeric `delay_ms` controls streaming cadence, not ordinary response latency. Read request logs after a request gate when checking payloads; retain bounded negative-observation windows and waits for actual RPC or terminal state. A provider gate does not prove that a TUI redraw has completed.
+
 ## Release Package and Provenance Checks
 
 Focused release provenance/package tests are offline and deterministic:

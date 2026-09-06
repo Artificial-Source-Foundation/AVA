@@ -76,7 +76,14 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, session, "start the live delegated workspace fixture")
     send_keys(tmux_exe, session, "Enter")
     provider.wait_for_request(1, "background task and parent continuation requests", timeout=12.0)
-    active_parent = wait_for(tmux_exe, session, r"Esc stop.*type a follow-up|type a follow-up", "active parent run before /jobs")
+    # Provider arrival precedes the TUI redraw: require the task card and active
+    # composer in the same frame, not the earlier composer-only running frame.
+    active_parent = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)launch: AVA TUI Fake · thinking default.*type a follow-up",
+        "active parent task card before /jobs",
+    )
     if "launch: AVA TUI Fake · thinking default" not in active_parent:
         raise RuntimeError(f"live task card omitted launch configuration\nscreen:\n{active_parent}")
     _assert_workspace_safe(active_parent, "active parent task card", parent_card=True)

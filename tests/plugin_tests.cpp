@@ -46,6 +46,10 @@
 #define AVA_SAMPLE_TODO_PLUGIN_DIR ""
 #endif
 
+#ifndef AVA_FAKE_PLUGIN_CHILD_PATH
+#define AVA_FAKE_PLUGIN_CHILD_PATH ""
+#endif
+
 namespace {
 
 using PluginDescriptorExecutor = decltype(ava::plugin::PluginBrokeredTool::executor);
@@ -324,8 +328,10 @@ std::string nested_arrays_json(std::size_t depth)
 {
   std::string text;
   text.reserve(depth * 2);
-  for (std::size_t index = 0; index < depth; ++index) text += '[';
-  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  for (std::size_t index = 0; index < depth; ++index)
+    text += '[';
+  for (std::size_t index = 0; index < depth; ++index)
+    text += ']';
   return text;
 }
 
@@ -443,9 +449,11 @@ void test_plugin_manifest_parsing()
   std::string deeply_nested_manifest =
       "{\"schema_version\":1,\"id\":\"com.example.deep\",\"name\":\"Deep\",\"version\":\"0.1\","
       "\"api_version\":\"ava.plugin.v1\",\"entrypoint\":{\"command\":\"node\"},\"extra\":";
-  for (int index = 0; index < 70; ++index) deeply_nested_manifest += '[';
+  for (int index = 0; index < 70; ++index)
+    deeply_nested_manifest += '[';
   deeply_nested_manifest += "0";
-  for (int index = 0; index < 70; ++index) deeply_nested_manifest += ']';
+  for (int index = 0; index < 70; ++index)
+    deeply_nested_manifest += ']';
   deeply_nested_manifest += '}';
   auto deep = ava::plugin::parse_plugin_manifest(deeply_nested_manifest, {});
   expect(!deep && deep.error().message().find("maximum JSON depth") != std::string::npos,
@@ -894,19 +902,14 @@ void test_plugin_runner_rejects_oversized_buffered_extra_records()
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.buffered";
   std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(plugin_dir);
 
-  write_text(plugin_dir / "plugin.sh",
-             "read line\n"
-             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
-             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
-             "printf '%s\\n' '" +
-                 std::string(300, 'x') +
-                 "'\n"
-                 "while read line; do :; done\n");
-
+  auto manifest = runner_manifest(plugin_dir, "com.example.buffered", "unused");
+  manifest.entrypoint.command = AVA_FAKE_PLUGIN_CHILD_PATH;
+  manifest.entrypoint.args = {"oversized-buffered-initialize"};
   auto options = runner_options(workspace, std::chrono::milliseconds(500));
   options.max_record_bytes = 256;
-  auto process = ava::plugin::PluginProcess::start(runner_manifest(plugin_dir, "com.example.buffered", "plugin.sh"), options);
+  auto process = ava::plugin::PluginProcess::start(std::move(manifest), options);
   expect(!process && process.error().format().find("output_limit: true") != std::string::npos,
          process ? "plugin runner rejects every oversized complete record already buffered after initialize"
                  : "plugin runner rejects every oversized complete record already buffered after initialize: " + process.error().format());
@@ -937,7 +940,8 @@ void test_plugin_runner_contained_failures()
   expect(!unsupported && unsupported.error().message().find("unsupported") != std::string::npos, "plugin runner rejects unsupported handshake API versions");
 
   std::string deep_contributions = "{}";
-  for (int i = 0; i < 160; ++i) deep_contributions = "{\"x\":" + deep_contributions + "}";
+  for (int i = 0; i < 160; ++i)
+    deep_contributions = "{\"x\":" + deep_contributions + "}";
   auto const deep_dir = root / "plugins" / "com.example.deep";
   write_text(deep_dir / "plugin.sh",
              "read line\n"

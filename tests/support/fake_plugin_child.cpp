@@ -1,6 +1,8 @@
 #include "sys.h"
 
+#include <cerrno>
 #include <chrono>
+#include <climits>
 #include <csignal>
 #include <cstdlib>
 #include <filesystem>
@@ -74,6 +76,26 @@ int main(int argc, char** argv)
     std::ofstream output(marker, std::ios::binary | std::ios::trunc);
     for (char** current = environ; current != nullptr && *current != nullptr; ++current)
       output << *current << '\n';
+  }
+  if (scenario == "oversized-buffered-initialize")
+  {
+    std::string records = "{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}\n";
+    records += std::string(300, 'x') + '\n';
+    if (records.size() > static_cast<std::size_t>(PIPE_BUF))
+      return 3;
+
+    ssize_t written;
+    do
+      written = ::write(STDOUT_FILENO, records.data(), records.size());
+    while (written < 0 && errno == EINTR);
+    if (written != static_cast<ssize_t>(records.size()))
+      return 3;
+
+    std::string request;
+    while (std::getline(std::cin, request))
+    {
+    }
+    return 0;
   }
 
   initialized();

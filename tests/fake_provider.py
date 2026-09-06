@@ -19,9 +19,11 @@ Non-Python harnesses spawn the same file as a line-based broker instead::
 
 The broker prints ``ready port=<n>`` (or ``error <message>``) on stdout, then
 answers one command per stdin line: ``wait <index> <timeout>``,
-``release <index>``, and ``stop``. Replies are ``ok`` or ``error <message>``.
-The broker owns provider cleanup on EOF, signal, and command error, so no
-orphan provider or helper process survives its caller.
+``release <index>``, ``finish <timeout>``, and ``stop``. Replies are ``ok`` or
+``error <message>``. ``finish`` requires natural exit 0 after all scripted
+requests; ``stop`` is cancellation/error cleanup. The broker owns provider
+cleanup on EOF, signal, and finish failure, so no orphan provider or helper
+process survives its caller.
 """
 
 from __future__ import annotations
@@ -112,11 +114,14 @@ class FakeProvider:
         except subprocess.TimeoutExpired:
             self.stop()
             raise RuntimeError("fake provider did not finish after its scripted requests") from None
+        error = None
         if status != 0:
-            raise RuntimeError(f"fake provider exited with {status}\nstderr:\n{self.stderr_text()}")
+            error = RuntimeError(f"fake provider exited with {status}\nstderr:\n{self.stderr_text()}")
         self._close_streams()
         self.gates.close()
         self._stopped = True
+        if error is not None:
+            raise error
 
     def _close_streams(self) -> None:
         if not self._stdout.closed:
@@ -295,6 +300,19 @@ def run_broker(argv: list[str]) -> int:
             elif command == "release":
                 provider.release_request(_parse_broker_index(parts, command))
                 reply("ok")
+            elif command == "finish":
+                if len(parts) < 2:
+                    raise ValueError("broker command 'finish' requires a timeout in seconds")
+                timeout = float(parts[1])
+                if not 0.0 <= timeout <= _BROKER_COMMAND_TIMEOUT_CEILING:
+                    raise ValueError(f"broker finish timeout must be in [0, {_BROKER_COMMAND_TIMEOUT_CEILING}], got {timeout}")
+                try:
+                    provider.finish(timeout)
+                except Exception as error:
+                    reply(f"error {_one_line(error)}")
+                    return 1
+                reply("ok")
+                return 0
             elif command == "stop":
                 natural_exit = provider.process.poll()
                 provider.stop()

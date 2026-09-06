@@ -343,7 +343,7 @@ async function runScenario({ acp, args, base, name, providerScenario, providerTa
       // the broker to reap the provider without asserting its exit status.
       broker.child.stdin.end();
     } else {
-      await channel.command("stop", `${name} provider broker stop`);
+      await channel.command("finish 7", `${name} provider broker finish`);
     }
     const brokerExit = await withDeadline(broker.exited, `${name} provider broker exit`, PROCESS_TIMEOUT_MS);
     assert.equal(brokerExit.error, null, `${name} provider broker spawn failed: ${brokerExit.error}`);

@@ -8,8 +8,9 @@
 #
 # Protocol: fake_provider_start DIR PREFIX DELAY_MS SCENARIO TARGET publishes
 # FAKE_PROVIDER_PORT; fake_provider_wait INDEX TIMEOUT and
-# fake_provider_release INDEX drive request gates; fake_provider_stop reaps the
-# broker and provider, returning nonzero if the provider failed on its own.
+# fake_provider_release INDEX drive request gates. fake_provider_finish TIMEOUT
+# requires natural provider exit 0 and reaps the broker; fake_provider_stop is
+# cancellation/error cleanup.
 
 FAKE_PROVIDER_PORT=""
 _FAKE_PROVIDER_BROKER_PID=""
@@ -33,12 +34,34 @@ fake_provider_stop() {
     _fake_provider_pid=$_FAKE_PROVIDER_BROKER_PID
     _FAKE_PROVIDER_BROKER_PID=""
     if kill -0 "$_fake_provider_pid" 2>/dev/null; then
-      # Ask the broker for a checked shutdown; EOF on the closed descriptors is
-      # the fallback that still guarantees provider cleanup.
+      # Ask the broker for cancellation/error cleanup; EOF on the closed
+      # descriptors is the fallback that still guarantees provider cleanup.
       printf 'stop\n' >&8 2>/dev/null || true
     fi
     wait "$_fake_provider_pid" 2>/dev/null || _fake_provider_status=$?
     exec 8>&- 9<&-
+  fi
+  _FAKE_PROVIDER_DIRECTORY=""
+  _FAKE_PROVIDER_PREFIX=""
+  FAKE_PROVIDER_PORT=""
+  return "$_fake_provider_status"
+}
+
+fake_provider_finish() {
+  # $1 timeout seconds for natural completion after scripted requests.
+  _fake_provider_status=0
+  _fake_provider_command "finish $1" || _fake_provider_status=$?
+  if [ -n "$_FAKE_PROVIDER_BROKER_PID" ]; then
+    _fake_provider_pid=$_FAKE_PROVIDER_BROKER_PID
+    _FAKE_PROVIDER_BROKER_PID=""
+    wait "$_fake_provider_pid" 2>/dev/null || {
+      _fake_provider_wait_status=$?
+      [ "$_fake_provider_status" -ne 0 ] || _fake_provider_status=$_fake_provider_wait_status
+    }
+    exec 8>&- 9<&-
+  fi
+  if [ "$_fake_provider_status" -ne 0 ]; then
+    _fake_provider_dump_logs
   fi
   _FAKE_PROVIDER_DIRECTORY=""
   _FAKE_PROVIDER_PREFIX=""

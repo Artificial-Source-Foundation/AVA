@@ -141,7 +141,7 @@ file(WRITE "${DRIVER_FILE}"
 "  cat \"${RPC_ERR}\" >&2 2>/dev/null || true\n"
 "  exit \"$ava_status\"\n"
 "fi\n"
-"fake_provider_stop || exit 1\n")
+"fake_provider_finish ${AVA_TIMEOUT_30} || exit 1\n")
 
 execute_process(
   COMMAND /bin/sh "${DRIVER_FILE}"

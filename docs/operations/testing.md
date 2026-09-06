@@ -58,7 +58,7 @@ Use a distinct or empty timing directory when comparing runs, or group records b
 
 ## Deterministic Fake-Provider Tests
 
-The shared test-only owner in [`tests/fake_provider.py`](../../tests/fake_provider.py) launches the fake provider with its process-gate descriptor and owns startup and cleanup. Python harnesses import that owner; Node and shell harnesses use its broker, with [`fake_provider_shell.sh`](../../tests/fake_provider_shell.sh) providing the POSIX shell client. The focused lifecycle test is `ava_tests.fake_provider_owner`.
+The shared test-only owner in [`tests/fake_provider.py`](../../tests/fake_provider.py) launches the fake provider with its process-gate descriptor and owns startup and cleanup. Python harnesses import that owner; Node and shell harnesses use its broker, with [`fake_provider_shell.sh`](../../tests/fake_provider_shell.sh) providing the POSIX shell client. The focused lifecycle test is `ava_tests.fake_provider_owner`. Successful scripted scenarios must use bounded `finish`/`fake_provider_finish` so natural exit 0 is verified; `stop` and broker EOF are reserved for cancellation and error cleanup where a response write may legitimately fail.
 
 For cancellation or active-run assertions, use a gate-delayed scenario, wait for the exact zero-based request with `wait_for_request`, observe the competing operation, and only then release the response or stop the fixture. A numeric `delay_ms` controls streaming cadence, not ordinary response latency. Read request logs after a request gate when checking payloads; retain bounded negative-observation windows and waits for actual RPC or terminal state. A provider gate does not prove that a TUI redraw has completed.
 

@@ -13,6 +13,7 @@ readonly MAX_REPORT_BYTES=65536
 readonly MAX_RAW_FILE_BLOCKS=16384 # 16 MiB with Bash's Linux 1024-byte blocks.
 readonly MAX_ZED_FILE_BLOCKS=65536 # 64 MiB; Zed preallocates state files above the raw-log cap.
 readonly DEFAULT_OPERATOR_TIMEOUT=600
+readonly CANCELLATION_REQUEST_TIMEOUT=60
 readonly ZED_PHASE_TAG_NAME="AVA_ZED_DOGFOOD_PHASE_ROOT"
 readonly MAX_PROC_SCAN_PIDS=131072
 readonly MAX_PROC_ENVIRON_BYTES=4194304
@@ -665,14 +666,12 @@ EOF
   else
     cat >&2 <<EOF
 
-CANCELLATION PHASE — observations are required; launch alone is never a pass.
+CANCELLATION PHASE — prompt submission comes first; do not cancel yet.
 1. In Zed, select “AVA M6 dogfood (cancellation)” as the external agent.
 2. Start a new thread rooted at: $workspace
 3. Send exactly: cancel this delayed deterministic M6 turn
-4. While the delayed provider request is in flight, cancel from Zed.
-5. Observe cancelled termination (not end_turn), then close the agent cleanly.
-6. If a screenshot is necessary, save the raw image only under: $screenshots
-Do not infer cancellation from killing Zed or from process cleanup.
+4. Wait for this launcher to confirm that provider request 0 arrived before cancelling.
+The launcher will print the cancellation and observation steps only after that gate.
 EOF
   fi
 }
@@ -741,12 +740,25 @@ run_zed_phase() {
     "$ava --acp (spawned by the exact Zed binary)"
   phase_checklist "$phase" "$phase_root/workspace" "$phase_root/raw/screenshots"
   start_zed "$phase_root" "$zed" "$display_kind" "$display" "$display_auth" "$phase_root/workspace"
+  if [[ $phase == cancellation ]]; then
+    if ! provider_gate_command "wait 0 $CANCELLATION_REQUEST_TIMEOUT"; then
+      die "cancellation prompt did not reach provider request gate 0; no cancellation outcome was requested"
+    fi
+    cat >&2 <<EOF
+
+PROVIDER REQUEST 0 CONFIRMED — now perform cancellation.
+5. Cancel the in-flight turn from Zed.
+6. Observe cancelled termination (not end_turn), then close the agent cleanly.
+7. If a screenshot is necessary, save the raw image only under: $phase_root/raw/screenshots
+Do not infer cancellation from killing Zed or from process cleanup.
+EOF
+  fi
   outcome=$(record_operator_outcome "$root" "$phase" "$operator_timeout")
 
   if [[ $phase == cancellation ]]; then
     # Release the delayed provider request only after the operator observed the
-    # cancelled termination. Cancellation closed the provider HTTP connection,
-    # so a failed response write after release is expected and tolerated.
+    # cancelled termination. Cancellation may close the provider HTTP
+    # connection, so a failed response write after release is tolerated.
     provider_gate_command "release 0" || true
   fi
   close_provider_broker

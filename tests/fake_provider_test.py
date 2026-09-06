@@ -94,6 +94,67 @@ def owner_startup_failure_cleans_up(provider_exe: Path, root: Path) -> None:
     require(_provider_pids(root / "missing" / "provider.port") == [], "failed launch left a provider process behind")
 
 
+def _write_provider_fixture(path: Path, body: str) -> None:
+    path.write_text(f"#!{sys.executable}\n{body}", encoding="utf-8")
+    path.chmod(0o700)
+
+
+def _require_finished_owner_closed(provider, expected_status: int) -> None:
+    require(provider.process.poll() == expected_status, f"provider was not reaped with status {expected_status}")
+    require(provider._stdout.closed, "provider stdout descriptor remained open")
+    require(provider._stderr.closed, "provider stderr descriptor remained open")
+    require(provider.gates.fileno == -1, "provider process-gate descriptor remained open")
+
+
+def owner_finish_failures_clean_up(root: Path) -> tuple[Path, Path]:
+    natural_nonzero = root / "natural-nonzero.py"
+    _write_provider_fixture(
+        natural_nonzero,
+        """from pathlib import Path
+import sys
+import time
+Path(sys.argv[1]).write_text("12345\\n", encoding="utf-8")
+time.sleep(0.2)
+raise SystemExit(23)
+""",
+    )
+    provider = launch_fake_provider(natural_nonzero, root / "owner-natural-nonzero")
+    try:
+        provider.finish(test_timeout(5))
+    except RuntimeError as error:
+        require("exited with 23" in str(error), f"natural nonzero exit was not reported: {error}")
+    else:
+        raise RuntimeError("natural nonzero provider exit unexpectedly passed finish")
+    _require_finished_owner_closed(provider, 23)
+    provider.stop()
+
+    term_42 = root / "hang-until-term.py"
+    _write_provider_fixture(
+        term_42,
+        """from pathlib import Path
+import signal
+import sys
+
+def stop(_signum, _frame):
+    raise SystemExit(42)
+
+signal.signal(signal.SIGTERM, stop)
+Path(sys.argv[1]).write_text("12345\\n", encoding="utf-8")
+signal.pause()
+""",
+    )
+    provider = launch_fake_provider(term_42, root / "owner-finish-timeout")
+    try:
+        provider.finish(0.1)
+    except RuntimeError as error:
+        require("did not finish" in str(error), f"finish timeout was not reported: {error}")
+    else:
+        raise RuntimeError("hanging provider unexpectedly passed finish")
+    _require_finished_owner_closed(provider, 42)
+    provider.stop()
+    return natural_nonzero, term_42
+
+
 class BrokerSession:
     def __init__(self, provider_py: Path, provider_exe: Path, directory: Path, *, scenario: str = "text") -> None:
         self.process = subprocess.Popen(
@@ -145,7 +206,7 @@ class BrokerSession:
         self.process.stdin.close()
 
 
-def broker_protocol_and_checked_stop(provider_py: Path, provider_exe: Path, root: Path) -> None:
+def broker_protocol_and_checked_finish(provider_py: Path, provider_exe: Path, root: Path) -> None:
     directory = root / "broker-protocol"
     broker = BrokerSession(provider_py, provider_exe, directory, scenario="text-delayed")
     connection = _post_request(broker.port)
@@ -163,10 +224,25 @@ def broker_protocol_and_checked_stop(provider_py: Path, provider_exe: Path, root
     finally:
         connection.close()
     require(broker.command("wait 9 0.2").startswith("error"), "broker wait for an unserved request did not fail")
+    require(broker.command("finish 3601").startswith("error"), "broker accepted an unbounded finish timeout")
     require(broker.command("nonsense").startswith("error"), "broker accepted an unknown command")
-    require(broker.command("stop") == "ok", "broker checked stop failed")
-    require(broker.process.wait(timeout=test_timeout(5)) == 0, "broker did not exit 0 after a checked stop")
+    require(broker.command("finish 5") == "ok", "broker checked finish failed")
+    require(broker.process.wait(timeout=test_timeout(5)) == 0, "broker did not exit 0 after a checked finish")
     require(_provider_pids(directory / "provider.port") == [], "broker left a provider process behind")
+
+
+def broker_finish_failures_exit_nonzero(provider_py: Path, natural_nonzero: Path, term_42: Path, root: Path) -> None:
+    for name, executable, timeout, diagnostic in (
+        ("natural-nonzero", natural_nonzero, 5, "exited with 23"),
+        ("finish-timeout", term_42, 0.1, "did not finish"),
+    ):
+        directory = root / f"broker-{name}"
+        broker = BrokerSession(provider_py, executable, directory)
+        reply = broker.command(f"finish {timeout}")
+        require(reply.startswith("error"), f"broker finish failure was not rejected: {reply!r}")
+        require(diagnostic in reply, f"broker finish failure omitted its diagnostic: {reply!r}")
+        require(broker.process.wait(timeout=test_timeout(5)) != 0, "broker exited 0 after provider finish failure")
+        require(_provider_pids(directory / "provider.port") == [], "failed broker finish left a provider process behind")
 
 
 def broker_eof_owns_provider_cleanup(provider_py: Path, provider_exe: Path, root: Path) -> None:
@@ -215,7 +291,9 @@ def main() -> int:
         root = Path(temporary)
         owner_gate_blocks_until_release(provider_exe, root)
         owner_startup_failure_cleans_up(provider_exe, root)
-        broker_protocol_and_checked_stop(provider_py, provider_exe, root)
+        natural_nonzero, term_42 = owner_finish_failures_clean_up(root)
+        broker_protocol_and_checked_finish(provider_py, provider_exe, root)
+        broker_finish_failures_exit_nonzero(provider_py, natural_nonzero, term_42, root)
         broker_eof_owns_provider_cleanup(provider_py, provider_exe, root)
         broker_startup_failure_is_reported(provider_py, provider_exe, root)
     print("shared fake-provider owner and broker lifecycle checks passed")

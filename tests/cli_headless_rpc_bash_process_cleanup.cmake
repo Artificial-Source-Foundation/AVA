@@ -193,7 +193,7 @@ file(WRITE "${DRIVER_FILE}"
 "  exit \"$ava_status\"\n"
 "fi\n"
 "fake_provider_wait 1 ${AVA_TIMEOUT_60} || exit 1\n"
-"fake_provider_stop || exit 1\n"
+"fake_provider_finish ${AVA_TIMEOUT_60} || exit 1\n"
 )
 
 execute_process(

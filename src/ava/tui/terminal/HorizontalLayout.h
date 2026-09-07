@@ -15,10 +15,11 @@ class GraphemeBlockRow;
 class HorizontalLayout
 {
  private:
-  std::vector<std::unique_ptr<LayoutItem>> layout_items_;
+  using layout_items_type = std::vector<std::unique_ptr<LayoutItem>, core::Application::Vec8Alloc::rebind<std::unique_ptr<LayoutItem>>::other>;
+  layout_items_type layout_items_;
 
  public:
-  HorizontalLayout() = default;
+  HorizontalLayout() : layout_items_(core::Application::instance().vec8alloc()) { }
 
   void append(std::unique_ptr<LayoutItem>&& layout_item) { layout_items_.push_back(std::move(layout_item)); }
 
@@ -30,7 +31,7 @@ class HorizontalLayout
   GraphemeBlockRow create_grapheme_block_row(columns_t columns) const;
 
   // Return the LayoutItem objects in their horizontal display order.
-  std::vector<std::unique_ptr<LayoutItem>> const& layout_items() const { return layout_items_; }
+  layout_items_type const& layout_items() const { return layout_items_; }
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

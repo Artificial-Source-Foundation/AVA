@@ -18,17 +18,22 @@ namespace ava::tui::terminal {
 class Paragraph : public LayoutItem
 {
  private:
-  std::vector<std::unique_ptr<TextSpan>> text_spans_;   // All the TextSpan's that make up this Paragraph, added in order with `append`.
+  using text_spans_type = std::vector<std::unique_ptr<TextSpan>, core::Application::Vec8Alloc::rebind<std::unique_ptr<TextSpan>>::other>;
+
+  text_spans_type text_spans_;                          // All the TextSpan's that make up this Paragraph, added in order with `append`.
   Rendition default_rendition_{ColorPair{}};            // The rendition used for TextSpan's that were created without a rendition of their own.
   Width natural_width_{0};                              // Cached sum of all the natural widths of text_spans_.
 
  private:
   // Construct an empty Paragraph with a default rendition that uses color pair 0 (the terminal default colors).
-  Paragraph(LayoutItem::Properties const& layout_properties) : LayoutItem(layout_properties) { }
+  Paragraph(LayoutItem::Properties const& layout_properties) : LayoutItem(layout_properties), text_spans_(core::Application::instance().vec8alloc()) { }
 
   // Construct an empty Paragraph with default rendition `default_rendition`.
   // Usually `default_rendition` equals the rendition of the (sub)window that this Paragraph will be rendered in.
-  Paragraph(LayoutItem::Properties const& layout_properties, Rendition default_rendition) : LayoutItem(layout_properties), default_rendition_(default_rendition)
+  Paragraph(LayoutItem::Properties const& layout_properties, Rendition default_rendition)
+    : LayoutItem(layout_properties),
+      text_spans_(core::Application::instance().vec8alloc()),
+      default_rendition_(default_rendition)
   {
   }
 

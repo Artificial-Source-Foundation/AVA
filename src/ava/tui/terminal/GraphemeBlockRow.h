@@ -22,16 +22,20 @@ namespace ava::tui::terminal {
 class GraphemeBlockRow
 {
  private:
-  std::vector<GraphemeBlock> blocks_;           // Horizontally stacked GraphemeBlock's spanning width_ terminal columns.
-  uint32_t height_{};                           // The height of the block row; the largest height of any block.
-  columns_t width_{};                           // The width of the block row, in terminal columns.
+  using blocks_type = std::vector<GraphemeBlock, core::Application::Vec8Alloc::rebind<GraphemeBlock>::other>;
+  blocks_type blocks_;          // Horizontally stacked GraphemeBlock's spanning width_ terminal columns.
+  uint32_t height_{};           // The height of the block row; the largest height of any block.
+  columns_t width_{};           // The width of the block row, in terminal columns.
 
  public:
   // Construct an empty GraphemeBlockRow with a pre-allocated capacity for `reserved_blocks` GraphemeBlock's.
-  GraphemeBlockRow(std::size_t reserved_blocks) { blocks_.reserve(reserved_blocks); }
+  GraphemeBlockRow(std::size_t reserved_blocks) : blocks_(core::Application::instance().vec8alloc())
+  {
+    blocks_.reserve(core::Application::Vec8Alloc::optimal_capacity(reserved_blocks));
+  }
 
   // Construct a GraphemeBlockRow from one or more horizontally stacked GraphemeBlock's.
-  GraphemeBlockRow(std::vector<GraphemeBlock>&& blocks) : blocks_(std::move(blocks))
+  GraphemeBlockRow(blocks_type&& blocks) : blocks_(std::move(blocks))
   {
     // Pass at least one GraphemeBlock so this GraphemeBlockRow has a known width.
     ASSERT(!blocks_.empty());
@@ -43,7 +47,10 @@ class GraphemeBlockRow
   }
 
   // Construct a GraphemeBlockRow that exists of a single GraphemeBlock.
-  GraphemeBlockRow(GraphemeBlock&& block) { append(std::move(block)); }
+  GraphemeBlockRow(GraphemeBlock&& block) : blocks_(core::Application::instance().vec8alloc())
+  {
+    append(std::move(block));
+  }
 
   void append(GraphemeBlock&& block)
   {
@@ -54,7 +61,7 @@ class GraphemeBlockRow
 
   // Accessors.
 
-  std::vector<GraphemeBlock> const& blocks() const { return blocks_; }
+  blocks_type const& blocks() const { return blocks_; }
   uint32_t height() const { return height_; }
   columns_t width() const { return width_; }
 

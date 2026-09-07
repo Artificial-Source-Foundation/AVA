@@ -103,7 +103,7 @@ void test_paragraph_wrap_comment_example()
   std::wstring concatenated;
   for (auto row = rows.ibegin(); row != rows.iend() && row != expected.iend(); ++row)
   {
-    std::vector<terminal::GraphemeRun> const& grapheme_runs = rows[row].grapheme_runs();
+    auto const& grapheme_runs = rows[row].grapheme_runs();
 
     expect(rows[row].columns() == expected[row].columns, "row " + utils::to_string(row) + " must occupy " + std::to_string(expected[row].columns) +
                                                              " terminal columns, got " + std::to_string(rows[row].columns()));

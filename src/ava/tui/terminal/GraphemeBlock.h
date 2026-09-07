@@ -14,7 +14,7 @@ struct GraphemeBlockCategory
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 using GraphemeBlockIndex = utils::VectorIndex<GraphemeBlockCategory>;
-using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex>;
+using GraphemeBlock = utils::Vector<GraphemeSpan, GraphemeBlockIndex, core::Application::Vec8Alloc::rebind<GraphemeSpan>::other>;
 
 inline uint32_t height_of(GraphemeBlock const& block)
 {

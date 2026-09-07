@@ -25,7 +25,7 @@ Application const* registered_application = nullptr;
 
 }  // namespace
 
-Application::Application()
+Application::Application() : mpp_(Vec8Alloc::mpp_block_size), vec8alloc_(mpp_)
 {
   AVA_REQUIRE_APPLICATION_LIFECYCLE(registered_application == nullptr);
   registered_application = this;

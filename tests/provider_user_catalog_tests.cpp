@@ -2,13 +2,18 @@
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
 #include "ava/app/connect_openai.h"
+#include "ava/app/reasoning_controls.h"
+#include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_credentials.h"
+#include "ava/app/runtime_reasoning.h"
 #include "ava/config/auth.h"
 #include "ava/config/provider_config.h"
+#include "ava/config/reasoning_profiles.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/catalog.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
+#include "ava/core/json.h"
 
 #include <cstdlib>
 #include <filesystem>
@@ -257,6 +262,117 @@ void test_builtin_openai_behavior_unchanged_under_options_defaults()
   expect(oauth && header_has(*oauth, "ChatGPT-Account-Id"), "built-in OpenAI OAuth still applies account headers");
 }
 
+void test_custom_chat_reasoning_effort()
+{
+  auto const root = create_empty_root("user-catalog-reasoning-effort");
+  auto const paths = test_paths(root);
+  write_file(paths.providers_file, R"({"version":1,"providers":[{
+    "id":"airouter","display_name":"Airouter","protocol":"openai_chat_completions",
+    "base_url":"http://127.0.0.1:11434","auth":"none"}]})");
+  auto const catalog = ava::provider::ProviderCatalog::build(paths);
+  expect(catalog.has_value(), catalog ? "custom reasoning catalog builds" : catalog.error().format());
+  if (!catalog)
+  {
+    return;
+  }
+  auto const provider = (*catalog)->create("airouter");
+  expect(provider.has_value(), "custom reasoning provider creates");
+  if (!provider)
+  {
+    return;
+  }
+
+  auto const models = ava::config::parse_model_registry(R"({"models":[{
+    "provider":"airouter","id":"DeepSeek-V4-Flash","api_family":"openai_chat_completions",
+    "supports_reasoning":true,"reasoning_levels":["high","xhigh"],
+    "reasoning_format":"reasoning_content","compatibility_quirks":["reasoning_effort"]}]})");
+  auto const model = ava::config::find_model(models, "airouter", "DeepSeek-V4-Flash");
+  expect(model.has_value(), "custom reasoning model parses");
+  if (!model)
+  {
+    return;
+  }
+  auto const selector = ava::app::reasoning_selector_view(*model, std::nullopt);
+  expect(selector && selector->items.size() == 3 && selector->items.at(0).label == "Default" && selector->items.at(1).value == "high" &&
+             selector->items.at(2).value == "xhigh",
+         "Airouter DeepSeek exposes Default, High and Extra high without a false Off choice");
+  expect(ava::config::reasoning_parameter_text(*model) == "request.reasoning_effort=<level>", "custom effort metadata describes the actual wire parameter");
+
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  auto opened = ava::app::runtime::Session::open(open_context);
+  expect(opened.has_value(), "reasoning cycle fixture opens a session");
+  if (opened)
+  {
+    ava::app::runtime::session_ts session(std::move(*opened));
+    auto switched = ava::app::runtime::Session::switch_model_and_refresh(session, *model);
+    expect(switched.has_value(), "reasoning cycle fixture selects custom DeepSeek");
+    for (auto const* expected : {"high", "xhigh", "default", "high", "xhigh", "default"})
+    {
+      auto cycled = ava::app::cycle_runtime_reasoning(session);
+      expect(cycled.has_value(), "custom DeepSeek reasoning cycle succeeds");
+      auto const view = ava::app::reasoning_selector_view(session);
+      expect(view && view->items.at(view->selected_item_index).value == expected,
+             "DeepSeek cycles High, Extra high, Default repeatedly and selector agrees with runtime state");
+    }
+  }
+
+  for (auto const* level : {"high", "xhigh"})
+  {
+    auto const selection = ava::app::runtime::resolve_runtime_reasoning_selection(
+        *model, {.level = level, .provider_level = std::nullopt, .budget_tokens = std::nullopt, .display = {}});
+    expect(selection.has_value(), "advertised Airouter effort resolves");
+    if (!selection)
+    {
+      continue;
+    }
+    auto request = sample_request("airouter", "DeepSeek-V4-Flash");
+    request.compatibility_quirks = model->compatibility_quirks;
+    request.reasoning = ava::app::runtime::provider_reasoning_options(*selection);
+    auto const built = (*provider)->build_request(request, "");
+    expect(built && ava::core::json::string_field(built->body, "reasoning_effort") == level && !built->body.contains("\"thinking\""),
+           "custom effort uses the exact selected wire value, including xhigh without DeepSeek-direct remapping");
+    request.reasoning = std::nullopt;
+    auto const automatic = (*provider)->build_request(request, "");
+    expect(automatic && !automatic->body.contains("reasoning_effort") && !automatic->body.contains("\"thinking\""),
+           "Default omits the override rather than disabling thinking");
+  }
+  for (auto const* unsupported : {"none", "low", "medium", "max", "enabled"})
+  {
+    expect(!ava::app::runtime::resolve_runtime_reasoning_selection(
+               *model, {.level = unsupported, .provider_level = std::nullopt, .budget_tokens = std::nullopt, .display = {}}),
+           "Airouter DeepSeek rejects efforts it does not advertise");
+  }
+  auto undeclared = *model;
+  undeclared.supports_reasoning = false;
+  undeclared.reasoning_levels.clear();
+  expect(!ava::app::reasoning_selector_view(undeclared, std::nullopt), "unknown or disabled capabilities remain unavailable");
+
+  // Other custom models can opt into the same wire format with different levels.
+  auto qwen = *model;
+  qwen.model_id = "Qwen3.8";
+  qwen.reasoning_levels = {"none", "low", "medium", "xhigh"};
+  for (auto const& level : qwen.reasoning_levels)
+  {
+    auto const selection = ava::app::runtime::resolve_runtime_reasoning_selection(
+        qwen, {.level = level, .provider_level = std::nullopt, .budget_tokens = std::nullopt, .display = {}});
+    expect(selection.has_value(), "Qwen effort resolves independently from DeepSeek");
+    if (!selection)
+    {
+      continue;
+    }
+    auto request = sample_request("airouter", qwen.model_id);
+    request.compatibility_quirks = qwen.compatibility_quirks;
+    request.reasoning = ava::app::runtime::provider_reasoning_options(*selection);
+    auto const built = (*provider)->build_request(request, "");
+    expect(built && ava::core::json::string_field(built->body, "reasoning_effort") == level, "Qwen none, low, medium and xhigh are preserved on the wire");
+  }
+}
+
 }  // namespace
 
 void run_provider_user_catalog_tests()
@@ -265,4 +381,5 @@ void run_provider_user_catalog_tests()
   test_user_api_key_precedence_and_isolation();
   test_connect_auth_none_does_not_write_auth_file();
   test_builtin_openai_behavior_unchanged_under_options_defaults();
+  test_custom_chat_reasoning_effort();
 }

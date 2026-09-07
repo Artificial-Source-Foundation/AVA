@@ -291,6 +291,12 @@ std::string reasoning_options_json(ProviderRequest const& request, bool preserve
   if (!request.reasoning || reasoning_request_field.empty())
     return {};
   auto const type = request.reasoning->type.empty() ? "enabled" : request.reasoning->type;
+  if (has_request_quirk(request, "reasoning_effort"))
+  {
+    // Custom endpoints declare their own levels and mappings. In particular,
+    // Airouter accepts xhigh itself; the direct DeepSeek adapter maps it to max.
+    return R"(,"reasoning_effort":")" + ava::core::json::escape(type) + "\"";
+  }
   if (effort_string)
   {
     return ",\"" + ava::core::json::escape(reasoning_request_field) + "\":\"" + reasoning_effort_value(type) + "\"";

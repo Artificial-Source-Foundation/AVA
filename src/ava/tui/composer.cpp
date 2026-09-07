@@ -1540,6 +1540,7 @@ bool status_is_alert(std::string_view status)
                                          "path disabled:",
                                          "selection too large to copy",
                                          "clipboard copy failed",
+                                         "reasoning can be changed between turns",
                                          "thinking mode unavailable for current model",
                                          "thinking mode can be changed between turns"};
   return std::ranges::any_of(kErrorPrefixes, [status](std::string_view prefix) { return status.starts_with(prefix); });

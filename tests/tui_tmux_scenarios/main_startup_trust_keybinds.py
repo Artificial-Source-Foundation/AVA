@@ -743,16 +743,16 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     send_keys(tmux_exe, session, "Escape")
     wait_for_absent(tmux_exe, session, r"Command /keybindings", "keybindings reset output closed")
 
-    send_keys(tmux_exe, session, "BTab")
-    shift_tab_reasoning = wait_for(tmux_exe, session, r"reasoning set to low|reasoning low", "shift-tab reasoning cycle")
-    if "reasoning set to low" not in shift_tab_reasoning and "reasoning low" not in shift_tab_reasoning:
-        raise RuntimeError(f"Shift+Tab did not cycle the visible reasoning state\nscreen:\n{shift_tab_reasoning}")
     send_keys(tmux_exe, session, "C-t")
-    thinking_selector = wait_for(tmux_exe, session, r"Select thinking mode", "ctrl-t thinking-mode selector")
+    ctrl_t_reasoning = wait_for(tmux_exe, session, r"reasoning set to low|reasoning low", "ctrl-t reasoning cycle")
+    if "reasoning set to low" not in ctrl_t_reasoning and "reasoning low" not in ctrl_t_reasoning:
+        raise RuntimeError(f"Ctrl+T did not cycle the visible reasoning state\nscreen:\n{ctrl_t_reasoning}")
+    send_keys(tmux_exe, session, "BTab")
+    thinking_selector = wait_for(tmux_exe, session, r"Select thinking mode", "shift-tab thinking-mode selector")
     if "Low" not in thinking_selector or "Esc cancel" not in thinking_selector:
-        raise RuntimeError(f"Ctrl+T did not open the direct thinking-mode selector\nscreen:\n{thinking_selector}")
+        raise RuntimeError(f"Shift+Tab did not open the direct thinking-mode selector\nscreen:\n{thinking_selector}")
     send_keys(tmux_exe, session, "Escape")
-    wait_for_absent(tmux_exe, session, r"Select thinking mode", "ctrl-t thinking-mode selector canceled")
+    wait_for_absent(tmux_exe, session, r"Select thinking mode", "shift-tab thinking-mode selector canceled")
     send_literal(tmux_exe, session, "/thinking")
     wait_for(tmux_exe, session, r"/thinking", "thinking command hide draft")
     send_keys(tmux_exe, session, "Enter")

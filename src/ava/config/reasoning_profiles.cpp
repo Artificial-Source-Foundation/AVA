@@ -2,6 +2,8 @@
 #include "ava/config/provider_profiles.h"
 #include "ava/config/reasoning_profiles.h"
 
+#include <algorithm>
+
 namespace ava::config {
 
 ReasoningProfile const& openai_responses_reasoning_profile()
@@ -35,6 +37,12 @@ std::string reasoning_parameter_text(ModelInfo const& model)
 {
   if (!model.supports_reasoning.value_or(false))
     return {};
+
+  if (model.api_family == openai_compatible_reasoning_content_profile().api_family &&
+      std::ranges::find(model.compatibility_quirks, "reasoning_effort") != model.compatibility_quirks.end())
+  {
+    return "request.reasoning_effort=<level>";
+  }
 
   if (auto provider = reasoning_provider_profile_for_model(model);
       provider && provider->api_family == model.api_family && !provider->reasoning_request_parameters.empty())

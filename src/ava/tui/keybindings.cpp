@@ -1083,8 +1083,8 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::ModeToggle, {Key::Tab}},
                                      {TuiAction::Interrupt, {Key::CtrlC}},
                                      {TuiAction::Exit, {Key::CtrlD}},
-                                     {TuiAction::VariantCycle, {Key::ShiftTab}},
-                                     {TuiAction::ReasoningSelect, {Key::CtrlT}},
+                                     {TuiAction::VariantCycle, {Key::CtrlT}},
+                                     {TuiAction::ReasoningSelect, {Key::ShiftTab}},
                                      {TuiAction::ThinkingToggle, {}},
                                      {TuiAction::ModelSelect, {Key::CtrlL}},
                                      {TuiAction::ModelCycleForward, {Key::CtrlP}},
@@ -1904,7 +1904,7 @@ std::string action_label(TuiAction action)
     case TuiAction::Exit:
       return "Exit";
     case TuiAction::VariantCycle:
-      return "Cycle variant";
+      return "Cycle reasoning level";
     case TuiAction::ReasoningSelect:
       return "Select thinking mode";
     case TuiAction::ThinkingToggle:

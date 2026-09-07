@@ -253,9 +253,9 @@ void run_tui_keybinding_tests()
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TranscriptHalfPageUp, ava::tui::Key::CtrlU) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::TranscriptHalfPageDown, ava::tui::Key::CtrlD) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ExternalEditor, ava::tui::Key::CtrlG) &&
-             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::ShiftTab) &&
-             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT) &&
-             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT) &&
+             !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+             ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::ShiftTab) &&
              !ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelSelect, ava::tui::Key::CtrlL) &&
              ava::tui::key_matches_action(default_bindings, ava::tui::TuiAction::ModelCycleForward, ava::tui::Key::CtrlP) &&
@@ -325,13 +325,12 @@ void run_tui_keybinding_tests()
   auto const help_items = ava::tui::key_binding_help_items(default_bindings);
   expect(
       std::ranges::any_of(help_items,
-                          [](ava::tui::TuiKeyBindingHelpItem const& item) {
-                            return item.action == "variant_cycle" && item.keys.find("Shift+Tab") != std::string::npos &&
-                                   item.keys.find("Ctrl+T") == std::string::npos;
+                          [](ava::tui::TuiKeyBindingHelpItem const& item) -> bool {
+                            return item.action == "variant_cycle" && item.keys.contains("Ctrl+T") && !item.keys.contains("Shift+Tab");
                           }) &&
           std::ranges::any_of(
               help_items,
-              [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "reasoning_select" && item.keys.find("Ctrl+T") != std::string::npos; }) &&
+              [](ava::tui::TuiKeyBindingHelpItem const& item) -> bool { return item.action == "reasoning_select" && item.keys.contains("Shift+Tab"); }) &&
           std::ranges::none_of(
               help_items,
               [](ava::tui::TuiKeyBindingHelpItem const& item) { return item.action == "thinking_toggle" && item.keys.find("Ctrl+T") != std::string::npos; }) &&
@@ -811,7 +810,8 @@ void run_tui_keybinding_tests()
           !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFilterLabeledOnly, ava::tui::Key::CtrlN) &&
           !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::TreeFilterAll, ava::tui::Key::CtrlA) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ModelsClearAll, ava::tui::Key::CtrlX) &&
-          ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::CtrlT) &&
+          ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::VariantCycle, ava::tui::Key::CtrlT) &&
+          ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ReasoningSelect, ava::tui::Key::ShiftTab) &&
           !ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::ThinkingToggle, ava::tui::Key::CtrlT) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessageFollowUp, ava::tui::Key::AltEnter) &&
           ava::tui::key_matches_action(*default_config_keybinds, ava::tui::TuiAction::MessagePrev, ava::tui::Key::AltK) &&

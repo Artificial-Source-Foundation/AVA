@@ -792,6 +792,12 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.startup_overview_close_wait PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.sidebar_drawer_reflow_wait
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_scenarios/sidebar_drawer_reflow_wait_test.py)
+  set_tests_properties(ava_tests.sidebar_drawer_reflow_wait PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_benchmark.harness_self_test
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_test.py

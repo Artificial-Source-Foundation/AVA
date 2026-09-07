@@ -18,8 +18,74 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_screen_change,
+    wait_for_screen_state,
 )
 from .common import _finish_main, _main_session, clear_settings_filter, close_settings, open_settings_section
+
+
+def _assert_drawer_frame(screen: str, width: int, height: int, label: str) -> list[str]:
+    lines = screen.splitlines()
+    if len(lines) != height:
+        raise RuntimeError(f"{label} had {len(lines)} rows, expected {height}\nscreen:\n{screen}")
+    if "Session overview" not in screen:
+        raise RuntimeError(f"{label} did not show the session overview title\nscreen:\n{screen}")
+    if "live session" in screen or screen.count("Activity") > 1:
+        raise RuntimeError(f"{label} duplicated the automatic side rail\nscreen:\n{screen}")
+    if not lines[height - 2].startswith("│  Type a message...") or not lines[height - 1].startswith("│  GPT-5.5 · ctx "):
+        raise RuntimeError(f"{label} did not retain the full-width quiet composer on rows {height - 2}/{height - 1}\nscreen:\n{screen}")
+    if any(len(line) > width for line in lines):
+        raise RuntimeError(f"{label} exceeded the {width}-column capture bound\nscreen:\n{screen}")
+    unexpected_controls = [character for character in screen if ord(character) < 32 and character != "\n"]
+    if unexpected_controls or "\x1b" in screen:
+        raise RuntimeError(f"{label} contained terminal control bytes\nscreen:\n{screen}")
+    return lines
+
+
+def _wait_for_drawer_reflow(tmux_exe: object, session: str, width: int, height: int, label: str) -> str:
+    """Wait for a fully valid drawer frame at the target geometry after a resize.
+
+    capture() trims trailing empty columns, so a width-only resize can leave the
+    trimmed pane text byte-identical even though the reflow already completed
+    (capture_idle_shell documents the same width-only text identity). A
+    text-change wait therefore times out on an already-valid frame, so
+    synchronize on tmux's authoritative dimensions first and then poll for one
+    frame that satisfies every _assert_drawer_frame condition at that geometry.
+    """
+
+    dimensions = tmux(
+        tmux_exe, "display-message", "-p", "-t", session, "#{window_width},#{window_height}"
+    ).stdout.strip()
+    if dimensions != f"{width},{height}":
+        raise RuntimeError(f"{label} dimensions were {dimensions}, expected {width},{height}")
+
+    def valid_drawer_frame(screen: str) -> bool:
+        try:
+            _assert_drawer_frame(screen, width, height, label)
+        except RuntimeError:
+            # Blank or transient mid-reflow frames are polled past within the
+            # bounded wait, never accepted and never failed immediately.
+            return False
+        return True
+
+    return wait_for_screen_state(tmux_exe, session, valid_drawer_frame, f"{label} valid {width}x{height} drawer frame")
+
+
+def _normalize_context_section(screen: str) -> str:
+    """Return the /context freshness section with modal wrap joins repaired.
+
+    The /context modal wraps rows at the captured width, so a short workspace
+    path can split a required field across rows (at 84 columns loaded_bytes=19
+    arrived as a row trailing "loade" plus an indented "d_bytes=19" row, and a
+    shorter baseline split status=current as "sta"/"tus=current"). Qualifying a
+    valid short path must not depend on where the wrap lands, so join the
+    captured rows after the last "Context freshness:" marker, removing only
+    each row's leading/trailing padding and the newlines. Spaces inside a row
+    are kept, so multi-token rows stay intact and split forbidden tokens remain
+    detectable by the negative assertions.
+    """
+
+    section = screen.rsplit("Context freshness:", 1)[-1]
+    return "".join(line.strip() for line in section.splitlines())
 
 
 def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
@@ -162,23 +228,6 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     capture_idle_shell(100, 12, "frontend-f1-short-idle-composer", sidebar_expected=False)
     capture_idle_shell(160, 12, "frontend-f1-short-wide-auto-sidebar-hidden", sidebar_expected=False)
 
-    def assert_drawer_frame(screen: str, width: int, height: int, label: str) -> list[str]:
-        lines = screen.splitlines()
-        if len(lines) != height:
-            raise RuntimeError(f"{label} had {len(lines)} rows, expected {height}\nscreen:\n{screen}")
-        if "Session overview" not in screen:
-            raise RuntimeError(f"{label} did not show the session overview title\nscreen:\n{screen}")
-        if "live session" in screen or screen.count("Activity") > 1:
-            raise RuntimeError(f"{label} duplicated the automatic side rail\nscreen:\n{screen}")
-        if not lines[height - 2].startswith("│  Type a message...") or not lines[height - 1].startswith("│  GPT-5.5 · ctx "):
-            raise RuntimeError(f"{label} did not retain the full-width quiet composer on rows {height - 2}/{height - 1}\nscreen:\n{screen}")
-        if any(len(line) > width for line in lines):
-            raise RuntimeError(f"{label} exceeded the {width}-column capture bound\nscreen:\n{screen}")
-        unexpected_controls = [character for character in screen if ord(character) < 32 and character != "\n"]
-        if unexpected_controls or "\x1b" in screen:
-            raise RuntimeError(f"{label} contained terminal control bytes\nscreen:\n{screen}")
-        return lines
-
     def open_sidebar_drawer(width: int, height: int, label: str) -> tuple[str, str]:
         previous = capture(tmux_exe, session)
         tmux(tmux_exe, "resize-window", "-t", session, "-x", str(width), "-y", str(height))
@@ -195,7 +244,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         wait_for(tmux_exe, session, r"/sidebar", f"{label} command draft")
         send_keys(tmux_exe, session, "Enter")
         drawer = wait_for(tmux_exe, session, r"(?s)Session overview.*│  Type a message\.\.\.", f"{label} opened")
-        assert_drawer_frame(drawer, width, height, label)
+        _assert_drawer_frame(drawer, width, height, label)
         if drawer.count("Activity") != 1:
             raise RuntimeError(f"{label} did not show exactly one Activity section\nscreen:\n{drawer}")
         cursor_flag = tmux(tmux_exe, "display-message", "-p", "-t", session, "#{cursor_flag}").stdout.strip()
@@ -212,7 +261,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         previous = scrolled_drawer
         send_keys(tmux_exe, session, "PageDown")
         scrolled_drawer = wait_for_screen_change(tmux_exe, session, previous, f"narrow sidebar drawer page {page + 1}")
-        assert_drawer_frame(scrolled_drawer, 80, 24, "narrow sidebar drawer scrolled")
+        _assert_drawer_frame(scrolled_drawer, 80, 24, "narrow sidebar drawer scrolled")
     if "context sources" not in scrolled_drawer or "version AVA " not in scrolled_drawer:
         raise RuntimeError(f"narrow sidebar drawer could not reach lower context/version fields\nscreen:\n{scrolled_drawer}")
     save_evidence(root, "frontend-f1-narrow-sidebar-drawer-scrolled", scrolled_drawer)
@@ -228,20 +277,17 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         previous = short_drawer_end
         send_keys(tmux_exe, session, "PageDown")
         short_drawer_end = wait_for_screen_change(tmux_exe, session, previous, "short sidebar drawer page down after End")
-    assert_drawer_frame(short_drawer_end, 100, 12, "short sidebar drawer")
+    _assert_drawer_frame(short_drawer_end, 100, 12, "short sidebar drawer")
     if "context sources" not in short_drawer_end or "version AVA " not in short_drawer_end:
         raise RuntimeError(f"short sidebar drawer could not reach lower context/version fields\nscreen:\n{short_drawer_end}")
     save_evidence(root, "frontend-f1-short-sidebar-drawer", short_drawer_end)
 
-    short_resize_previous = short_drawer_end
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "160", "-y", "12")
-    reflowed_drawer = wait_for_screen_change(tmux_exe, session, short_resize_previous, "open sidebar drawer 160x12 reflow")
-    reflowed_dimensions = tmux(
-        tmux_exe, "display-message", "-p", "-t", session, "#{window_width},#{window_height}"
-    ).stdout.strip()
-    if reflowed_dimensions != "160,12":
-        raise RuntimeError(f"open sidebar drawer reflow dimensions were {reflowed_dimensions}, expected 160,12")
-    assert_drawer_frame(reflowed_drawer, 160, 12, "reflowed short-wide sidebar drawer")
+    # A width-only resize can leave the trimmed capture byte-identical, so a
+    # text-change wait times out on an already-valid reflow; synchronize on
+    # tmux's authoritative dimensions and a fully valid drawer frame instead.
+    reflowed_drawer = _wait_for_drawer_reflow(tmux_exe, session, 160, 12, "open sidebar drawer 160x12 reflow")
+    _assert_drawer_frame(reflowed_drawer, 160, 12, "reflowed short-wide sidebar drawer")
     send_keys(tmux_exe, session, "Escape")
     short_wide_closed = wait_for_absent(tmux_exe, session, r"Session overview", "short-wide sidebar drawer closed")
     if "live session" in short_wide_closed or "Activity" in short_wide_closed:
@@ -505,7 +551,7 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     context_freshness = wait_for(
         tmux_exe, session, r"(?s)Context freshness:.*context_sources=1.*Enter/Esc close", "context freshness command"
     )
-    context_freshness_section = context_freshness.rsplit("Context freshness:", 1)[-1]
+    context_freshness_section = _normalize_context_section(context_freshness)
     if (
         "prompt=builtin" not in context_freshness_section
         or "context_sources=1" not in context_freshness_section

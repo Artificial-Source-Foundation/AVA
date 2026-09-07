@@ -1212,6 +1212,17 @@ if(Python3_Interpreter_FOUND)
     set_tests_properties(ava_release.package_linux PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 240 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
   endif()
 
+  if(APPLE AND NOT OptionEnableAvaSanitizers AND NOT AVA_ENABLE_TSAN)
+    add_test(
+      NAME ava_release.package_macos
+      COMMAND ${Python3_EXECUTABLE}
+              ${CMAKE_CURRENT_SOURCE_DIR}/package_macos_tests.py
+              --repo ${CMAKE_SOURCE_DIR}
+              --build-dir ${CMAKE_BINARY_DIR}
+              --cmake ${CMAKE_COMMAND})
+    set_tests_properties(ava_release.package_macos PROPERTIES TIMEOUT 120 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endif()
+
   set(AVA_TUI_TMUX_SMOKE_SCENARIOS
     bounded_run
     auto_read

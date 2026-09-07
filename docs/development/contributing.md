@@ -79,6 +79,34 @@ Parallel jobs speed clean builds; a compiler cache speeds repeated builds. To en
 
 Tests currently build into `tests/ava_tests`, registered as focused `ava_tests.<suite>` CTests from sources under `tests/`. LSP coverage uses the `ava_fake_lsp_server` support executable.
 
+## macOS port verification
+
+The `macos/apple-silicon-support` development checkout was rebuilt on macOS 15.7.4 arm64 with Apple Clang 17 on 2026-09-05. This local checkout evidence does not qualify a clean release artifact or change the dated publication matrix below.
+
+Run the offline terminal scenarios explicitly; the default suite skips them. These checks use isolated state, fake providers, tmux, and pseudo-terminals. The clangd check uses the locally installed language server:
+
+```sh
+AVA_TUI_TMUX_SMOKE=1 \
+AVA_TUI_TERMINAL_LIFECYCLE_SMOKE=1 \
+AVA_TUI_OSC8_SMOKE=1 \
+AVA_TUI_KITTY_IMAGE_SMOKE=1 \
+AVA_TUI_ITERM2_IMAGE_SMOKE=1 \
+AVA_LSP_REAL_CLANGD_SMOKE=1 \
+scripts/run-tests.sh --build-dir build --jobs 2
+```
+
+Native clipboard checks use a private pasteboard and leave the user clipboard untouched: `scripts/run-tests.sh --build-dir build -R native_clipboard`. Build a relocatable Mac archive with `python3 scripts/package-macos.py --build-dir build`; it includes ncurses and terminfo, strips Homebrew loader paths, and ad-hoc signs the bundled Mach-O files. `scripts/run-tests.sh --build-dir build -R package_macos` verifies the archive after relocation, including a fake-provider terminal and clipboard smoke. These local artifacts are not notarized or release-qualified.
+
+The Mac port targets Apple Silicon (arm64). Intel and Rosetta qualification are outside its current scope.
+
+The platform security difference is deliberate. Linux prepares Landlock/seccomp containment when supported by the kernel. The native macOS backend always reports containment unavailable and elevates containment-required commands to one-time CriticalAsk approval. These commands cannot acquire session grants or persistent Allow rules. Approval preserves executable sealing, owner/mode checks, descriptor/path identity validation, pre-exec pathname revalidation, inherited-FD cleanup, synthetic HOME/XDG/TMP values, and process-group cleanup. macOS does not claim Linux-equivalent isolation.
+
+macOS rejects detected executable/path changes before execution. Its final pathname revalidation and `execve` are not atomic, so a residual pathname-swap window remains. This is another documented difference from Linux descriptor execution; the existing revalidation remains mandatory.
+
+`ava_tests.macos_command_security` is a required, non-skipped Mac regression suite for that contract: unavailable containment, CriticalAsk metadata, repeated approval, denial without execution, normal approved execution, executable replacement rejection, and inherited-FD cleanup. Run it with the adjacent `tools`, `command`, `permission_rules`, and `tui_composer` suites before the final full run. The existing tools suite additionally covers executable/interpreter descriptor binding, pre-exec permission revocation, sanitized environment inheritance, cancellation, deadlines, and process-group cleanup.
+
+Use `--build-dir build-sanitize` for ASan/UBSan after rebuilding that tree. With the terminal and clangd flags above enabled, the explicitly expected Mac skips are the opt-in live-provider suite and the Linux kernel-containment suite; the Mac security-contract suite must pass. Missing Linux-equivalent isolation is a documented limitation, not a blocker for this native port. Protocol-level graphics tests do not qualify every terminal emulator's visual rendering.
+
 ## Tested build matrix
 
 | Combination | Status | 2026-08-23 evidence |

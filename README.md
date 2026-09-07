@@ -64,6 +64,16 @@ GitHub Actions runs both the normal and sanitizer test jobs on pushes and pull r
 
 **For detailed cmake configuration options and build instructions see [CONTRIBUTING](docs/development/contributing.md).**
 
+### macOS development on the port branch
+
+The `macos/apple-silicon-support` branch runs natively on Apple Silicon. Use the same `dev` and `sanitize` presets above with Apple Clang and Homebrew Boost/ncurses. CMake discovers standard Homebrew prefixes and enables libc++ experimental threading support. Linux-only libcwd instrumentation is disabled on macOS.
+
+Built-in `clangd` discovery includes the Command Line Tools and standard Xcode toolchain directories. The server must still pass AVA's executable ownership and path checks. For workspaces reached through filesystem aliases, use the physical workspace path so language-server locations match the workspace boundary.
+
+Linux and macOS deliberately use different security backends. Linux uses Landlock/seccomp containment when the kernel supports it. Native containment is unavailable on macOS: every command that requires containment is elevated to Critical risk and requires one-time approval. The prompt identifies uncontained execution, and neither session grants nor persistent “always allow” rules can bypass that approval. Executable sealing, owner/mode checks, descriptor/path identity checks, pre-exec path revalidation, inherited-FD cleanup, the synthetic HOME/XDG/TMP environment, and process-group cleanup remain active. This is not Linux-equivalent isolation.
+
+The native Apple Silicon archive requires macOS 15 or newer. `python3 scripts/package-macos.py --build-dir build` creates a relocatable archive with ncurses, its license, and terminal definitions included; Homebrew is only needed for the development build. Local Mac sessions use native text and image clipboard integration; SSH text copy retains terminal routing. `scripts/package-linux.sh` remains Linux-only. See the [macOS verification notes](docs/development/contributing.md#macos-port-verification) for the offline checks. Local archives are ad-hoc signed; notarization and public release qualification are separate work.
+
 ### Linux host artifact
 
 Create the AVA-only host archive and checksum outside the checkout with:

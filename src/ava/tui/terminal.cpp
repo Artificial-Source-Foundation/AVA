@@ -20,12 +20,43 @@
 #include <cstdio>
 #include <cstdlib>
 #include <limits>
+#ifdef __APPLE__
+#include <filesystem>
+#include <mach-o/dyld.h>
+#endif
 #include <optional>
 #include <string_view>
 #include <utility>
 
 namespace ava::tui {
 namespace {
+
+#ifdef __APPLE__
+void configure_bundled_terminfo()
+{
+  if (std::getenv("TERMINFO") || std::getenv("TERMINFO_DIRS"))
+    return;
+  std::uint32_t size = 0;
+  static_cast<void>(_NSGetExecutablePath(nullptr, &size));
+  if (size == 0 || size > 1024 * 1024)
+    return;
+  std::string path(size, '\0');
+  if (_NSGetExecutablePath(path.data(), &size) != 0)
+    return;
+  path.resize(path.find('\0'));
+  std::error_code error;
+  auto const executable = std::filesystem::canonical(path, error);
+  if (error)
+    return;
+  auto const terminfo = executable.parent_path().parent_path() / "share/terminfo";
+  if (std::filesystem::is_directory(terminfo, error) && !error)
+  {
+    // The trailing empty entry retains ncurses' system database fallback.
+    auto const directories = terminfo.string() + ":";
+    static_cast<void>(::setenv("TERMINFO_DIRS", directories.c_str(), 0));
+  }
+}
+#endif
 
 constexpr int kTerminalEscapeDelayMs = 100;
 constexpr std::size_t kOsc11ResponseMaxBytes = 256;
@@ -1533,6 +1564,9 @@ CursesSession::~CursesSession()
 
 ava::core::Result<CursesSession> CursesSession::enter()
 {
+#ifdef __APPLE__
+  configure_bundled_terminfo();
+#endif
   char const* current_locale = std::setlocale(LC_ALL, nullptr);
   std::string const previous_locale = current_locale == nullptr ? "C" : current_locale;
   if (std::setlocale(LC_ALL, "") == nullptr)

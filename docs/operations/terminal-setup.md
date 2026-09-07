@@ -123,7 +123,7 @@ AVA's preview capability is environment-detected:
 Notes:
 
 - Direct terminal sessions are the intended path for inline previews.
-- iTerm2 protocol support is runtime/protocol support only. macOS packaging docs are deferred; this guide does not add a macOS install path.
+- The native macOS development archive bundles ncurses and terminfo. Keep its `bin/`, `lib/`, and `share/` directories together and run `bin/ava`.
 - If an imported image renders as text metadata only, AVA will still attach it; only the terminal-side preview is missing or suppressed.
 - If Ctrl+V does not import an image on Linux, install or configure `wl-paste` for Wayland or `xclip` for X11, or use `/attach <path>` directly. `AVA_CLIPBOARD_IMAGE_FILE=/absolute/path.png` is reserved for deterministic smoke tests.
 
@@ -144,9 +144,17 @@ If a link is visible but not clickable, check the terminal's hyperlink setting a
 
 Reference: [iTerm2 OSC 8 documentation](https://iterm2.com/documentation-escape-codes.html).
 
+## Command Approval On macOS
+
+On macOS, a command that needs containment shows **macOS uncontained · one-time approval** in the permission prompt. **Allow once** authorizes only that execution; session-wide and persistent Allow choices are unavailable. The approval receipt also identifies uncontained macOS execution. Ordinary permitted commands retain their existing policy, while Linux-contained commands use the Linux backend. A Mac approval is not a sandbox: executable identity/path checks, the synthetic environment, and process cleanup still apply.
+
 ## OSC 52 Clipboard Copy
 
-The TUI plain `/copy` command and F5 copy the latest assistant response through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation. Under tmux AVA uses a bounded passthrough-safe form. AVA reports local construction or terminal-write failures, and labels a successful write only as a request sent because downstream terminal, SSH, or multiplexer delivery is unknowable. Double-click selects a word, triple-click selects a rendered line, drag selects a range, and navigation shows a transient scrollbar.
+Local macOS sessions use the native system pasteboard, so clipboard copy works in Terminal.app without OSC 52 support. `/export` copies the conversation as Markdown and confirms a successful native copy; its native limit is 16 MiB. Other copy actions retain their 64 KiB selection/message bound. Ctrl+V imports native clipboard PNG/JPEG/WebP/GIF images and converts TIFF images to PNG. SSH sessions automatically route text copy to the client terminal. Set `AVA_CLIPBOARD_BACKEND=terminal` to select the terminal backend explicitly.
+
+The following protocol details apply to the terminal backend.
+
+With the terminal backend, the TUI plain `/copy` command and F5 copy the latest assistant response through OSC 52 (`OSC 52 ; c ; <base64> ST`) to the terminal clipboard path. AVA uses this for latest assistant text, selected public user-turn text (`/copy user`), tool details, diffs, and permission details. Payloads larger than 64 KiB are rejected without silent truncation. Under tmux AVA uses a bounded passthrough-safe form. AVA reports local construction or terminal-write failures, and labels a successful write only as a request sent because downstream terminal, SSH, or multiplexer delivery is unknowable. Double-click selects a word, triple-click selects a rendered line, drag selects a range, and navigation shows a transient scrollbar.
 
 AVA rejects empty clipboard text and any payload larger than 64 KiB (65,536 raw bytes) without emitting a partial sequence or spawning an external clipboard helper. Oversized copies report the existing clipboard failure status.
 
@@ -258,4 +266,4 @@ Checklist:
 - OSC 8 and OSC 52 are best-effort terminal protocols. If a terminal, SSH path, or multiplexer blocks them, AVA keeps visible/copyable text but cannot override that policy.
 - Windows Terminal is recognized as a text-image, OSC-8-capable environment, but Windows packaging/setup docs are deferred.
 - Termux packaging/setup docs are deferred.
-- macOS packaging/setup docs are deferred. iTerm2 inline image protocol support exists when AVA is run in an environment that exposes iTerm2 session variables, but this guide does not document a packaged macOS install path.
+- The Apple Silicon development archive includes ncurses and terminfo; see the native macOS setup above. Public notarized distribution remains unqualified. iTerm2 inline images require a direct terminal session that exposes iTerm2 capabilities.

@@ -16,7 +16,8 @@ Environment credentials are deliberately not persisted merely by using AVA. `ava
 | `AVA_TUI_THEME` | Process-only built-in theme override: `dark`, `light`, or `plain`. Unknown/empty values fall through to automatic detection. |
 | `AVA_TUI_TMUX_HYPERLINKS` | Set to `1` to opt into OSC 8 links in tmux after tmux itself has been configured to forward hyperlinks. It affects only the tmux fallback. |
 | `AVA_DISABLE_BROWSER_OPEN` | Any presence prevents AVA from launching a browser for OAuth; AVA still prints the URL. |
-| `AVA_CLIPBOARD_IMAGE_FILE` | Absolute image file to import for Ctrl+V instead of probing the Linux clipboard. Intended primarily for deterministic use; supported image types are the same as clipboard paste. |
+| `AVA_CLIPBOARD_BACKEND` | `terminal` forces OSC 52 text copy; otherwise local macOS sessions use the native clipboard. SSH sessions always use the client terminal for text copy. |
+| `AVA_CLIPBOARD_IMAGE_FILE` | Absolute image file to import for Ctrl+V instead of probing the platform clipboard. Intended primarily for deterministic use; supported image types are the same as clipboard paste. |
 | `AVA_EXTERNAL_EDITOR_FILE` | Internal, short-lived path supplied by AVA only while it invokes `VISUAL`/`EDITOR`; editor commands use it instead of a positional filename. Do not pre-set it as configuration. |
 
 ### Provider credentials and endpoints

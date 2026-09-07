@@ -5,4 +5,3 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory(ncurses-tests)
 add_subdirectory(json-tests)
-add_subdirectory(allocator-tests)

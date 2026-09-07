@@ -32,10 +32,30 @@
 #include <utility>
 #include <vector>
 #include <signal.h>
+#ifdef __APPLE__
+#include <sys/proc.h>
+#include <sys/resource.h>
+#include <sys/sysctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 
 namespace {
+
+// macOS keeps true(1)/false(1) under /usr/bin; FHS Linux keeps them under
+// /bin. Prefer the Linux path so Linux behavior is unchanged, and fall back
+// for the fixture copies below.
+std::filesystem::path system_binary_for_test(std::string_view name)
+{
+  for (auto const* directory : {"/bin", "/usr/bin"})
+  {
+    auto const candidate = std::filesystem::path(directory) / name;
+    std::error_code status_error;
+    if (std::filesystem::is_regular_file(candidate, status_error))
+      return candidate;
+  }
+  return std::filesystem::path("/bin") / name;
+}
 
 std::string read_text_file_for_test(std::filesystem::path const& path)
 {
@@ -55,10 +75,46 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   return static_cast<pid_t>(value);
 }
 
+bool process_group_exists(pid_t pgid)
+{
+  errno = 0;
+  if (::kill(-pgid, 0) == 0)
+    return true;
+  return errno != ESRCH;
+}
+
+// kill(-pgid, 0) also reports orphaned zombies that only an external reaper
+// can collect. Ignore zombies exactly like the /proc scan on Linux; macOS has
+// no procfs, so list the group with sysctl KERN_PROC_PGRP instead.
+bool process_group_has_live_member(pid_t pgid)
+{
+#ifdef __APPLE__
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid};
+  std::size_t size = 0;
+  if (::sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0)
+    return process_group_exists(pgid);
+  if (size == 0)
+    return false;
+  std::vector<char> buffer(size);
+  if (::sysctl(mib, 4, buffer.data(), &size, nullptr, 0) != 0)
+    return process_group_exists(pgid);
+  std::size_t const count = size / sizeof(struct kinfo_proc);
+  auto const* processes = reinterpret_cast<struct kinfo_proc const*>(buffer.data());
+  for (std::size_t index = 0; index < count; ++index)
+  {
+    if (processes[index].kp_proc.p_stat != SZOMB && processes[index].kp_proc.p_stat != 0)
+      return true;
+  }
+  return false;
+#else
+  return process_group_exists(pgid);
+#endif
+}
+
 bool wait_for_process_group_exit(pid_t pgid)
 {
   auto const deadline = ava::tests::now_plus_seconds(5);
-  while (ava::test::process_group_has_live_member(pgid))
+  while (process_group_has_live_member(pgid))
   {
     if (std::chrono::steady_clock::now() >= deadline)
       return false;
@@ -83,7 +139,33 @@ ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolCont
       return std::unexpected(std::move(anchors.error()));
     context.anchor_set = *anchors;
   }
-  return ava::tools::run_bash(context, command, options);
+#ifdef __APPLE__
+  auto roots_for_process = []() -> std::vector<std::filesystem::path> {
+    std::array<char, PATH_MAX> base{};
+    auto const length = ::confstr(_CS_DARWIN_USER_TEMP_DIR, base.data(), base.size());
+    expect(length > 0 && length <= base.size(), "command cleanup fixture obtains native temporary base");
+    std::vector<std::filesystem::path> roots;
+    if (length > 0 && length <= base.size())
+    {
+      auto const prefix = ".ava-command-" + std::to_string(::getpid()) + "-";
+      for (auto const& entry : std::filesystem::directory_iterator(base.data()))
+      {
+        if (entry.path().filename().string().starts_with(prefix))
+        {
+          roots.push_back(entry.path());
+        }
+      }
+    }
+    std::ranges::sort(roots);
+    return roots;
+  };
+  auto const roots_before = roots_for_process();
+#endif
+  auto result = ava::tools::run_bash(context, command, options);
+#ifdef __APPLE__
+  expect(roots_for_process() == roots_before, "command environment is removed on success, denial, cancellation, timeout, and error");
+#endif
+  return result;
 }
 
 class RecordingCommandExecutor final : public ava::tools::CommandExecutor
@@ -223,9 +305,12 @@ void test_bash_tool()
 
   auto capped_spill =
       run_bash_for_test(bash_spill_context, "seq 1 1000000", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000), .max_bytes = 1});
-  expect(capped_spill && capped_spill->truncated && capped_spill->spill_truncated && !capped_spill->spill_path.empty() &&
-             std::filesystem::file_size(capped_spill->spill_path) == ava::tools::kMaxSpillFileBytes,
-         "run_bash caps individual spill files and reports spill truncation");
+  expect(capped_spill && capped_spill->exit_code == 0 && !capped_spill->timed_out && capped_spill->truncated && capped_spill->spill_truncated &&
+             !capped_spill->spill_path.empty() && std::filesystem::file_size(capped_spill->spill_path) == ava::tools::kMaxSpillFileBytes,
+         "run_bash caps individual spill files and reports spill truncation: " +
+             (capped_spill ? "exit=" + std::to_string(capped_spill->exit_code) + " timed_out=" + std::to_string(capped_spill->timed_out) + " total_bytes=" +
+                                 std::to_string(capped_spill->total_bytes) + " spill_truncated=" + std::to_string(capped_spill->spill_truncated)
+                           : capped_spill.error().format()));
 
   auto const hijack_path = root / "printenv";
   {
@@ -382,6 +467,103 @@ void test_bash_tool()
   expect(!ask_failed && ask_failed.error().format().find("resolution: resolver_failed") != std::string::npos, "run_bash fails closed when resolver fails");
 }
 
+#ifdef __APPLE__
+void test_macos_sparse_descriptor_cleanup()
+{
+  std::array<int, 2> report{-1, -1};
+  if (::pipe(report.data()) != 0)
+  {
+    expect(false, "Mac descriptor cleanup fixture creates its report pipe");
+    return;
+  }
+  pid_t const child = ::fork();
+  if (child == 0)
+  {
+    static_cast<void>(::close(report[0]));
+    struct rlimit limit{};
+    if (::getrlimit(RLIMIT_NOFILE, &limit) != 0)
+      _exit(2);
+    auto const capacity = std::min<rlim_t>(limit.rlim_max, 4096);
+    if (capacity < 128)
+      _exit(2);
+    limit.rlim_cur = capacity;
+    if (::setrlimit(RLIMIT_NOFILE, &limit) != 0)
+      _exit(2);
+    std::array<int, 512> extra{};
+    auto const count = std::min<std::size_t>(extra.size(), static_cast<std::size_t>(capacity - 32));
+    for (std::size_t index = 0; index < count; ++index)
+    {
+      extra[index] = ::open("/dev/null", O_RDONLY | (index % 2 ? O_CLOEXEC : 0));
+      if (extra[index] < 0)
+        _exit(2);
+    }
+    int const kept = ::fcntl(extra[0], F_DUPFD_CLOEXEC, static_cast<int>(capacity - 2));
+    int const dropped = ::fcntl(extra[0], F_DUPFD_CLOEXEC, static_cast<int>(capacity - 1));
+    if (kept < 0 || dropped < 0)
+      _exit(2);
+    // Existing descriptors remain valid above a lowered soft limit. Cleanup
+    // must find these and every batch of ordinary descriptors, while keeping
+    // the explicit report and executable descriptors.
+    limit.rlim_cur = 64;
+    if (::setrlimit(RLIMIT_NOFILE, &limit) != 0)
+      _exit(2);
+    ava::containment::close_inherited_fds_except(report[1], kept);
+    bool extras_closed = true;
+    for (std::size_t index = 0; index < count; ++index)
+      extras_closed = (::fcntl(extra[index], F_GETFD) == -1 && errno == EBADF) && extras_closed;
+    std::array<int, 3> const state{extras_closed ? 1 : 0, ::fcntl(kept, F_GETFD), ::fcntl(dropped, F_GETFD)};
+    _exit(write_all_to_descriptor_for_test(report[1], state.data(), sizeof(state)) ? 0 : 2);
+  }
+  static_cast<void>(::close(report[1]));
+  std::array<int, 3> state{};
+  bool const received = child > 0 && read_exact_from_descriptor_for_test(report[0], state.data(), sizeof(state));
+  static_cast<void>(::close(report[0]));
+  int status = 0;
+  if (child > 0)
+    static_cast<void>(::waitpid(child, &status, 0));
+  expect(received && WIFEXITED(status) && WEXITSTATUS(status) == 0 && state[0] == 1 && state[1] >= 0 && state[2] == -1,
+         "Mac cleanup closes multiple batches and sparse descriptors above the soft limit while preserving its keep set");
+}
+#endif
+
+void test_bash_stream_lifecycle()
+{
+  auto const root = create_empty_root("bash-stream-lifecycle");
+  auto describe = [](ava::core::Result<ava::tools::BashResult> const& result) {
+    return result ? "exit=" + std::to_string(result->exit_code) + " timed_out=" + std::to_string(result->timed_out) +
+                        " total_bytes=" + std::to_string(result->total_bytes) + " retained_bytes=" + std::to_string(result->output.size())
+                  : result.error().format();
+  };
+  ava::tools::ToolContext const context{
+      .workspace_dir = root,
+      .mode = ava::agent::Mode::Build,
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        return ava::permissions::PermissionResolution::Allow;
+      }};
+  // This finite producer cannot complete its billion rows within the short
+  // deadline. Its retained output and spill buffer stay bounded throughout.
+  auto timed = run_bash_for_test(context, "seq 1 1000000000", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 1024});
+  expect(timed && timed->timed_out && timed->exit_code == -1 && timed->total_bytes > 0 && timed->output.size() <= 1024,
+         "streaming command output preserves its deadline and retained-output bound: " + describe(timed));
+
+  bool received_output = false;
+  auto cancel_context = context;
+  cancel_context.cancel_requested = [&received_output] { return received_output; };
+  cancel_context.progress_sink = [&received_output](ava::tools::ToolProgressEvent const& event) -> ava::core::VoidResult {
+    if (event.text.starts_with("bash output ") && event.status == "running")
+      received_output = true;
+    return {};
+  };
+  auto canceled = run_bash_for_test(cancel_context, "seq 1 1000000000", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000), .max_bytes = 1024});
+  expect(received_output && canceled && canceled->canceled && !canceled->timed_out && canceled->exit_code == -1 && canceled->output.size() <= 1024,
+         "streaming command output remains cancelable after progress arrives: " + describe(canceled));
+
+  auto closed = run_bash_for_test(context, "/bin/sh -c 'printf ready; exec 1>&- 2>&-; sleep 30'",
+                                  ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .max_bytes = 1024});
+  expect(closed && closed->timed_out && closed->exit_code == -1 && closed->output == "ready",
+         "closing stdout and stderr does not bypass the command deadline or process cleanup: " + describe(closed));
+}
+
 void test_bash_runtime_and_invocation_contract()
 {
   auto const root = temp_root() / "bash-runtime-invocation-contract";
@@ -418,12 +600,20 @@ void test_bash_runtime_and_invocation_contract()
       user_context, "git status",
       ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000), .invocation_source = ava::tools::BashOptions::InvocationSource::UserRawShell});
 
-  expect(model_context.command_runtime.mode == ava::command::CommandRuntimeMode::Enabled && model_git && model_metadata &&
-             model_metadata->level == ava::command::CommandLevel::Standard &&
-             model_metadata->execution_domain == ava::command::CommandExecutionDomain::DirectArgv &&
-             model_metadata->family == ava::command::CommandFamily::Inspection && !legacy && !prompt_only &&
-             legacy.error().message().find("Enabled") != std::string::npos && prompt_only.error().message().find("Enabled") != std::string::npos,
+  bool const common_runtime_contract = model_context.command_runtime.mode == ava::command::CommandRuntimeMode::Enabled && model_metadata &&
+                                       model_metadata->execution_domain == ava::command::CommandExecutionDomain::DirectArgv &&
+                                       model_metadata->family == ava::command::CommandFamily::Inspection && !legacy && !prompt_only &&
+                                       legacy.error().message().find("Enabled") != std::string::npos &&
+                                       prompt_only.error().message().find("Enabled") != std::string::npos;
+#ifdef __APPLE__
+  expect(common_runtime_contract && !model_git && model_metadata->level == ava::command::CommandLevel::Critical &&
+             model_metadata->containment_status == ava::permissions::CommandContainmentStatus::Unavailable &&
+             model_git.error().format().find("resolution: no_resolver") != std::string::npos,
+         "Enabled is the ToolContext default and only executable runtime mode; macOS git status fails closed when containment is unavailable");
+#else
+  expect(common_runtime_contract && model_git && model_metadata->level == ava::command::CommandLevel::Standard,
          "Enabled is the ToolContext default and only executable runtime mode; model git status remains a Standard direct-argv recipe");
+#endif
   expect(!user_git && user_prompt && user_prompt->command_metadata && user_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
              user_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
              user_prompt->command_metadata->execution_domain == ava::command::CommandExecutionDomain::RawShell &&
@@ -660,7 +850,7 @@ void test_sealed_local_bash_contract()
 
   auto const binary_path = first_bin / "descriptor-binary";
   std::error_code copy_error;
-  std::filesystem::copy_file("/bin/true", binary_path, std::filesystem::copy_options::overwrite_existing, copy_error);
+  std::filesystem::copy_file(system_binary_for_test("true"), binary_path, std::filesystem::copy_options::overwrite_existing, copy_error);
   if (!copy_error)
     static_cast<void>(::chmod(binary_path.c_str(), S_IRUSR | S_IWUSR | S_IXUSR));
   auto binary = run_bash_for_test(context, "descriptor-binary", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
@@ -692,7 +882,8 @@ void test_sealed_local_bash_contract()
   std::error_code interpreter_copy_error;
   std::filesystem::copy_file("/bin/sh", bound_interpreter, std::filesystem::copy_options::overwrite_existing, interpreter_copy_error);
   std::error_code replacement_copy_error;
-  std::filesystem::copy_file("/bin/false", replacement_interpreter, std::filesystem::copy_options::overwrite_existing, replacement_copy_error);
+  std::filesystem::copy_file(system_binary_for_test("false"), replacement_interpreter, std::filesystem::copy_options::overwrite_existing,
+                             replacement_copy_error);
   bool interpreter_swapped_after_binding = false;
   bool const interpreter_fixture_written = !interpreter_copy_error && !replacement_copy_error &&
                                            ::chmod(bound_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
@@ -736,12 +927,18 @@ void test_sealed_local_bash_contract()
                                    bound_script_result->output
                              : "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: " +
                                    bound_script_result.error().format());
+#ifdef __APPLE__
+  expect(interpreter_fixture_written && interpreter_swapped_after_binding && !bound_interpreter_result &&
+             bound_interpreter_result.error().message().find("bound descriptor") != std::string::npos,
+         "macOS fails closed when a shebang interpreter path is replaced after descriptor binding");
+#else
   expect(interpreter_fixture_written && interpreter_swapped_after_binding && bound_interpreter_result && bound_interpreter_result->exit_code == 0 &&
              bound_interpreter_result->output == "approved-interpreter-descriptor",
          bound_interpreter_result ? "a shebang interpreter executes from its approved descriptor after a post-binding pathname replacement: output=" +
                                         bound_interpreter_result->output
                                   : "a shebang interpreter executes from its approved descriptor after a post-binding pathname replacement: " +
                                         bound_interpreter_result.error().format());
+#endif
   expect(failure_script_written && !descriptor_exec_failure && descriptor_exec_failure.error().message().find("bound descriptor") != std::string::npos &&
              descriptor_exec_failure.error().format().find("descriptor-exec-failure") == std::string::npos,
          "descriptor-exec failure is actionable, redacted, and occurs after process-group cleanup");
@@ -799,6 +996,7 @@ void test_sealed_process_group_sentinel_and_grace()
   // A fixture that starts a background subshell with a SIGTERM handler that
   // writes a marker after a short delay, then the leader exits normally.
   auto const grace_marker = workspace / "grace-marker";
+  auto const grace_ready = workspace / "grace-ready";
   std::filesystem::remove(grace_marker, cleanup);
   expect(write_executable(first_bin / "grace-leader",
                           "#!/bin/sh\n"
@@ -806,8 +1004,21 @@ void test_sealed_process_group_sentinel_and_grace()
                           "  trap 'sleep 0.1; touch " +
                               grace_marker.string() +
                               "; exit 0' TERM\n"
+                              "  : > " +
+                              grace_ready.string() +
+                              "\n"
                               "  while true; do sleep 0.05; done\n"
                               ") &\n"
+                              // The parent must not exit before the child installs its
+                              // TERM handler; scheduler timing is not a readiness signal.
+                              "attempt=0\n"
+                              "while [ ! -e " +
+                              grace_ready.string() +
+                              " ]; do\n"
+                              "  attempt=$((attempt + 1))\n"
+                              "  [ $attempt -lt 100 ] || exit 1\n"
+                              "  sleep 0.01\n"
+                              "done\n"
                               "exit 0\n"),
          "sentinel/grace fixture creates the grace-leader executable");
 
@@ -1327,7 +1538,11 @@ void test_command_permission_user_guidance_propagation()
 
 void run_tools_process_network_tests()
 {
+#ifdef __APPLE__
+  test_macos_sparse_descriptor_cleanup();
+#endif
   test_bash_tool();
+  test_bash_stream_lifecycle();
   test_bash_runtime_and_invocation_contract();
   test_injected_command_executor();
   test_sealed_local_bash_contract();

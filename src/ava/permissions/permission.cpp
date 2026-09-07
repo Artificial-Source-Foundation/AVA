@@ -935,6 +935,12 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
   return metadata;
 }
 
+auto command_uses_macos_approval_fallback(CommandPermissionMetadata const& metadata) noexcept -> bool
+{
+  return metadata.executor_identity_verified && metadata.containment_status == CommandContainmentStatus::Unavailable &&
+         metadata.containment_profile_id == "ava-macos-uncontained-v1";
+}
+
 PermissionDecision decide(CommandPermissionMetadata const& metadata)
 {
   if (!metadata.executor_identity_verified || metadata.containment_status == CommandContainmentStatus::UnverifiedDelegatedExecutor)
@@ -943,6 +949,11 @@ PermissionDecision decide(CommandPermissionMetadata const& metadata)
   }
   if (metadata.containment_status == CommandContainmentStatus::Unavailable)
   {
+    if (command_uses_macos_approval_fallback(metadata))
+    {
+      return decision(PermissionAction::Ask, "Command not executed: macOS native containment is unavailable and this command requires one-shot user approval.",
+                      PermissionRisk::Critical);
+    }
     return decision(PermissionAction::Ask,
                     "sealed command requires containment, but containment is unavailable; explicit one-shot approval will run it uncontained",
                     PermissionRisk::Critical);

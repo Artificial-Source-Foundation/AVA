@@ -4,11 +4,13 @@
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
+#ifdef __linux__
 #include <linux/audit.h>
 #include <linux/filter.h>
 #include <linux/seccomp.h>
 #include <sys/prctl.h>
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 #ifndef AF_INET
@@ -17,6 +19,10 @@
 
 namespace ava::containment {
 namespace {
+
+#ifndef __APPLE__
+// The constants and filter builder below are Linux-only (seccomp-BPF); Apple
+// builds stub out the public probes instead, so plans stay Unavailable.
 
 // Detect the native audit architecture at compile time. The seccomp filter
 // checks the architecture of each syscall so a 64-bit filter cannot be bypassed
@@ -57,6 +63,8 @@ constexpr std::uint32_t kX32SyscallBit = __X32_SYSCALL_BIT;
 constexpr std::uint32_t kX32SyscallBit = 0;
 #endif
 
+// The BPF filter builder below is Linux-only (sock_filter, BPF_*,
+// SECCOMP_*); Apple builds stub out the public probes instead.
 // BPF instruction helpers.
 struct BpfStmt
 {
@@ -189,10 +197,16 @@ struct BpfStmt
   return filter;
 }
 
+#endif  // not __APPLE__
+
 }  // namespace
 
 bool seccomp_network_filter_supported() noexcept
 {
+#ifdef __APPLE__
+  // Seccomp-BPF is Linux-only; containment plans stay Unavailable on Apple.
+  return false;
+#else
   if (kNativeAuditArch == 0)
     return false;
 
@@ -214,10 +228,15 @@ bool seccomp_network_filter_supported() noexcept
     // (it has been since seccomp filter mode was introduced in 3.5).
   }
   return true;
+#endif
 }
 
 ava::core::VoidResult apply_seccomp_network_filter()
 {
+#ifdef __APPLE__
+  return std::unexpected(
+      ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "seccomp network filter is only available on Linux"));
+#else
   if (!seccomp_network_filter_supported())
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "seccomp network filter is not supported on this architecture or kernel"));
@@ -243,13 +262,20 @@ ava::core::VoidResult apply_seccomp_network_filter()
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "failed to install seccomp network filter"));
   }
   return {};
+#endif
 }
 
 ava::core::VoidResult apply_no_new_privs()
 {
+#ifdef __APPLE__
+  // Linux PR_SET_NO_NEW_PRIVS has no macOS equivalent; containment never
+  // becomes Available on Apple, so fail closed here as well.
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "no_new_privs is only available on Linux"));
+#else
   if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "failed to set PR_SET_NO_NEW_PRIVS"));
   return {};
+#endif
 }
 
 }  // namespace ava::containment

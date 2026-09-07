@@ -17,7 +17,12 @@
 #include <utility>
 #include <fcntl.h>
 #include <sys/file.h>
+#ifdef __linux__
 #include <sys/random.h>
+#endif
+#ifdef __APPLE__
+#include <cstdlib>
+#endif
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/types.h>
@@ -250,7 +255,20 @@ std::optional<std::string> read_private_file(int directory_fd, std::string_view 
 OpenFile open_trace_counter_lock(int directory_fd) noexcept
 {
   constexpr char name[] = "trace-counters-v1.lock";
-  int const fd = ::openat(directory_fd, name, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, kPrivateFileMode);
+  int fd = -1;
+#ifdef __APPLE__
+  // Concurrent O_CREAT opens can transiently report ENOENT on macOS while a
+  // peer's newly created entry is already visible. Retry the open itself; all
+  // normal metadata and inode checks below still fail closed.
+  for (int attempt = 0; attempt < 16; ++attempt)
+  {
+    fd = ::openat(directory_fd, name, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, kPrivateFileMode);
+    if (fd >= 0 || errno != ENOENT)
+      break;
+  }
+#else
+  fd = ::openat(directory_fd, name, O_RDWR | O_CREAT | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK, kPrivateFileMode);
+#endif
   if (fd < 0)
   {
     struct stat existing{};
@@ -300,6 +318,11 @@ bool write_all(int fd, std::string_view body) noexcept
 std::string opaque_token()
 {
   std::array<unsigned char, 16> bytes{};
+#ifdef __APPLE__
+  // macOS has no getrandom(2); arc4random_buf draws from the same CSPRNG and
+  // fills the whole buffer (no partial reads, no EINTR).
+  ::arc4random_buf(bytes.data(), bytes.size());
+#else
   std::size_t offset = 0;
   while (offset < bytes.size())
   {
@@ -323,6 +346,7 @@ std::string opaque_token()
       bytes[index] = static_cast<unsigned char>(value & 0xffU);
     }
   }
+#endif
   constexpr char hex[] = "0123456789abcdef";
   std::string result;
   result.reserve(bytes.size() * 2);

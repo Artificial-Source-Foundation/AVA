@@ -14,6 +14,7 @@
 #include <cerrno>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iterator>
@@ -26,7 +27,9 @@
 #include <vector>
 #include <fcntl.h>
 #include <grp.h>
+#ifdef __linux__
 #include <linux/landlock.h>
+#endif
 #include <pwd.h>
 #include <signal.h>
 #include <sys/stat.h>
@@ -38,6 +41,28 @@ namespace {
 namespace command = ava::command;
 namespace containment = ava::containment;
 namespace perms = ava::permissions;
+
+bool group_has_member_other_than(group const& resolved, std::string_view account_name)
+{
+#ifdef __APPLE__
+  auto const* member_bytes = reinterpret_cast<unsigned char const*>(resolved.gr_mem);
+  while (member_bytes)
+  {
+    char* member = nullptr;
+    std::memcpy(&member, member_bytes, sizeof(member));
+    if (!member)
+      break;
+    if (std::string_view(member) != account_name)
+      return true;
+    member_bytes += sizeof(member);
+  }
+#else
+  for (auto const* const* member = resolved.gr_mem; member && *member; ++member)
+    if (std::string_view(*member) != account_name)
+      return true;
+#endif
+  return false;
+}
 
 bool landlock_available()
 {
@@ -60,6 +85,11 @@ std::optional<gid_t> private_primary_group_for_test()
     return std::nullopt;
   }
 
+#ifdef __APPLE__
+  group* resolved_group = ::getgrgid(resolved_account->pw_gid);
+  if (!resolved_group || !resolved_group->gr_name || std::string_view(resolved_group->gr_name) != resolved_account->pw_name)
+    return std::nullopt;
+#else
   std::array<char, 16 * 1024> group_storage{};
   group primary_group{};
   group* resolved_group = nullptr;
@@ -68,11 +98,9 @@ std::optional<gid_t> private_primary_group_for_test()
   {
     return std::nullopt;
   }
-  for (auto const* const* member = resolved_group->gr_mem; member && *member; ++member)
-  {
-    if (std::string_view(*member) != resolved_account->pw_name)
-      return std::nullopt;
-  }
+#endif
+  if (group_has_member_other_than(*resolved_group, resolved_account->pw_name))
+    return std::nullopt;
   return resolved_group->gr_gid;
 }
 
@@ -175,7 +203,19 @@ void test_containment_summary_redacts_paths()
 void test_containment_fd_closure_keeps_bound_executable()
 {
   std::array<int, 2> report{-1, -1};
+#ifdef __APPLE__
+  // macOS has no pipe2(2); pipe() plus FD_CLOEXEC is equivalent.
+  bool report_pipe_created = ::pipe(report.data()) == 0;
+  if (report_pipe_created && (::fcntl(report[0], F_SETFD, FD_CLOEXEC) != 0 || ::fcntl(report[1], F_SETFD, FD_CLOEXEC) != 0))
+  {
+    ::close(report[0]);
+    ::close(report[1]);
+    report = {-1, -1};
+    report_pipe_created = false;
+  }
+#else
   bool const report_pipe_created = ::pipe2(report.data(), O_CLOEXEC) == 0;
+#endif
   int const handshake_fd = report_pipe_created ? ::open("/dev/null", O_RDONLY | O_CLOEXEC) : -1;
   int const executable_fd = report_pipe_created ? ::open("/dev/null", O_RDONLY | O_CLOEXEC) : -1;
   int const inherited_fd = report_pipe_created ? ::open("/dev/null", O_RDONLY | O_CLOEXEC) : -1;
@@ -277,6 +317,61 @@ void test_sensitive_network_enabled_remains_ask()
   expect(result && result->exit_code == 0 && prompts == 1, "sensitive network-enabled command remains Ask");
   expect(network_allowed_in_metadata, "sensitive network-enabled command metadata states network permitted after approval");
 }
+
+#ifdef __APPLE__
+void test_macos_native_security_contract()
+{
+  ContainmentFixture fix("macos-command-security");
+  expect(fix.write_executable("cmake", "#!/bin/sh\nprintf 'ran\\n' >> build/approval-count\nprintf 'approved-command\\n'\n"),
+         "macOS approval fixture creates a normal build command");
+  ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
+  auto context = fix.make_context();
+  std::vector<perms::PermissionPrompt> prompts;
+  context.permission_resolver = [&prompts](perms::PermissionPrompt const& prompt) -> ava::core::Result<perms::PermissionResolutionDecision> {
+    prompts.push_back(prompt);
+    return prompts.size() == 2 ? perms::PermissionResolution::Deny : perms::PermissionResolution::Allow;
+  };
+  auto const options = ava::tools::BashOptions{.timeout = std::chrono::milliseconds(2000)};
+  auto first = ava::tools::run_bash(context, "cmake --build build", options);
+  auto denied = ava::tools::run_bash(context, "cmake --build build", options);
+  auto third = ava::tools::run_bash(context, "cmake --build build", options);
+  std::ifstream marker(fix.build_dir / "approval-count");
+  std::string const executions{std::istreambuf_iterator<char>(marker), std::istreambuf_iterator<char>()};
+  expect(first && third && first->exit_code == 0 && third->exit_code == 0 && first->output == "approved-command\n" && third->output == "approved-command\n" &&
+             !first->containment_applied && !third->containment_applied,
+         "macOS approved native commands execute successfully and never claim containment");
+  expect(prompts.size() == 3 && !denied && denied.error().category() == ava::core::ErrorCategory::PermissionDenied && executions == "ran\nran\n",
+         "macOS asks again after every approval and denial prevents execution");
+  bool const all_one_shot =
+      prompts.size() == 3 && std::ranges::all_of(prompts, [](perms::PermissionPrompt const& prompt) {
+        if (!prompt.command_metadata)
+          return false;
+        auto const& metadata = *prompt.command_metadata;
+        return prompt.risk == perms::PermissionRisk::Critical && metadata.level == command::CommandLevel::Critical && metadata.executor_identity_verified &&
+               metadata.containment_status == perms::CommandContainmentStatus::Unavailable && !metadata.containment_available &&
+               metadata.containment_profile_id == "ava-macos-uncontained-v1" && metadata.backend_maximum_scope == command::InteractiveScope::Once &&
+               metadata.effective_allowed_scopes == std::vector{command::InteractiveScope::Once} && metadata.global_recipe_key.empty() &&
+               metadata.workspace_recipe_key.empty() && !perms::command_permission_allows_reusable_grant(metadata) &&
+               !perms::command_prompt_allows_persistent_allow(prompt) &&
+               prompt.reason == "Command not executed: macOS native containment is unavailable and this command requires one-shot user approval.";
+      });
+  expect(all_one_shot, "macOS containment-required commands become truthful CriticalAsk prompts with no persistent or session Allow authority");
+  expect(containment::probe_landlock_abi_version() == 0 && !containment::seccomp_network_filter_supported(),
+         "native macOS reports Linux containment capabilities unavailable");
+  expect(fix.write_executable("cmake.next", "#!/bin/sh\nprintf 'replacement-must-not-run' > build/replacement-marker\n"),
+         "macOS replacement regression prepares an inert marker command");
+  bool replaced_during_approval = false;
+  context.permission_resolver = [&fix, &replaced_during_approval](perms::PermissionPrompt const&) -> ava::core::Result<perms::PermissionResolutionDecision> {
+    std::error_code error;
+    std::filesystem::rename(fix.bin / "cmake.next", fix.bin / "cmake", error);
+    replaced_during_approval = !error;
+    return perms::PermissionResolution::Allow;
+  };
+  auto replaced = ava::tools::run_bash(context, "cmake --build build", options);
+  expect(replaced_during_approval && !replaced && !std::filesystem::exists(fix.build_dir / "replacement-marker"),
+         "macOS executable identity and path revalidation fail closed on replacement between approval and execution");
+}
+#endif
 
 void test_critical_raw_remains_ask_no_containment()
 {
@@ -886,6 +981,14 @@ void test_contained_direct_file_recipe()
 }
 
 }  // namespace
+
+#ifdef __APPLE__
+void run_macos_command_security_tests()
+{
+  test_macos_native_security_contract();
+  test_containment_fd_closure_keeps_bound_executable();
+}
+#endif
 
 void run_containment_tests()
 {

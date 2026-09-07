@@ -43,6 +43,7 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/context/context_loader.h"
 #include "ava/lsp/lsp_client.h"
+#include "ava/core/AnchorSet.h"
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/core/path.h"
@@ -1710,6 +1711,144 @@ void test_subagent_launch_display_normalization_and_validated_task_callback()
          "valid task permission denial and start failure retain launch metadata while a throwing private sink cannot affect execution");
 }
 
+void test_macos_shell_approval_payloads()
+{
+#ifdef __APPLE__
+  auto const root = create_empty_root("macos-shell-approval-payloads");
+  auto const workspace = root / "workspace";
+  auto const spill = root / "spill";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(spill);
+  auto anchors = ava::core::AnchorSet::open({workspace, spill});
+  expect(anchors.has_value(), "macOS shell payload fixture opens private anchors");
+  if (!anchors)
+    return;
+  std::vector<ava::tools::PermissionAuditEvent> audits;
+  ava::tools::ToolContext context{.workspace_dir = workspace, .spill_dir = spill};
+  context.anchor_set = *anchors;
+  context.permission_audit_sink = [&](auto const& event) -> ava::core::VoidResult {
+    audits.push_back(event);
+    return {};
+  };
+  std::ofstream evidence(root / "payloads.jsonl");
+  auto dispatch = [&](ava::tools::ToolContext const& current, std::string const& id, std::string arguments) {
+    auto result = ava::agent::ToolDispatcher(current).dispatch({.id = id, .name = "bash", .arguments_json = std::move(arguments)});
+    expect(result.has_value(), "macOS shell dispatch returns a tool result");
+    if (result)
+      evidence << "{\"case\":\"" << id << "\",\"result\":" << result->result_text << ",\"payload\":" << ava::agent::serialize_tool_result_payload_json(*result)
+               << "}\n";
+    return result;
+  };
+  auto missing = dispatch(context, "approval_required", R"({"command":"git status"})");
+  expect(missing && !missing->success && missing->payload.error_code == "approval_required" &&
+             missing->result_text.find("Command not executed: macOS native containment is unavailable and this command requires one-shot user approval.") !=
+                 std::string::npos &&
+             missing->result_text.find("\"executed\":false") != std::string::npos && missing->result_text.find("Do not retry") != std::string::npos &&
+             missing->result_text.find("Do not infer") != std::string::npos,
+         "unapproved macOS git status explicitly requires one-shot approval and supplies no execution result");
+  expect(
+      !audits.empty() && audits.front().action == ava::permissions::PermissionAction::Ask && audits.front().risk == ava::permissions::PermissionRisk::Critical,
+      "native git status still reaches CriticalAsk");
+  if (missing)
+  {
+    std::optional<ava::session::SessionEntry> stored;
+    auto sink = [&](ava::session::SessionEntry entry) -> ava::core::VoidResult {
+      stored = std::move(entry);
+      return {};
+    };
+    expect(ava::agent::append_tool_result(sink, *missing).has_value() && stored.has_value(), "approval-required result persists for provider replay");
+    if (stored)
+    {
+      auto replay = ava::agent::build_provider_messages_from_entries(
+          {ava::session::SessionEntry{.id = "approval_call",
+                                      .parent_id = "",
+                                      .type = ava::session::EntryType::ToolCall,
+                                      .timestamp = "2026-09-05T00:00:00Z",
+                                      .data_json = R"({"call_id":"approval_required","name":"bash","arguments":"{\"command\":\"git status\"}"})"},
+           *stored},
+          ava::agent::MessageBuildOptions{.target = ava::agent::HistoryReplayTarget{.provider_id = "openai",
+                                                                                    .model_id = "gpt-test",
+                                                                                    .api_family = "openai_responses",
+                                                                                    .reasoning_format = "openai_responses",
+                                                                                    .supports_tools = true}});
+      bool exact_payload = false;
+      if (replay)
+        for (auto const& message : *replay)
+          for (auto const& part : message.content_parts)
+            if (part.type == ava::provider::ContentPartType::ToolResult && part.text == missing->result_text)
+              exact_payload = true;
+      expect(exact_payload, "model-visible ToolResult replay preserves the exact explicit approval payload");
+    }
+  }
+  auto const audit_count = audits.size();
+  auto malformed = dispatch(context, "malformed", R"({"command":7})");
+  expect(malformed && malformed->payload.error_category == "invalid_argument" && malformed->payload.error_code == "malformed_invocation",
+         "malformed bash invocation is distinct from approval failures");
+  context.permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Deny;
+  };
+  auto invalid_json = dispatch(context, "invalid_json", R"({"command":"git status"} trailing)");
+  expect(invalid_json && invalid_json->payload.error_code == "malformed_invocation" && audits.size() == audit_count,
+         "malformed JSON and invalid command arguments never reach a permission check or execution");
+  auto denied = dispatch(context, "denied", R"({"command":"git status"})");
+  expect(denied && denied->payload.error_code == "command_denied" && denied->result_text.find("\"executed\":false") != std::string::npos,
+         "explicit rejection is distinct from an outstanding approval requirement");
+  context.permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "synthetic resolver unavailable"));
+  };
+  auto unavailable = dispatch(context, "resolver_error", R"({"command":"git status"})");
+  expect(unavailable && unavailable->payload.error_code == "approval_error", "resolver failure is neither user denial nor successful pending approval");
+  context.permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::AllowSessionGrant;
+  };
+  auto reusable = dispatch(context, "reusable_rejected", R"({"command":"git status"})");
+  expect(reusable && !reusable->success && reusable->payload.error_code == "command_denied", "uncontained macOS git status cannot acquire reusable approval");
+  context.permission_resolver = [](auto const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto init = dispatch(context, "init_approved", R"({"command":"git init"})");
+  expect(init && init->success && std::filesystem::is_directory(workspace / ".git"), "approved git creates the synthetic repository");
+  auto echo = dispatch(context, "echo_approved", R"({"command":"/bin/echo AVA-MAC-SHELL-OK"})");
+  expect(echo && echo->success && echo->result_text.find("AVA-MAC-SHELL-OK") != std::string::npos, "approved native echo executes normally");
+  auto failed = dispatch(context, "execution_failed", R"({"command":"/bin/sh -c 'exit 7'"})");
+  expect(failed && !failed->success && failed->result_text.find("\"command_status\":\"execution_failed\"") != std::string::npos &&
+             failed->result_text.find("\"exit_code\":7") != std::string::npos,
+         "executed command failure retains its actual exit code and is not a sandbox error");
+  std::promise<ava::permissions::PermissionPrompt> pending;
+  auto pending_prompt = pending.get_future();
+  std::promise<void> approve;
+  auto approval = approve.get_future();
+  context.permission_resolver = [&](auto const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    pending.set_value(prompt);
+    approval.wait();
+    return ava::permissions::PermissionResolution::Allow;
+  };
+  auto active = std::async(std::launch::async, [&] { return dispatch(context, "git_approved", R"({"command":"git status"})"); });
+  auto const reached_prompt = pending_prompt.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+  expect(reached_prompt && active.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout,
+         "interactive CriticalAsk suspends dispatch; no failed tool result reaches the model while approval is pending");
+  if (reached_prompt)
+  {
+    auto const prompt = pending_prompt.get();
+    expect(prompt.command == "git status" &&
+               prompt.reason == "Command not executed: macOS native containment is unavailable and this command requires one-shot user approval." &&
+               prompt.command_metadata && ava::permissions::command_uses_macos_approval_fallback(*prompt.command_metadata) &&
+               !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata),
+           "pending native git prompt has the exact command, macOS fallback, and one-shot scope");
+    evidence << "{\"case\":\"pending_prompt\",\"command\":\"git status\",\"model_result_available\":false,\"reason\":\""
+             << ava::core::json::escape(prompt.reason) << "\"}\n";
+  }
+  approve.set_value();
+  auto approved = active.get();
+  expect(approved && approved->success && approved->result_text.find("No commits yet") != std::string::npos,
+         "one-shot approved native git status returns actual repository output");
+  context.permission_resolver = nullptr;
+  auto again = dispatch(context, "approval_required_again", R"({"command":"git status"})");
+  expect(again && !again->success && again->payload.error_code == "approval_required", "a successful approval does not authorize the next git command");
+  std::cout << "macOS shell payload evidence: " << (root / "payloads.jsonl") << '\n';
+#endif
+}
+
 void test_permission_denial_guidance_provider_only_channel()
 {
   auto const root = create_empty_root("dispatcher-guidance-channel");
@@ -1884,4 +2023,5 @@ void run_agent_tool_dispatcher_tests()
   test_empty_worker_services_disable_interactive_tools();
   test_tool_dispatcher_plan_mode_denies_mutation();
   test_permission_denial_guidance_provider_only_channel();
+  test_macos_shell_approval_payloads();
 }

@@ -62,6 +62,11 @@ class AnchorSet
   // opened at all.
   [[nodiscard]] static Result<std::shared_ptr<AnchorSet>> open(std::vector<std::filesystem::path> const& roots);
 
+  // Snapshot the retained anchors and add one already-opened private directory.
+  // Existing anchors are duplicated, never reopened by pathname. The caller
+  // retains ownership of directory_fd and the shared set is not modified.
+  [[nodiscard]] auto with_directory_fd(std::filesystem::path const& root, int directory_fd) const -> Result<std::shared_ptr<AnchorSet>>;
+
   struct Anchor
   {
     // The anchor's open directory descriptor. Callers pass this to open_beneath

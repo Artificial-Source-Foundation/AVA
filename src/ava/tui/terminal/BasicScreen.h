@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include <cstdio>
 #include <memory>
 
 namespace ava::tui::terminal {

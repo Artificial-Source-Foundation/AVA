@@ -17,7 +17,12 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#ifdef __linux__
 #include <sys/random.h>
+#endif
+#ifdef __APPLE__
+#include <cstdlib>
+#endif
 #include <unistd.h>
 #include "debug.h"
 
@@ -41,6 +46,11 @@ struct ProductionTraceCounters
 std::string random_token()
 {
   std::array<unsigned char, 16> bytes{};
+#ifdef __APPLE__
+  // macOS has no getrandom(2); arc4random_buf draws from the same CSPRNG and
+  // fills the whole buffer (no partial reads, no EINTR).
+  ::arc4random_buf(bytes.data(), bytes.size());
+#else
   std::size_t offset = 0;
   while (offset < bytes.size())
   {
@@ -64,6 +74,7 @@ std::string random_token()
       byte = static_cast<unsigned char>(value & 0xffU);
     }
   }
+#endif
   constexpr char hex[] = "0123456789abcdef";
   std::string result;
   result.reserve(bytes.size() * 2);

@@ -202,11 +202,18 @@ def canonical_control_character(value: int | bytes) -> int | tuple[int, ...]:
 
 
 def normalized_termios(attrs: list) -> tuple[int, int, int, int, int, int, tuple[int | tuple[int, ...], ...]]:
+    lflag = int(attrs[3])
+    if sys.platform == "darwin":
+        # XNU sets PENDIN when restoring ICANON with TCSANOW, even when the
+        # saved attributes did not contain it. This is kernel input-replay
+        # state, not an application-owned terminal mode; compare every other
+        # flag and control character exactly.
+        lflag &= ~termios.PENDIN
     return (
         int(attrs[0]),
         int(attrs[1]),
         int(attrs[2]),
-        int(attrs[3]),
+        lflag,
         int(attrs[4]),
         int(attrs[5]),
         tuple(canonical_control_character(value) for value in attrs[6]),

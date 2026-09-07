@@ -100,6 +100,54 @@ void capture_permission_denial_guidance(ToolContext const& context, std::string_
     context.permission_denial_guidance_capture->provider_user_guidance.clear();
 }
 
+auto command_permission_error(ava::permissions::PermissionDecision const& decision, std::optional<ava::permissions::CommandPermissionMetadata> const& metadata,
+                              std::string_view resolution) -> ava::core::Error
+{
+  bool const approval_required = decision.action == ava::permissions::PermissionAction::Ask && resolution == "no_resolver";
+  bool const macos_fallback = metadata && ava::permissions::command_uses_macos_approval_fallback(*metadata);
+  std::string message = "Command not executed: permission was denied.";
+  std::string status = "command_denied";
+  std::string reason = "command permission denied";
+  if (approval_required)
+  {
+    message = macos_fallback ? "Command not executed: macOS native containment is unavailable and this command requires one-shot user approval."
+                             : "Command not executed: explicit user approval is required.";
+    status = "approval_required";
+    reason = "user approval required";
+  }
+  else if (resolution == "resolver_failed")
+  {
+    message = "Command not executed: the approval resolver failed.";
+    status = "approval_error";
+    reason = "approval resolver failed";
+  }
+  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::move(message));
+  error.with_context("command_status", std::move(status));
+  error.with_context("executed", "false");
+  error.with_context("reason", std::move(reason));
+  if (metadata)
+  {
+    error.with_context("containment", ava::permissions::to_string(metadata->containment_status));
+    if (!ava::permissions::command_permission_allows_reusable_grant(*metadata))
+    {
+      error.with_context("approval_scope", "once");
+    }
+  }
+  if (macos_fallback)
+  {
+    error.with_context("platform", "macos");
+  }
+  std::string next_action;
+  if (approval_required)
+  {
+    next_action =
+        "No approval prompt is active. Request the user's approval through the interactive TUI or RPC permission flow; wait while a prompt is pending. ";
+  }
+  next_action += "Do not retry or work around the permission system. Do not infer command output or repository state from this unexecuted command.";
+  error.with_context("next_action", std::move(next_action));
+  return error;
+}
+
 ava::core::Error permission_denied_error(std::string_view error_message, ava::permissions::Operation operation,
                                          ava::permissions::PermissionDecision const& decision, std::filesystem::path const& target_path,
                                          std::string_view command, std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata,
@@ -107,9 +155,13 @@ ava::core::Error permission_denied_error(std::string_view error_message, ava::pe
                                          std::string_view permission_request_id = {})
 {
   bool const run_command = operation == ava::permissions::Operation::RunCommand;
-  auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
+  auto error = run_command ? command_permission_error(decision, command_metadata, resolution_context)
+                           : ava::core::Error(ava::core::ErrorCategory::PermissionDenied, std::string(error_message));
   error.with_context("action", ava::permissions::to_string(decision.action));
-  error.with_context("reason", run_command ? "command permission denied" : decision.reason);
+  if (!run_command)
+  {
+    error.with_context("reason", decision.reason);
+  }
   error.with_context("risk", ava::permissions::to_string(decision.risk));
   if (!permission_request_id.empty())
   {

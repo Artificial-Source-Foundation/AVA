@@ -42,7 +42,14 @@ void test_acp_peer_lifecycle_notifications_and_duplicate_ids()
 {
   using namespace ava::app::acp;
   auto state = std::make_shared<MemoryTransportState>();
-  AgentService service("1.0.0");
+  auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-peer-lifecycle");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  AgentServiceOptions options;
+  options.agent_version = "1.0.0";
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
+  options.paths = ava::tests::app_test_paths(root);
+  AgentService service(std::move(options));
   JsonRpcPeer peer(
       std::make_unique<MemoryTransport>(state), [&service](Request const& request, std::stop_token token) { return service.handle_request(request, token); },
       [&service](Notification const& notification, std::stop_token token) { service.handle_notification(notification, token); });

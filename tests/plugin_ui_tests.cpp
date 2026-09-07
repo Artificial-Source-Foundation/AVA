@@ -897,8 +897,14 @@ ava::app::runtime::session_ts plugin_ui_test_session(ava::config::XdgPaths const
 
 std::string app_ui_script(std::string_view ui_text, int request_count = 1)
 {
+#ifdef __APPLE__
+  constexpr std::string_view sed = "/usr/bin/sed";
+#else
+  constexpr std::string_view sed = "/bin/sed";
+#endif
   std::string script = "IFS= read -r initialize\nprintf '%s\\n' '" + initialized_record() +
-                       "'\nIFS= read -r command\nrequest_id=$(printf '%s' \"$command\" | /bin/sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
+                       "'\nIFS= read -r command\nrequest_id=$(printf '%s' \"$command\" | " + std::string(sed) +
+                       " -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n";
   for (int index = 0; index < request_count; ++index)
   {
     if (index == 0)

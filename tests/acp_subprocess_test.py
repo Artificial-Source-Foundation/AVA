@@ -126,6 +126,17 @@ def start(ava, root, cwd=None, extra_env=None):
     )
 
 
+def process_environment(pid):
+    proc_environment = Path(f"/proc/{pid}/environ")
+    if proc_environment.exists():
+        return proc_environment.read_bytes()
+    inspected = subprocess.run(
+        ["ps", "eww", "-p", str(pid), "-o", "command="],
+        check=True, capture_output=True,
+    )
+    return inspected.stdout
+
+
 def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", target="unused"):
     provider = launch_fake_provider(
         executable,
@@ -226,8 +237,8 @@ def main():
     previous_parent_secret = os.environ.get(parent_secret_name)
     os.environ[parent_secret_name] = "must-not-reach-child"
     process = start(args.ava, root / "recovery")
-    child_environment = Path(f"/proc/{process.pid}/environ").read_bytes().split(b"\0")
-    assert not any(item.startswith(parent_secret_name.encode() + b"=") for item in child_environment)
+    child_environment = process_environment(process.pid)
+    assert parent_secret_name.encode() + b"=" not in child_environment
     if previous_parent_secret is None:
         os.environ.pop(parent_secret_name, None)
     else:

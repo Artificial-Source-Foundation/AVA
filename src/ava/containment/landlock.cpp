@@ -12,12 +12,40 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#ifdef __linux__
 #include <linux/landlock.h>
+#endif
 #include <sys/stat.h>
+#ifdef __linux__
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 namespace ava::containment {
+
+#ifdef __APPLE__
+// Stable Linux UAPI Landlock access-rights bits (linux/landlock.h), repeated
+// here so that rule-mask planning math compiles on macOS. Enforcement below
+// is stubbed out: containment plans always report Unavailable on Apple
+// platforms, so these masks never reach a kernel.
+#ifndef LANDLOCK_ACCESS_FS_EXECUTE
+#define LANDLOCK_ACCESS_FS_EXECUTE (1ULL << 0)
+#define LANDLOCK_ACCESS_FS_WRITE_FILE (1ULL << 1)
+#define LANDLOCK_ACCESS_FS_READ_FILE (1ULL << 2)
+#define LANDLOCK_ACCESS_FS_READ_DIR (1ULL << 3)
+#define LANDLOCK_ACCESS_FS_REMOVE_DIR (1ULL << 4)
+#define LANDLOCK_ACCESS_FS_REMOVE_FILE (1ULL << 5)
+#define LANDLOCK_ACCESS_FS_MAKE_CHAR (1ULL << 6)
+#define LANDLOCK_ACCESS_FS_MAKE_DIR (1ULL << 7)
+#define LANDLOCK_ACCESS_FS_MAKE_REG (1ULL << 8)
+#define LANDLOCK_ACCESS_FS_MAKE_SOCK (1ULL << 9)
+#define LANDLOCK_ACCESS_FS_MAKE_FIFO (1ULL << 10)
+#define LANDLOCK_ACCESS_FS_MAKE_BLOCK (1ULL << 11)
+#define LANDLOCK_ACCESS_FS_MAKE_SYM (1ULL << 12)
+#define LANDLOCK_ACCESS_FS_REFER (1ULL << 13)
+#define LANDLOCK_ACCESS_FS_TRUNCATE (1ULL << 14)
+#endif
+#endif
 
 // Landlock IOCTL_DEV was added in ABI 5 (Linux 6.2). The installed kernel
 // headers may predate it, so define the stable constant when absent.
@@ -90,6 +118,9 @@ ava::core::Error landlock_error(std::string message)
   return error;
 }
 
+#ifndef __APPLE__
+// The two syscall helpers below are Linux-only; on Apple, enforcement is
+// stubbed in apply_landlock_in_child and these are never called.
 [[nodiscard]] int landlock_create_ruleset_fd(std::uint64_t handled_access_fs)
 {
   struct landlock_ruleset_attr attr{};
@@ -123,6 +154,7 @@ ava::core::Error landlock_error(std::string message)
     return std::unexpected(landlock_error("failed to add Landlock filesystem rule"));
   return {};
 }
+#endif  // not __APPLE__
 
 }  // namespace
 
@@ -131,6 +163,9 @@ ava::core::VoidResult apply_landlock_in_child(DevelopmentContainmentPlan const& 
   if (plan.filesystem_rules.empty())
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "containment plan has no filesystem rules"));
 
+#ifdef __APPLE__
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Landlock filesystem enforcement is only available on Linux"));
+#else
   int const ruleset_fd = landlock_create_ruleset_fd(plan.handled_access_fs);
   if (ruleset_fd < 0)
   {
@@ -163,6 +198,7 @@ ava::core::VoidResult apply_landlock_in_child(DevelopmentContainmentPlan const& 
     return std::unexpected(landlock_error("failed to enforce Landlock ruleset"));
 
   return {};
+#endif
 }
 
 namespace {

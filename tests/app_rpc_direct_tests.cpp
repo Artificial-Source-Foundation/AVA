@@ -138,7 +138,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
     input_buffer.push("{\"id\":\"deny\",\"type\":\"permission_reply\",\"request_id\":\"" + *request_id +
                       "\",\"correlation_id\":\"cmd-deny\",\"decision\":\"deny\",\"reason\":\"not approved\"}\n");
   }
-  bool const denied = output_buffer.wait_contains("command requires permission", std::chrono::seconds(2));
+  bool const denied = output_buffer.wait_contains("command_denied", std::chrono::seconds(2));
   input_buffer.close();
   rpc_thread.join();
 
@@ -155,6 +155,7 @@ void test_app_rpc_direct_run_command_permission_denial_blocks_execution()
   auto const session_secret_absent =
       entries && std::ranges::all_of(*entries, [&](ava::session::SessionEntry const& entry) { return entry.data_json.find(secret) == std::string::npos; });
   expect(denied && jsonl.find("\"id\":\"cmd-deny\"") != std::string::npos && jsonl.find("\"tool\":\"bash\"") != std::string::npos &&
+             jsonl.contains("Command not executed: permission was denied.") &&
              count_substrings(jsonl, secret) == 1,
          "RPC direct command denial keeps the argument only in its permission prompt, not its reply diagnostics");
   expect(!std::filesystem::exists(workspace / "denied.txt"), "RPC direct command denial blocks process execution before side effects");

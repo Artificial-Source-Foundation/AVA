@@ -239,12 +239,21 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
 
     if (allow)
     {
-      emit_prompt_audit("tui:permission_allow", "permission allowed: " + prompt.tool_name, prompt.permission_request_id, prompt.tool_name, prompt.reason,
+      bool const macos_uncontained = prompt.command_metadata && ava::permissions::command_uses_macos_approval_fallback(*prompt.command_metadata);
+      char const* const receipt = macos_uncontained ? "permission allowed once; uncontained on macOS" : "permission allowed";
+      emit_prompt_audit("tui:permission_allow", std::string(receipt) + ": " + prompt.tool_name, prompt.permission_request_id, prompt.tool_name, prompt.reason,
                         remember ? "selected allow and remember" : "selected allow");
       {
         std::lock_guard<std::recursive_mutex> lock(ui_mutex);
         snapshot.permission_prompt.reset();
-        snapshot.status = remember ? "permission allow rule saved" : "permission allowed once";
+        if (macos_uncontained)
+        {
+          snapshot.status = receipt;
+        }
+        else
+        {
+          snapshot.status = remember ? "permission allow rule saved" : "permission allowed once";
+        }
       }
       if (!render())
       {

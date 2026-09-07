@@ -22,9 +22,9 @@ std::string render_permission_choice(std::string_view label, bool selected)
   return std::string(kSgrMuted) + text + std::string(kSgrReset);
 }
 
-std::string permission_dock_header(std::size_t width)
+auto permission_dock_header(std::size_t width, bool compact_macos_notice = false) -> std::string
 {
-  auto const label = width < 8 ? std::string("! PERM") : std::string("! Permission required");
+  auto const label = width < 8 ? std::string("! PERM") : std::string(compact_macos_notice ? "! macOS uncontained" : "! Permission required");
   return fit_line_preserving_sgr("  " + std::string(kSgrWarning) + std::string(kSgrBold) + label + std::string(kSgrReset), width);
 }
 
@@ -86,10 +86,16 @@ std::string permission_dock_compact_summary(PermissionPromptView const& prompt, 
 std::string permission_metadata_text(PermissionPromptView const& prompt)
 {
   std::vector<std::string> parts;
+  if (!prompt.security_notice.empty())
+  {
+    parts.push_back(sanitize_terminal_text(prompt.security_notice));
+  }
   if (!prompt.risk.empty())
     parts.push_back("risk " + sanitize_terminal_text(prompt.risk));
-  if (!prompt.reason.empty())
+  if (prompt.security_notice.empty() && !prompt.reason.empty())
+  {
     parts.push_back("reason " + sanitize_terminal_text(prompt.reason));
+  }
   if (parts.empty())
     return {};
 
@@ -664,6 +670,7 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
                         ? permission_guidance_dock_keys(width)
                         : permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
   auto const guidance_line = prompt.guidance_mode ? permission_guidance_line(prompt, width) : std::string{};
+  auto header = permission_dock_header(width, max_lines <= 4 && !prompt.security_notice.empty());
   auto const remember_preview = !prompt.guidance_mode ? permission_remember_preview_line(prompt, width) : std::string{};
 
   if (prompt.guidance_mode)
@@ -680,7 +687,7 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
       lines.push_back(keys);
       return lines;
     }
-    lines.push_back(permission_dock_header(width));
+    lines.push_back(header);
     if (max_lines == 3)
     {
       lines.push_back(guidance_line);
@@ -702,7 +709,7 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
     return lines;
   }
 
-  lines.push_back(permission_dock_header(width));
+  lines.push_back(header);
   if (max_lines == 2)
   {
     lines.push_back(actions);

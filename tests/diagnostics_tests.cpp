@@ -424,7 +424,8 @@ void test_trace_counter_writes_aggregate_sequentially_concurrently_and_saturate(
   for (auto const child : children)
   {
     int status = 0;
-    children_succeeded = children_succeeded && ::waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    bool const succeeded = child > 0 && ::waitpid(child, &status, 0) == child && WIFEXITED(status) && WEXITSTATUS(status) == 0;
+    children_succeeded = children_succeeded && succeeded;
   }
   auto concurrent = ava::diagnostics::read_trace_counter_snapshot(concurrent_paths, *concurrent_anchors);
   expect(children_succeeded && concurrent.record && concurrent.record->captured_at == 8 && concurrent.record->runtime_starts == 36 &&

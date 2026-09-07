@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <array>
 #include <concepts>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <optional>
@@ -24,6 +25,34 @@
 namespace {
 
 namespace command = ava::command;
+
+bool group_has_member_other_than(group const& resolved, std::string_view account_name)
+{
+#ifdef __APPLE__
+  auto const* member_bytes = reinterpret_cast<unsigned char const*>(resolved.gr_mem);
+  while (member_bytes)
+  {
+    char* member = nullptr;
+    std::memcpy(&member, member_bytes, sizeof(member));
+    if (!member)
+      break;
+    if (std::string_view(member) != account_name)
+      return true;
+    member_bytes += sizeof(member);
+  }
+#else
+  for (auto const* const* member = resolved.gr_mem; member && *member; ++member)
+    if (std::string_view(*member) != account_name)
+      return true;
+#endif
+  return false;
+}
+
+#ifdef __APPLE__
+constexpr char kSystemLs[] = "/bin/ls";
+#else
+constexpr char kSystemLs[] = "/usr/bin/ls";
+#endif
 
 static_assert(!std::default_initializable<command::CommandEnvironment>);
 static_assert(!std::default_initializable<command::CommandPlan>);
@@ -151,6 +180,11 @@ std::optional<gid_t> private_primary_group_for_test()
   auto const account = current_account_for_test();
   if (!account)
     return std::nullopt;
+#ifdef __APPLE__
+  group* resolved = ::getgrgid(account->second);
+  if (!resolved || !resolved->gr_name || std::string_view(resolved->gr_name) != account->first)
+    return std::nullopt;
+#else
   std::array<char, 16 * 1024> storage{};
   group record{};
   group* resolved = nullptr;
@@ -159,11 +193,9 @@ std::optional<gid_t> private_primary_group_for_test()
   {
     return std::nullopt;
   }
-  for (auto const* const* member = resolved->gr_mem; member && *member; ++member)
-  {
-    if (std::string_view(*member) != account->first)
-      return std::nullopt;
-  }
+#endif
+  if (group_has_member_other_than(*resolved, account->first))
+    return std::nullopt;
   return resolved->gr_gid;
 }
 
@@ -182,16 +214,19 @@ std::optional<gid_t> shared_supplementary_group_for_test()
   {
     if (candidate == account->second)
       continue;
+#ifdef __APPLE__
+    group* resolved = ::getgrgid(candidate);
+    if (!resolved)
+      continue;
+#else
     std::array<char, 16 * 1024> storage{};
     group record{};
     group* resolved = nullptr;
     if (::getgrgid_r(candidate, &record, storage.data(), storage.size(), &resolved) != 0 || !resolved)
       continue;
-    for (auto const* const* member = resolved->gr_mem; member && *member; ++member)
-    {
-      if (std::string_view(*member) != account->first)
-        return candidate;
-    }
+#endif
+    if (group_has_member_other_than(*resolved, account->first))
+      return candidate;
   }
   return std::nullopt;
 }
@@ -419,7 +454,7 @@ void test_recipe_paths_are_logical_sealed_and_fresh()
     std::string executable;
     std::vector<std::string> prefix;
   };
-  std::vector<RecipeCase> const cases{{"ls", "/usr/bin/ls", {}}, {"cmake", "cmake", {"--build"}}, {"ctest", "ctest", {"--test-dir"}}, {"pytest", "pytest", {}}};
+  std::vector<RecipeCase> const cases{{"ls", kSystemLs, {}}, {"cmake", "cmake", {"--build"}}, {"ctest", "ctest", {"--test-dir"}}, {"pytest", "pytest", {}}};
   bool all_escaped_downgraded = true;
   bool all_replacements_stale = true;
   bool all_paths_bound = true;
@@ -1078,7 +1113,7 @@ void test_ancestor_freshness_detects_mode_and_replacement()
   std::filesystem::create_directories(target);
   ::chmod(parent.c_str(), S_IRWXU);
   ::chmod(target.c_str(), S_IRWXU);
-  auto recipe_plan = command::seal_command_plan(*command::CommandIntent::structured({"/usr/bin/ls", "recipe-parent/target"}), recipe_fixture.options());
+  auto recipe_plan = command::seal_command_plan(*command::CommandIntent::structured({kSystemLs, "recipe-parent/target"}), recipe_fixture.options());
   ::chmod(parent.c_str(), S_IRWXU | S_IWGRP);
   auto recipe_changed = recipe_plan ? command::plan_is_fresh(*recipe_plan)
                                     : ava::core::Result<bool>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "no plan"))};

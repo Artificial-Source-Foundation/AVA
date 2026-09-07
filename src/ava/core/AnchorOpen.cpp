@@ -5,6 +5,11 @@
 #include "ava/core/open_beneath.h"
 
 #include <cerrno>
+#ifdef __APPLE__
+#include <array>
+#include <cstring>
+#include <limits.h>
+#endif
 #include <cstdint>
 #include <deque>
 #include <filesystem>
@@ -112,6 +117,9 @@ UniqueFd open_root()
   return UniqueFd(fd);
 }
 
+#ifndef __APPLE__
+// On macOS open_component() below replaces this: without O_PATH, opening a
+// symlink itself with O_NOFOLLOW fails instead of returning a link fd.
 UniqueFd open_nofollow(int directory, std::filesystem::path const& component)
 {
   int const fd = ::openat(directory, component.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
@@ -121,7 +129,64 @@ UniqueFd open_nofollow(int directory, std::filesystem::path const& component)
 
   return UniqueFd(fd);
 }
+#endif
 
+#ifdef __APPLE__
+struct OpenedComponent
+{
+  UniqueFd object;
+  bool is_symlink = false;
+};
+
+// macOS has no O_PATH, so opening a symlink itself with O_NOFOLLOW fails with
+// ELOOP instead of returning a link descriptor. Detect that case (confirming
+// with fstatat so a genuine resolution failure still throws) and report the
+// component as a symlink; the caller reads its target by name.
+OpenedComponent open_component(int directory, std::filesystem::path const& component)
+{
+  int const fd = ::openat(directory, component.c_str(), O_PATH | O_NOFOLLOW | O_CLOEXEC);
+
+  if (fd == -1 && errno == ELOOP)
+  {
+    struct stat status{};
+    if (::fstatat(directory, component.c_str(), &status, AT_SYMLINK_NOFOLLOW) == 0 && S_ISLNK(status.st_mode))
+      return OpenedComponent{UniqueFd(), true};
+    throw_errno("openat(path component)");
+  }
+  if (fd == -1)
+    throw_errno("openat(path component)");
+
+  return OpenedComponent{UniqueFd(fd), false};
+}
+
+// Read a symlink by name relative to its already-resolved parent descriptor.
+// Used on macOS where open_component cannot return a link descriptor.
+std::string read_link_at(int directory, std::filesystem::path const& component)
+{
+  std::string target(256, '\0');
+
+  for (;;)
+  {
+    ssize_t const length = ::readlinkat(directory, component.c_str(), target.data(), target.size());
+
+    if (length == -1)
+      throw_errno("readlinkat");
+
+    if (static_cast<std::size_t>(length) < target.size())
+    {
+      target.resize(static_cast<std::size_t>(length));
+      return target;
+    }
+
+    if (target.size() > 1024 * 1024)
+      throw_error(ENAMETOOLONG, "readlinkat");
+
+    target.resize(2 * target.size());
+  }
+}
+#endif
+
+#ifndef __APPLE__
 UniqueFd open_parent(int directory)
 {
   int const fd = ::openat(directory, "..", O_PATH | O_DIRECTORY | O_CLOEXEC);
@@ -131,6 +196,7 @@ UniqueFd open_parent(int directory)
 
   return UniqueFd(fd);
 }
+#endif
 
 mode_t file_type(int fd)
 {
@@ -142,6 +208,7 @@ mode_t file_type(int fd)
   return status.st_mode & S_IFMT;
 }
 
+#ifndef __APPLE__
 std::string read_link(int fd)
 {
   std::string target(256, '\0');
@@ -165,6 +232,7 @@ std::string read_link(int fd)
     target.resize(2 * target.size());
   }
 }
+#endif
 
 struct FileId
 {
@@ -176,6 +244,17 @@ struct FileId
 
 FileId file_id(int fd)
 {
+#ifdef __APPLE__
+  // macOS has no statx(2): st_dev identifies the filesystem (mount) and st_ino
+  // the file, which is the same identity the anchor checks need. fstat works
+  // on the O_RDONLY fallback fds used here in place of Linux O_PATH.
+  struct stat status{};
+
+  if (::fstat(fd, &status) == -1)
+    throw_errno("fstat");
+
+  return {static_cast<std::uint64_t>(status.st_dev), static_cast<std::uint64_t>(status.st_ino)};
+#else
   struct statx status{};
   unsigned int constexpr mask = STATX_INO | STATX_MNT_ID;
 
@@ -186,8 +265,55 @@ FileId file_id(int fd)
     throw_error(ENOTSUP, "statx did not return inode and mount IDs");
 
   return {status.stx_mnt_id, status.stx_ino};
+#endif
 }
 
+#ifdef __APPLE__
+std::filesystem::path physical_directory_path(int fd)
+{
+  if (file_type(fd) != S_IFDIR)
+    throw_error(ENOTDIR, "physical path requires a directory descriptor");
+  std::array<char, PATH_MAX> buffer{};
+  if (::fcntl(fd, F_GETPATH_NOFIRMLINK, buffer.data()) == -1)
+    throw_errno("fcntl(F_GETPATH_NOFIRMLINK)");
+  if (::strnlen(buffer.data(), buffer.size()) == buffer.size())
+    throw_error(ENAMETOOLONG, "unterminated physical directory path");
+  std::filesystem::path path(buffer.data());
+  if (!path.is_absolute() || path != path.lexically_normal())
+    throw_error(EIO, "ambiguous physical directory path");
+  return path;
+}
+
+struct PhysicalAnchor
+{
+  FileId identity;
+  int fd;  // Borrowed from the AnchorSet retained for this synchronous resolution.
+  std::filesystem::path path;
+};
+
+bool is_beneath_any_anchor(int directory, std::vector<PhysicalAnchor> const& anchors)
+{
+  auto const identity = file_id(directory);
+  auto const path = physical_directory_path(directory);
+  for (auto const& anchor : anchors)
+  {
+    if (file_id(anchor.fd) != anchor.identity || physical_directory_path(anchor.fd) != anchor.path)
+      throw_error(EIO, "anchor changed during external resolution");
+    // The component-relative path selects a possible location; it is not
+    // authority. In particular, /a/b must not match /a/b-other.
+    auto const relative = path.lexically_relative(anchor.path);
+    if (relative.empty() || *relative.begin() == "..")
+      continue;
+    UniqueFd proof(open_beneath(anchor.fd, relative, O_RDONLY | O_DIRECTORY | O_CLOEXEC));
+    if (proof.get() == -1)
+      throw_errno("open_beneath(physical descendant)");
+    if (file_id(proof.get()) != identity || physical_directory_path(directory) != path)
+      throw_error(EIO, "physical descendant identity changed");
+    return true;
+  }
+  return false;
+}
+#else
 bool is_beneath_any_anchor(int directory, std::vector<FileId> const& anchor_ids)
 {
   UniqueFd current = duplicate_fd(directory);
@@ -211,6 +337,7 @@ bool is_beneath_any_anchor(int directory, std::vector<FileId> const& anchor_ids)
     current_id = parent_id;
   }
 }
+#endif
 
 struct ResolvedPath
 {
@@ -218,6 +345,9 @@ struct ResolvedPath
   UniqueFd parent;
   std::filesystem::path final_component;
   bool is_directory;
+#ifdef __APPLE__
+  std::filesystem::path name;
+#endif
 };
 
 std::vector<std::filesystem::path> path_components(std::filesystem::path const& path)
@@ -230,7 +360,11 @@ std::vector<std::filesystem::path> path_components(std::filesystem::path const& 
   return result;
 }
 
+#ifdef __APPLE__
+bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<PhysicalAnchor> const& anchor_ids)
+#else
 bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& anchor_ids)
+#endif
 {
   int const directory = path.is_directory ? path.object.get() : path.parent.get();
 
@@ -239,6 +373,60 @@ bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& 
 
 Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesystem::path const& absolute, bool nofollow_logical_final)
 {
+#ifdef __APPLE__
+  std::vector<PhysicalAnchor> anchor_ids;
+  anchor_ids.reserve(anchors.anchors().size());
+  for (auto const& anchor : anchors.anchors())
+    anchor_ids.push_back({file_id(anchor.fd), anchor.fd, physical_directory_path(anchor.fd)});
+
+  // Retain the forward path's directories. Darwin reverse parent lookup can
+  // follow namespace aliases, so a relative symlink's .. uses this owned stack.
+  std::vector<UniqueFd> directories;
+  directories.push_back(open_root());
+  std::deque<std::filesystem::path> components;
+  for (auto const& component : path_components(absolute)) components.push_back(component);
+  unsigned int followed_symlinks = 0;
+  while (!components.empty())
+  {
+    auto component = std::move(components.front());
+    components.pop_front();
+    if (component.empty() || component == ".")
+      continue;
+    if (component == "..")
+    {
+      if (directories.size() > 1)
+        directories.pop_back();
+      if (is_beneath_any_anchor(directories.back().get(), anchor_ids))
+        return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
+      continue;
+    }
+    OpenedComponent opened = open_component(directories.back().get(), component);
+    if (opened.is_symlink)
+    {
+      if (++followed_symlinks > 40)
+        throw_error(ELOOP, "symbolic-link resolution");
+      std::filesystem::path const target(read_link_at(directories.back().get(), component));
+      if (target.is_absolute())
+        directories.resize(1);
+      auto const target_components = path_components(target);
+      for (auto it = target_components.rbegin(); it != target_components.rend(); ++it) components.push_front(*it);
+      continue;
+    }
+    bool const is_directory = file_type(opened.object.get()) == S_IFDIR;
+    ResolvedPath resolved{std::move(opened.object), duplicate_fd(directories.back().get()), is_directory, std::move(component)};
+    if (is_beneath_any_anchor(resolved, anchor_ids))
+      return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
+    if (components.empty())
+      return resolved;
+    if (!is_directory)
+      throw_error(ENOTDIR, "non-directory pathname component");
+    directories.push_back(std::move(resolved.object));
+  }
+  ResolvedPath resolved{duplicate_fd(directories.back().get()), duplicate_fd(directories.back().get()), true, "."};
+  if (is_beneath_any_anchor(resolved, anchor_ids))
+    return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
+  return resolved;
+#else
   auto const& anchor_list = anchors.anchors();
   std::vector<FileId> anchor_ids;
   anchor_ids.reserve(anchor_list.size());
@@ -299,10 +487,28 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
   if (is_beneath_any_anchor(resolved, anchor_ids))
     return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
   return resolved;
+#endif
 }
 
 UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags, mode_t mode)
 {
+#ifdef __APPLE__
+  // Reopen only from the inspected, retained parent; the held object remains
+  // alive while identity equality is checked. Never reopen an absolute path.
+  auto const expected = file_id(resolved.object.get());
+  int const fd = open_beneath(resolved.parent.get(), resolved.name, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW | (flags & O_DIRECTORY));
+  if (fd == -1)
+    throw_errno("open_beneath(inspected object)");
+  UniqueFd reopened(fd);
+  // The O_PATH fallback carries O_NONBLOCK (see cmake/macos-compat.h); clear
+  // it so the usable fd keeps Linux blocking I/O semantics.
+  int const status_flags = ::fcntl(reopened.get(), F_GETFL);
+  if (status_flags != -1 && (status_flags & O_NONBLOCK) != 0)
+    static_cast<void>(::fcntl(reopened.get(), F_SETFL, status_flags & ~O_NONBLOCK));
+  if (file_id(reopened.get()) != expected)
+    throw_error(EIO, "reopened fd identity mismatch");
+  return reopened;
+#else
   auto const expected = file_id(resolved.object.get());
   invoke_external_reopen_hook();
   int const fd = resolved.parent.get() >= 0 ? ::openat(resolved.parent.get(), resolved.final_component.c_str(), flags | O_NOFOLLOW | O_CLOEXEC, mode)
@@ -313,6 +519,7 @@ UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags, mode_t 
   if (file_id(reopened.get()) != expected)
     throw_error(EIO, "resolved external target identity mismatch");
   return reopened;
+#endif
 }
 
 // Build an error for a failed open, translating the errno into the category
@@ -323,8 +530,19 @@ UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags, mode_t 
 // (empty for external reads).
 Error open_path_error(std::string const& message, int error_number, std::filesystem::path const& path, std::filesystem::path const& anchor_root = {})
 {
+#ifdef __APPLE__
+  // This target reports native beneath escapes as EACCES. Other Darwin SDKs
+  // may expose ENOTCAPABLE; do not invent its numeric value on older SDKs.
+  bool const escape_error = error_number == ELOOP || error_number == EXDEV || error_number == EACCES
+#ifdef ENOTCAPABLE
+      || error_number == ENOTCAPABLE
+#endif
+      ;
+  ErrorCategory const category = escape_error ? ErrorCategory::PermissionDenied : (error_number == ENOENT ? ErrorCategory::NotFound : ErrorCategory::Io);
+#else
   ErrorCategory const category = (error_number == ELOOP || error_number == EXDEV) ? ErrorCategory::PermissionDenied
                                                                                   : (error_number == ENOENT ? ErrorCategory::NotFound : ErrorCategory::Io);
+#endif
   auto error = Error(category, message);
   if (!path.empty())
     error.with_context("path", path.string());

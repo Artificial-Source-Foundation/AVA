@@ -75,7 +75,22 @@ bool has_elf_identity(int fd)
   {
     bytes = ::pread(fd, magic.data(), magic.size(), 0);
   } while (bytes < 0 && errno == EINTR);
-  return bytes == static_cast<ssize_t>(magic.size()) && magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F';
+  if (bytes != static_cast<ssize_t>(magic.size()))
+    return false;
+  if (magic[0] == 0x7f && magic[1] == 'E' && magic[2] == 'L' && magic[3] == 'F')
+    return true;
+#ifdef __APPLE__
+  // Mach-O binaries use their own magic instead of ELF: 64-bit and 32-bit
+  // Mach-O headers (little-endian) and fat/universal binaries (big-endian).
+  // Scripts (#!) stay rejected here exactly like on Linux.
+  if (magic[0] == 0xcf && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe)
+    return true;
+  if (magic[0] == 0xce && magic[1] == 0xfa && magic[2] == 0xed && magic[3] == 0xfe)
+    return true;
+  if (magic[0] == 0xca && magic[1] == 0xfe && magic[2] == 0xba && (magic[3] == 0xbe || magic[3] == 0xbf))
+    return true;
+#endif
+  return false;
 }
 
 std::optional<ExecutableIdentity> inspect_executable(std::filesystem::path const& candidate, bool user_owned, std::filesystem::path const& workspace_root,
@@ -113,14 +128,28 @@ std::optional<ExecutableIdentity> inspect_executable(std::filesystem::path const
       .device = static_cast<std::uintmax_t>(opened_metadata.st_dev),
       .inode = static_cast<std::uintmax_t>(opened_metadata.st_ino),
       .size = static_cast<std::uintmax_t>(opened_metadata.st_size),
+#ifdef __APPLE__
+      // macOS names the change-time member st_ctimespec; Linux st_ctim.
+      .changed_seconds = static_cast<std::int64_t>(opened_metadata.st_ctimespec.tv_sec),
+      .changed_nanoseconds = static_cast<std::int64_t>(opened_metadata.st_ctimespec.tv_nsec),
+#else
       .changed_seconds = static_cast<std::int64_t>(opened_metadata.st_ctim.tv_sec),
       .changed_nanoseconds = static_cast<std::int64_t>(opened_metadata.st_ctim.tv_nsec),
+#endif
   };
 }
 
 std::vector<std::filesystem::path> default_system_directories()
 {
+#ifdef __APPLE__
+  // /usr/bin/clangd is an xcrun shim, not the language server. Discover the
+  // actual Apple toolchain binary through the same root-owned, non-symlink
+  // directory and executable checks used for other system installations.
+  return {"/Library/Developer/CommandLineTools/usr/bin", "/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin",
+          "/usr/local/bin", "/usr/bin", "/bin"};
+#else
   return {"/usr/local/bin", "/usr/bin", "/bin"};
+#endif
 }
 
 std::vector<std::filesystem::path> default_user_directories()

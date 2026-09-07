@@ -149,6 +149,43 @@ ava::core::Result<std::shared_ptr<AnchorSet>> AnchorSet::open(std::vector<std::f
   return set;
 }
 
+auto AnchorSet::with_directory_fd(std::filesystem::path const& root, int directory_fd) const -> Result<std::shared_ptr<AnchorSet>>
+{
+  struct stat retained{};
+  struct stat named{};
+  if (!root.is_absolute() || ::fstat(directory_fd, &retained) != 0 || !S_ISDIR(retained.st_mode) || ::lstat(root.c_str(), &named) != 0 ||
+      !S_ISDIR(named.st_mode) || retained.st_dev != named.st_dev || retained.st_ino != named.st_ino)
+  {
+    return std::unexpected(anchor_error("private directory descriptor does not match its pathname", root));
+  }
+  auto set = std::make_shared<AnchorSet>(AnchorSet{});
+  set->anchors_.reserve(anchors_.size() + 1);
+  auto duplicate = [&set](int descriptor, std::filesystem::path const& path) -> VoidResult {
+    // Copy the path before acquiring the descriptor, so allocation failure
+    // cannot strand an unowned descriptor.
+    Anchor anchor{.fd = -1, .root = path};
+    anchor.fd = ::fcntl(descriptor, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    if (anchor.fd < 0)
+    {
+      return std::unexpected(anchor_error("failed to duplicate retained directory anchor", path, errno));
+    }
+    set->anchors_.push_back(std::move(anchor));
+    return {};
+  };
+  for (auto const& anchor : anchors_)
+  {
+    if (auto copied = duplicate(anchor.fd, anchor.root); !copied)
+    {
+      return std::unexpected(std::move(copied.error()));
+    }
+  }
+  if (auto copied = duplicate(directory_fd, root.lexically_normal()); !copied)
+  {
+    return std::unexpected(std::move(copied.error()));
+  }
+  return set;
+}
+
 ava::core::Result<AnchorSet::AnchorRef> AnchorSet::find_anchor(std::filesystem::path const& candidate) const
 {
   DoutEntering(dc::core, "AnchorSet::find_anchor(" << candidate << ")");

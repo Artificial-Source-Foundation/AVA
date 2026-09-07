@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import json
+import platform
 import re
+import subprocess
 
 from tui_smoke_helpers import (
     SmokeContext,
@@ -15,6 +18,7 @@ from tui_smoke_helpers import (
     wait_for,
     wait_for_absent,
     wait_for_screen_change,
+    wait_for_screen_state,
 )
 from .common import _finish_main, _main_session
 
@@ -420,7 +424,7 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
     seq_result = wait_for(
         tmux_exe,
         session,
-        r"(?s)Command /bash.*exit: 0",
+        r"(?s)Command /bash.*exit: 0.*\d+-\d+/\d+.*Enter close",
         "allowed bounded local bash spill modal",
         timeout=30.0,
     )
@@ -430,8 +434,14 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
 
     initial_footer = re.search(r"(\d+)-(\d+)/(\d+)", seq_result)
     send_literal(tmux_exe, session, "\x1b[<65;4;6M" * 8)
-    wait_for_screen_change(tmux_exe, session, seq_result, "bounded local bash modal wheel scroll redraw")
-    wheel_scrolled = capture(tmux_exe, session)
+    if not initial_footer:
+        raise RuntimeError(f"bounded command output has no scroll footer\nscreen:\n{seq_result}")
+    def wheel_advanced(screen: str) -> bool:
+        footer = re.search(r"(\d+)-(\d+)/(\d+)", screen)
+        return footer is not None and int(footer.group(1)) > int(initial_footer.group(1))
+    wheel_scrolled = wait_for_screen_state(
+        tmux_exe, session, wheel_advanced, "bounded local bash modal wheel viewport advanced"
+    )
     wheel_footer = re.search(r"(\d+)-(\d+)/(\d+)", wheel_scrolled)
     if not initial_footer or not wheel_footer or int(wheel_footer.group(1)) <= int(initial_footer.group(1)):
         raise RuntimeError(f"command-output mouse wheel did not advance the bounded viewport\nscreen:\n{wheel_scrolled}")
@@ -496,3 +506,88 @@ def scenario_main_permission_flow(ctx: SmokeContext) -> None:
         raise RuntimeError(f"prior local command invocations remained after the final modal closed\nscreen:\n{seq_closed}")
 
     _finish_main(tmux_exe, session)
+
+    if platform.system() == "Darwin":
+        # Use a recognized build recipe: generic scripts are already Critical
+        # on both backends. /bash also deliberately selects raw-shell mode, so
+        # exercise the sealed agent command path through a local fake provider.
+        workspace = ctx.active_workspace
+        session = ctx.session_name("macos-command-security")
+        native_command = workspace / "cmake"
+        native_marker = workspace / "native-approval-count"
+        (workspace / "build").mkdir(mode=0o700, exist_ok=True)
+        native_command.write_text("#!/bin/sh\nprintf 'ran\\n' >> native-approval-count\nprintf 'native-approved-command-complete\\n'\n")
+        native_command.chmod(0o700)
+        models_path = ctx.active_ava_config / "models.json"
+        models = json.loads(models_path.read_text())
+        models["models"][0]["supports_tools"] = True
+        models_path.write_text(json.dumps(models) + "\n")
+        provider = ctx.start_fake_provider("macos-command-security", delay_ms=0, scenario="bash-build-twice")
+        command = "AVA_SESSION_TITLES=off " + ctx.fake_provider_command(
+            provider, home=ctx.active_home, config=ctx.active_config, state=ctx.active_state, data=ctx.active_data
+        )
+        ctx.launch_ava(session, workspace=workspace, command=command)
+        wait_for(tmux_exe, session, r"Type a message|live session", "macOS command-security initial frame")
+
+        def request_native_command(label: str) -> str:
+            send_literal(tmux_exe, session, "run the fixture build")
+            send_keys(tmux_exe, session, "Enter")
+            screen = wait_for(tmux_exe, session, r"(?s)Permission required.*macOS uncontained.*not executed.*risk critical.*Allow once", label)
+            if "Always allow" in screen or "Allow session" in screen:
+                raise RuntimeError(f"macOS command exposed reusable approval\nscreen:\n{screen}")
+            return screen
+
+        native_prompt = request_native_command("native macOS uncontained command prompt")
+        save_evidence(root, "macos-uncontained-one-time-prompt", native_prompt)
+        send_keys(tmux_exe, session, "Down")
+        send_literal(tmux_exe, session, "SR")
+        no_reuse = wait_for(tmux_exe, session, r"(?s)macOS uncontained.*› Allow once", "macOS rejects session and remembered-Allow shortcuts")
+        if native_marker.exists():
+            raise RuntimeError("macOS command ran through a reusable-approval shortcut")
+        save_evidence(root, "macos-no-reusable-allow", no_reuse)
+        send_keys(tmux_exe, session, "Enter")
+        completed = wait_for(tmux_exe, session, r"native approved turn complete", "macOS one-time approved command completed")
+        if native_marker.read_text() != "ran\n":
+            raise RuntimeError("macOS approved command did not execute exactly once")
+        save_evidence(root, "macos-approved-command", completed)
+        request_native_command("macOS repeats approval for the same command")
+        send_keys(tmux_exe, session, "Escape")
+        rejected = wait_for(
+            tmux_exe, session, r"(?s)x bash.*Command not executed: permission was denied.*stopped by user", "macOS repeated command rejected"
+        )
+        if native_marker.read_text() != "ran\n":
+            raise RuntimeError("macOS command executed after denial or reused its previous approval")
+        save_evidence(root, "macos-repeated-command-denied", rejected)
+        _finish_main(tmux_exe, session)
+
+        subprocess.run(
+            ["/usr/bin/git", "init", str(workspace)], check=True, capture_output=True, timeout=10,
+            env={"PATH": "/usr/bin:/bin", "HOME": str(ctx.active_home), "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null"},
+        )
+        session = ctx.session_name("macos-git-approval")
+        git_provider = ctx.start_fake_provider("macos-git-approval", delay_ms=0, scenario="bash-git-status")
+        command = "AVA_SESSION_TITLES=off " + ctx.fake_provider_command(
+            git_provider, home=ctx.active_home, config=ctx.active_config, state=ctx.active_state, data=ctx.active_data
+        )
+        ctx.launch_ava(session, workspace=workspace, command=command)
+        wait_for(tmux_exe, session, r"Type a message", "native git approval initial frame")
+        send_literal(tmux_exe, session, "check git status")
+        send_keys(tmux_exe, session, "Enter")
+        pending_git = wait_for(
+            tmux_exe, session, r"(?s)Permission required.*\$ git status.*macOS uncontained.*not executed.*Allow once", "git status awaits one-shot approval"
+        )
+        if len(re.findall(r"(?m)^--- request \d+ ---$", git_provider.request_log.read_text())) != 1:
+            raise RuntimeError("model continued before the pending git approval was resolved")
+        if "Always allow" in pending_git or "Allow session" in pending_git:
+            raise RuntimeError("native git approval exposed a reusable Allow")
+        save_evidence(root, "macos-git-status-pending", pending_git)
+        send_keys(tmux_exe, session, "A", "Enter")
+        completed_git = wait_for(tmux_exe, session, r"git status approved turn complete", "native git approved result returned to model")
+        requests = re.split(r"(?m)^--- request \d+ ---\n", git_provider.request_log.read_text())[1:]
+        last_request = json.loads(requests[-1].split("\n\n", 1)[1])
+        results = [json.loads(message["content"]) for message in last_request["messages"] if message.get("role") == "tool"]
+        if len(results) != 1 or results[0].get("command_status") != "completed" or results[0].get("exit_code") != 0 or "No commits yet" not in results[0].get("output", ""):
+            raise RuntimeError("approved git status did not return actual repository output to the model")
+        (root / "macos-git-model-payload.json").write_text(json.dumps(results[0], indent=2) + "\n")
+        save_evidence(root, "macos-git-status-approved", completed_git)
+        _finish_main(tmux_exe, session)

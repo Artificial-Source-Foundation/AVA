@@ -52,7 +52,14 @@ namespace runtime = ava::app::runtime;
 void test_acp_service_gating_reinitialize_and_negotiation()
 {
   using namespace ava::app::acp;
-  AgentService service("1.0.0");
+  auto const root = std::filesystem::temp_directory_path() / ava::core::make_id("acp-service-gating");
+  auto const workspace = root / "workspace";
+  std::filesystem::create_directories(workspace);
+  AgentServiceOptions options;
+  options.agent_version = "1.0.0";
+  options.launch_root = ava::core::normalized_absolute_path(workspace);
+  options.paths = ava::tests::app_test_paths(root);
+  AgentService service(std::move(options));
   Request before{.id = std::int64_t(1), .method = "session/new", .params_json = std::string("{}")};
   auto preinit = service.handle_request(before, {});
   expect(!preinit && preinit.error().code == -32600, "ACP service rejects methods before initialize");

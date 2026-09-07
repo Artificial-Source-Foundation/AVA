@@ -449,6 +449,7 @@ class SmokeContext:
     editor_command: str = field(init=False)
     _environment: dict[str, str] = field(init=False)
     _state_directory: tempfile.TemporaryDirectory[str] | None = field(default=None, init=False, repr=False)
+    _socket_directory: tempfile.TemporaryDirectory[str] | None = field(default=None, init=False, repr=False)
     _providers: list[FakeProvider] = field(default_factory=list, init=False)
     _closed: bool = field(default=False, init=False)
 
@@ -461,7 +462,11 @@ class SmokeContext:
             tmux_home = self.root / "tmux-home"
             tmux_home.mkdir(mode=0o700)
             self._environment = _compatibility_environment(home=tmux_home, tmpdir=tmpdir)
-            self.tmux = TmuxClient(self.tmux_exe, self.root / "tmux.sock", self._environment)
+            # Darwin AF_UNIX paths fit only 104 bytes. Keep the server socket
+            # in its own private short directory regardless of checkout depth.
+            self._socket_directory = tempfile.TemporaryDirectory(prefix="ava-tmux-", dir="/tmp")
+            socket_path = pathlib.Path(self._socket_directory.name) / "tmux.sock"
+            self.tmux = TmuxClient(self.tmux_exe, socket_path, self._environment)
             self._prepare_fixture()
             # The first new-session command starts the private server atomically.
             # A separate start-server races tmux's default exit-empty teardown
@@ -789,13 +794,19 @@ class SmokeContext:
                     tmux_client.close()
                 finally:
                     # tmux may leave a dead custom socket pathname after kill-server. It is
-                    # inside this scenario's guarded leaf; never touch the shared parent.
+                    # inside this scenario's private directory; never touch the shared parent.
                     tmux_client.socket_path.unlink(missing_ok=True)
         finally:
-            state_directory = self._state_directory
-            if state_directory is not None:
-                state_directory.cleanup()
-                self._state_directory = None
+            try:
+                state_directory = self._state_directory
+                if state_directory is not None:
+                    state_directory.cleanup()
+                    self._state_directory = None
+            finally:
+                socket_directory = self._socket_directory
+                if socket_directory is not None:
+                    socket_directory.cleanup()
+                    self._socket_directory = None
 
     def __enter__(self) -> "SmokeContext":
         return self

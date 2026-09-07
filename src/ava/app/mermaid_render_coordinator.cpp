@@ -3,6 +3,9 @@
 #include "ava/app/mermaid_render_coordinator.h"
 #include "ava/core/json.h"
 #include "ava/core/thread.h"
+#ifdef __APPLE__
+#include "ava/core/fd_exec.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -188,6 +191,10 @@ void descriptor_exec(int executable_fd, char* const argv[], char* const environm
 {
 #if defined(__linux__) && defined(SYS_execveat) && defined(AT_EMPTY_PATH)
   static_cast<void>(::syscall(SYS_execveat, executable_fd, "", argv, environment, AT_EMPTY_PATH));
+#elif defined(__APPLE__)
+  // macOS has neither execveat(2) nor fexecve(3) and refuses to execute
+  // /dev/fd/N (EACCES); verify the fd identity at its own path and exec that.
+  static_cast<void>(ava::core::exec_verified_fd(executable_fd, argv, environment));
 #elif !defined(__linux__)
   static_cast<void>(::fexecve(executable_fd, argv, environment));
 #else

@@ -12,6 +12,12 @@ set(CURSES_NEED_NCURSES TRUE)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 
+# FindCurses reports required compiler flags (e.g. Homebrew ncursesw needs
+# -DNCURSES_WIDECHAR and -D_DARWIN_C_SOURCE on macOS) via CURSES_CFLAGS.
+if(CURSES_CFLAGS)
+  add_compile_options(${CURSES_CFLAGS})
+endif()
+
 add_library(ava_test_support
   "support/acp_test_support.cpp"
   "support/agent_loop_test_support.cpp"
@@ -25,6 +31,15 @@ target_link_libraries(ava_test_support PUBLIC ${AVA_BACKEND_LIBRARIES} ${AICXX_O
 target_include_directories(ava_test_support PUBLIC ${CMAKE_SOURCE_DIR})
 ava_apply_warnings(ava_test_support)
 ava_apply_sanitizers(ava_test_support)
+
+if(APPLE)
+  add_executable(ava_darwin_anchor_tests "darwin_anchor_tests.cpp")
+  target_link_libraries(ava_darwin_anchor_tests PRIVATE ava_test_support)
+  ava_apply_warnings(ava_darwin_anchor_tests)
+  ava_apply_sanitizers(ava_darwin_anchor_tests)
+  add_test(NAME ava_tests.darwin_anchor COMMAND ava_darwin_anchor_tests)
+  add_test(NAME ava_tests.darwin_cryptex COMMAND ava_darwin_anchor_tests cryptex)
+endif()
 
 add_library(ava_tui_test_support
   "support/tui_test_support.cpp"
@@ -301,7 +316,7 @@ endif()
 
 add_executable(ava_tests ${AVA_TESTS_SOURCES})
 target_link_libraries(ava_tests PRIVATE ${AVA_FRONTEND_LIBRARIES} ${AVA_BACKEND_LIBRARIES} ava_test_support ava_tui_test_support ${AICXX_OBJECTS_LIST})
-target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS})
+target_include_directories(ava_tests PRIVATE ${CURSES_INCLUDE_DIRS} ${NCURSES_INCLUDE_DIRS})
 add_dependencies(ava_tests ava_fake_lsp_server ava_fake_mcp_server ava_fake_process_child ava_fake_curl_child ava_fake_clipboard_child ava_fake_plugin_child ava_fake_mermaid_helper ava_fake_provider_server)
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_LSP_SERVER_PATH="$<TARGET_FILE:ava_fake_lsp_server>")
 target_compile_definitions(ava_tests PRIVATE AVA_FAKE_MCP_SERVER_PATH="$<TARGET_FILE:ava_fake_mcp_server>")
@@ -386,6 +401,10 @@ set(AVA_TEST_SUITES
   runtime_diagnostics
   containment
 )
+
+if(APPLE)
+  list(APPEND AVA_TEST_SUITES macos_command_security)
+endif()
 
 foreach(AVA_TEST_SUITE IN LISTS AVA_TEST_SUITES)
   add_test(NAME ava_tests.${AVA_TEST_SUITE} COMMAND ava_tests ${AVA_TEST_SUITE})
@@ -765,6 +784,11 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
 endif()
 if(Python3_Interpreter_FOUND)
+  if(APPLE)
+    add_test(NAME ava_macos.default_command_home
+      COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/macos_command_home_test.py --ava $<TARGET_FILE:ava>)
+    set_tests_properties(ava_macos.default_command_home PROPERTIES TIMEOUT 60 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+  endif()
   add_test(
     NAME ava_tests.process_gate
     COMMAND ${Python3_EXECUTABLE}

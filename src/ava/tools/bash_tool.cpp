@@ -2,17 +2,23 @@
 #include "ava/containment/containment.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
-#include "ava/core/trusted_home.h"
+#include "ava/core/stat_time.h"
+#ifdef __APPLE__
+#include "ava/core/fd_exec.h"
+#include "ava/core/macos_fd_internal.h"
+#endif
 #include "ava/tools/bash_tool.h"
 #include "ava/tools/spill_files.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
+#include "ava/core/trusted_home.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <cerrno>
 #include <chrono>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <initializer_list>
@@ -37,6 +43,7 @@ namespace {
 
 constexpr char kDefaultStartupPath[] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin";
 constexpr std::size_t kBashProgressByteInterval = 128 * 1024;
+constexpr std::size_t kBashReadBatchBytes = 256 * 1024;
 constexpr auto kBashProgressTimeInterval = std::chrono::seconds(2);
 constexpr auto kProcessGroupGrace = std::chrono::milliseconds(300);
 constexpr auto kProcessGroupKillWait = std::chrono::milliseconds(500);
@@ -84,11 +91,13 @@ ssize_t read_retry(int fd, void* data, std::size_t size);
 
 bool matches_sealed_executable(struct stat const& status, ava::command::ExecutableMetadata const& sealed) noexcept
 {
+  using ava::core::stat_change_time;
   return S_ISREG(status.st_mode) && static_cast<std::uintmax_t>(status.st_dev) == sealed.device && static_cast<std::uintmax_t>(status.st_ino) == sealed.inode &&
          static_cast<std::uintmax_t>(status.st_mode) == sealed.mode && static_cast<std::uintmax_t>(status.st_size) == sealed.size &&
          static_cast<std::uintmax_t>(status.st_uid) == sealed.owner && static_cast<std::uintmax_t>(status.st_gid) == sealed.group &&
-         static_cast<std::uintmax_t>(status.st_nlink) == sealed.link_count && static_cast<std::int64_t>(status.st_ctim.tv_sec) == sealed.changed_seconds &&
-         static_cast<std::int64_t>(status.st_ctim.tv_nsec) == sealed.changed_nanoseconds;
+         static_cast<std::uintmax_t>(status.st_nlink) == sealed.link_count &&
+         static_cast<std::int64_t>(stat_change_time(status).tv_sec) == sealed.changed_seconds &&
+         static_cast<std::int64_t>(stat_change_time(status).tv_nsec) == sealed.changed_nanoseconds;
 }
 
 ava::core::Result<UniqueFd> open_approved_executable(ava::command::ExecutableMetadata const& sealed, std::shared_ptr<ava::core::AnchorSet const> const& anchors)
@@ -129,8 +138,8 @@ ava::core::Result<UniqueFd> open_approved_cwd(ava::command::CommandPlan const& p
   if (::fstat(opened->fd(), &status) != 0 || !S_ISDIR(status.st_mode) || static_cast<std::uintmax_t>(status.st_dev) != sealed.device ||
       static_cast<std::uintmax_t>(status.st_ino) != sealed.inode || static_cast<std::uintmax_t>(status.st_mode) != sealed.mode ||
       static_cast<std::uintmax_t>(status.st_uid) != sealed.owner || static_cast<std::uintmax_t>(status.st_gid) != sealed.group ||
-      static_cast<std::int64_t>(status.st_ctim.tv_sec) != sealed.changed_seconds ||
-      static_cast<std::int64_t>(status.st_ctim.tv_nsec) != sealed.changed_nanoseconds)
+      static_cast<std::int64_t>(ava::core::stat_change_time(status).tv_sec) != sealed.changed_seconds ||
+      static_cast<std::int64_t>(ava::core::stat_change_time(status).tv_nsec) != sealed.changed_nanoseconds)
   {
     return std::unexpected(
         ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "approved cwd changed after permission; prepare and approve a new command"));
@@ -204,13 +213,31 @@ pid_t waitpid_retry(pid_t pid, int* status, int options)
 ava::core::Result<std::array<int, 2>> make_pipe_cloexec()
 {
   std::array<int, 2> pipe_fds{-1, -1};
+#ifdef __APPLE__
+  // macOS has no pipe2(2); pipe() plus FD_CLOEXEC on both ends is equivalent.
+  if (::pipe(pipe_fds.data()) != 0)
+    return std::unexpected(errno_error("failed to create close-on-exec process pipe"));
+  if (::fcntl(pipe_fds[0], F_SETFD, FD_CLOEXEC) != 0 || ::fcntl(pipe_fds[1], F_SETFD, FD_CLOEXEC) != 0)
+  {
+    auto const saved_errno = errno;
+    ::close(pipe_fds[0]);
+    ::close(pipe_fds[1]);
+    errno = saved_errno;
+    return std::unexpected(errno_error("failed to set close-on-exec process pipe"));
+  }
+#else
   if (::pipe2(pipe_fds.data(), O_CLOEXEC) != 0)
     return std::unexpected(errno_error("failed to create close-on-exec process pipe"));
+#endif
   return pipe_fds;
 }
 
 void close_nonstandard_fds_except(std::vector<int> const& keep_fds) noexcept
 {
+#ifdef __APPLE__
+  if (ava::core::detail::close_macos_fds_except(keep_fds))
+    return;
+#endif
   constexpr std::size_t kMaxKeptDescriptors = 16;
   std::array<int, kMaxKeptDescriptors> sorted{};
   std::size_t count = 0;
@@ -378,16 +405,16 @@ void finalize_output(BashResult& result, BashOptions const& options, bool saw_ou
   result.truncated = result.truncated || result.byte_limited || result.line_limited || result.output_bytes < result.total_bytes;
 }
 
-ava::core::VoidResult remove_tree_at(int directory_fd, std::size_t& remaining_entries)
+auto remove_tree_at(int directory_fd, std::size_t& remaining_entries) noexcept -> bool
 {
   auto duplicate = ::dup(directory_fd);
   if (duplicate < 0)
-    return std::unexpected(errno_error("failed to duplicate synthetic environment cleanup directory"));
+    return false;
   DIR* directory = ::fdopendir(duplicate);
   if (!directory)
   {
     static_cast<void>(::close(duplicate));
-    return std::unexpected(errno_error("failed to inspect synthetic environment cleanup directory"));
+    return false;
   }
   while (dirent* entry = ::readdir(directory))
   {
@@ -397,7 +424,7 @@ ava::core::VoidResult remove_tree_at(int directory_fd, std::size_t& remaining_en
     if (remaining_entries == 0)
     {
       static_cast<void>(::closedir(directory));
-      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "synthetic environment cleanup exceeded its bounded entry limit"));
+      return false;
     }
     --remaining_entries;
     struct stat status{};
@@ -406,15 +433,18 @@ ava::core::VoidResult remove_tree_at(int directory_fd, std::size_t& remaining_en
     if (S_ISDIR(status.st_mode))
     {
       UniqueFd child(::openat(directory_fd, entry->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
-      if (child.get() >= 0)
-        static_cast<void>(remove_tree_at(child.get(), remaining_entries));
+      if (child.get() < 0 || !remove_tree_at(child.get(), remaining_entries))
+      {
+        static_cast<void>(::closedir(directory));
+        return false;
+      }
       static_cast<void>(::unlinkat(directory_fd, entry->d_name, AT_REMOVEDIR));
     }
     else
       static_cast<void>(::unlinkat(directory_fd, entry->d_name, 0));
   }
   static_cast<void>(::closedir(directory));
-  return {};
+  return true;
 }
 
 class SyntheticEnvironmentRoot final
@@ -450,26 +480,47 @@ class SyntheticEnvironmentRoot final
 
   [[nodiscard]] static ava::core::Result<SyntheticEnvironmentRoot> create(ToolContext const& context)
   {
-    if (!context.anchor_set || context.spill_dir.empty())
+    if (!context.anchor_set)
     {
-      return std::unexpected(
-          ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command execution requires a shared AnchorSet and pre-opened spill anchor"));
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "sealed command execution requires a shared AnchorSet"));
     }
-    auto selected = context.anchor_set->find_anchor(context.spill_dir);
-    if (!selected || selected->anchor().root == context.anchor_set->launch_workspace_root())
+#ifdef __APPLE__
+    // confstr is the native per-user temporary location. TMPDIR is inherited
+    // input and may point inside HOME, the workspace, or persistent state.
+    std::array<char, PATH_MAX> native_temp{};
+    auto const length = ::confstr(_CS_DARWIN_USER_TEMP_DIR, native_temp.data(), native_temp.size());
+    if (length == 0 || length > native_temp.size())
     {
-      return std::unexpected(
-          ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "sealed command synthetic environment must use a non-workspace writable anchor"));
+      return std::unexpected(errno_error("failed to obtain native command temporary directory"));
     }
-    auto opened_parent = ava::core::open_readable(*context.anchor_set, context.spill_dir, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
-    if (!opened_parent)
-      return std::unexpected(std::move(opened_parent.error()));
-    int const parent_duplicate = ::fcntl(opened_parent->fd(), F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
-    if (parent_duplicate < 0)
-      return std::unexpected(errno_error("failed to retain synthetic environment parent descriptor"));
-
+    std::filesystem::path base(native_temp.data());
+#else
+    std::filesystem::path base("/tmp");
+#endif
+    // Resolve only this OS-selected base (e.g. Darwin's /var alias), not any
+    // workspace or authority paths used by descriptor-based access checks.
+    std::error_code base_error;
+    base = std::filesystem::canonical(base, base_error);
+    if (base_error || !base.is_absolute())
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "native command temporary directory is unavailable"));
+    }
     SyntheticEnvironmentRoot result;
-    result.parent_fd_ = UniqueFd(parent_duplicate);
+    result.parent_fd_ = UniqueFd(::open(base.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
+    struct stat parent_status{};
+    struct stat named_parent{};
+    if (result.parent_fd_.get() < 0 || ::fstat(result.parent_fd_.get(), &parent_status) != 0 || ::lstat(base.c_str(), &named_parent) != 0 ||
+        !S_ISDIR(parent_status.st_mode) || !S_ISDIR(named_parent.st_mode) || parent_status.st_dev != named_parent.st_dev ||
+        parent_status.st_ino != named_parent.st_ino
+#ifdef __APPLE__
+        || parent_status.st_uid != ::geteuid() || (parent_status.st_mode & (S_IWGRP | S_IWOTH)) != 0
+#else
+        || parent_status.st_uid != 0 || (parent_status.st_mode & S_ISVTX) == 0
+#endif
+    )
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "native command temporary base is not a trusted directory"));
+    }
     static std::atomic<std::uint64_t> sequence{0};
     for (std::size_t attempt = 0; attempt < 128; ++attempt)
     {
@@ -484,17 +535,30 @@ class SyntheticEnvironmentRoot final
     if (result.name_.empty())
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to allocate a bounded unique synthetic command environment root"));
 
-    result.root_ = (context.spill_dir / result.name_).lexically_normal();
+    result.root_ = base / result.name_;
+    // Capture the created name even if the subsequent open fails, so an
+    // allocation error can remove only this inode, never a replacement.
+    struct stat created{};
+    if (::fstatat(result.parent_fd_.get(), result.name_.c_str(), &created, AT_SYMLINK_NOFOLLOW) != 0 || !S_ISDIR(created.st_mode) ||
+        created.st_uid != ::geteuid() || (created.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "created command environment is not a private directory"));
+    }
+    result.device_ = created.st_dev;
+    result.inode_ = created.st_ino;
     result.root_fd_ = UniqueFd(::openat(result.parent_fd_.get(), result.name_.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC));
     struct stat status{};
     if (result.root_fd_.get() < 0 || ::fstat(result.root_fd_.get(), &status) != 0 || !S_ISDIR(status.st_mode) || status.st_uid != ::geteuid() ||
-        (status.st_mode & (S_IRWXG | S_IRWXO)) != 0)
+        (status.st_mode & (S_IRWXG | S_IRWXO)) != 0 || status.st_dev != result.device_ || status.st_ino != result.inode_)
     {
+      result.root_fd_.reset();
       return std::unexpected(
           ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "private synthetic command environment root is not an owner-only directory"));
     }
-    result.device_ = status.st_dev;
-    result.inode_ = status.st_ino;
+    if (auto valid = result.validate_location(context); !valid)
+    {
+      return std::unexpected(std::move(valid.error()));
+    }
     for (auto const name : {"home", "xdg-config", "xdg-cache", "xdg-data", "xdg-state", "tmp"})
     {
       if (::mkdirat(result.root_fd_.get(), name, S_IRWXU) != 0)
@@ -511,18 +575,47 @@ class SyntheticEnvironmentRoot final
   }
 
   [[nodiscard]] std::filesystem::path const& root() const noexcept { return root_; }
+  [[nodiscard]] auto fd() const noexcept -> int { return root_fd_.get(); }
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
+  [[nodiscard]] auto validate_location(ToolContext const& context) const -> ava::core::VoidResult
+  {
+    auto protected_roots = context.ava_authority_roots;
+    protected_roots.push_back(context.workspace_dir);
+    protected_roots.emplace_back(ava::core::cached_trusted_account().home);
+    if (!context.spill_dir.empty())
+    {
+      protected_roots.push_back(context.spill_dir);
+    }
+    for (auto const& protected_root : protected_roots)
+    {
+      std::error_code error;
+      auto const physical = std::filesystem::weakly_canonical(protected_root, error);
+      auto const within = [](std::filesystem::path const& candidate, std::filesystem::path const& parent) -> bool {
+        auto const relative = candidate.lexically_relative(parent);
+        return !relative.empty() && *relative.begin() != "..";
+      };
+      if (error || physical.empty() || within(root_, physical) || within(physical, root_))
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied,
+                                                "command environment must be disjoint from HOME, workspace, and persistent AVA storage"));
+      }
+    }
+    return {};
+  }
+
   void cleanup() noexcept
   {
-    if (root_fd_.get() < 0)
-      return;
-    std::size_t remaining_entries = kCleanupEntryLimit;
-    static_cast<void>(remove_tree_at(root_fd_.get(), remaining_entries));
+    bool cleaned = true;
+    if (root_fd_.get() >= 0)
+    {
+      std::size_t remaining_entries = kCleanupEntryLimit;
+      cleaned = remove_tree_at(root_fd_.get(), remaining_entries);
+    }
     struct stat named_status{};
-    if (parent_fd_.get() >= 0 && !name_.empty() && ::fstatat(parent_fd_.get(), name_.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 &&
+    if (cleaned && parent_fd_.get() >= 0 && !name_.empty() && ::fstatat(parent_fd_.get(), name_.c_str(), &named_status, AT_SYMLINK_NOFOLLOW) == 0 &&
         S_ISDIR(named_status.st_mode) && named_status.st_dev == device_ && named_status.st_ino == inode_)
     {
       static_cast<void>(::unlinkat(parent_fd_.get(), name_.c_str(), AT_REMOVEDIR));
@@ -560,8 +653,13 @@ ava::core::Result<ava::command::CommandBuildOptions> local_command_build_options
     startup_path.assign(inherited_path, length);
   }
   auto const& root = synthetic.root();
+  auto command_anchors = context.anchor_set->with_directory_fd(root, synthetic.fd());
+  if (!command_anchors)
+  {
+    return std::unexpected(std::move(command_anchors.error()));
+  }
   return ava::command::CommandBuildOptions{.workspace = context.workspace_dir,
-                                           .anchor_set = context.anchor_set,
+                                           .anchor_set = std::move(*command_anchors),
                                            .trusted_home = trusted_account.home,
                                            .discover_host_user_tools = !static_cast<bool>(context.command_executor),
                                            .startup_path = std::move(startup_path),
@@ -647,7 +745,13 @@ ava::core::Result<DescriptorExecution> prepare_descriptor_execution(ava::command
       transformed.push_back(interpreter.interpreter.requested_path.string());
       if (!interpreter.argument.empty())
         transformed.push_back(interpreter.argument);
+#ifdef __APPLE__
+      // macOS has no /proc/self/fd; /dev/fd/N reads the same open file
+      // description, which is all the interpreter needs for a script.
+      transformed.push_back("/dev/fd/" + std::to_string(execution.descriptors[current_script_descriptor].get()));
+#else
       transformed.push_back("/proc/self/fd/" + std::to_string(execution.descriptors[current_script_descriptor].get()));
+#endif
       transformed.insert(transformed.end(), execution.argv.begin() + 1, execution.argv.end());
       if (std::ranges::find(execution.retained_script_descriptors, current_script_descriptor) == execution.retained_script_descriptors.end())
         execution.retained_script_descriptors.push_back(current_script_descriptor);
@@ -1138,7 +1242,14 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       keep_descriptors.push_back(fd);
     }
     close_nonstandard_fds_except(keep_descriptors);
+#ifdef __APPLE__
+    // macOS has no fexecve(3) and refuses to execute /dev/fd/N (EACCES);
+    // verify the fd identity at its own path and exec that instead.
+    static_cast<void>(
+        ava::core::exec_verified_fd(descriptor_execution->descriptors[descriptor_execution->executable_descriptor].get(), argv.data(), environment.data()));
+#else
     ::fexecve(descriptor_execution->descriptors[descriptor_execution->executable_descriptor].get(), argv.data(), environment.data());
+#endif
     int const descriptor_error = errno == 0 ? EIO : errno;
     static_cast<void>(write_retry(status_write.get(), &descriptor_error, sizeof(descriptor_error)));
     _exit(127);
@@ -1317,6 +1428,7 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
 
   SpillBuffer spill_buffer;
   bool running = true;
+  bool output_eof = false;
   bool leader_reaped = false;
   bool sentinel_reaped = false;
   int status = 0;
@@ -1344,11 +1456,15 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
 
   while (running)
   {
-    while (true)
+    // A continuously readable producer must still yield to cancellation,
+    // its deadline, and leader cleanup after a bounded amount of output.
+    std::size_t batch_bytes = 0;
+    while (!output_eof && batch_bytes < kBashReadBatchBytes)
     {
       auto const bytes = read_retry(read_fd.get(), buffer.data(), buffer.size());
       if (bytes > 0)
       {
+        batch_bytes += static_cast<std::size_t>(bytes);
         std::string_view const chunk(buffer.data(), static_cast<std::size_t>(bytes));
         spill_buffer.append(chunk);
         append_output(result, chunk, options, saw_output, previous_was_newline, newline_count);
@@ -1356,7 +1472,12 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
           return fail_after_cleanup(std::move(progress.error()));
         continue;
       }
-      if (bytes == 0 || errno == EAGAIN || errno == EWOULDBLOCK)
+      if (bytes == 0)
+      {
+        output_eof = true;
+        break;
+      }
+      if (errno == EAGAIN || errno == EWOULDBLOCK)
         break;
       return fail_after_cleanup(errno_error("failed to read sealed command output"));
     }
@@ -1391,7 +1512,19 @@ ava::core::Result<BashResult> run_bash(ToolContext const& context, std::string_v
       running = false;
       break;
     }
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    // Wake as soon as bytes arrive instead of throttling small pipe buffers
+    // with a fixed sleep. EOF is not process exit: a command may close its
+    // output and keep running, so stop polling that hung-up descriptor while
+    // continuing the bounded cancellation/deadline checks.
+    pollfd output_poll{.fd = output_eof ? -1 : read_fd.get(), .events = POLLIN, .revents = 0};
+    int const output_ready = ::poll(&output_poll, 1, 10);
+    if (output_ready < 0 && errno != EINTR)
+      return fail_after_cleanup(errno_error("failed to wait for sealed command output"));
+    if ((output_poll.revents & POLLNVAL) != 0)
+    {
+      errno = EBADF;
+      return fail_after_cleanup(errno_error("sealed command output descriptor became invalid"));
+    }
   }
 
   while (true)

@@ -25,6 +25,10 @@
 #include <thread>
 #include <vector>
 #include <signal.h>
+#ifdef __APPLE__
+#include <sys/proc.h>
+#include <sys/sysctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -64,8 +68,19 @@ ava::lsp::BuiltinDiscoveryOptions builtin_discovery_for_test(std::filesystem::pa
 void copy_fake_lsp_executable(std::filesystem::path const& destination)
 {
   std::filesystem::create_directories(destination.parent_path());
-  for (auto directory = destination.parent_path(); !directory.empty() && directory != std::filesystem::temp_directory_path();
-       directory = directory.parent_path())
+  // temp_directory_path() may carry a trailing slash from TMPDIR (always set
+  // on macOS), which path equality and even lexically_normal() treat as
+  // significant; compare spellings with trailing separators stripped so the
+  // walk stops at the temp root instead of climbing into protected parents.
+  auto const same_spelling = [](std::filesystem::path const& left, std::filesystem::path const& right) {
+    auto strip = [](std::string text) {
+      while (text.size() > 1 && !text.empty() && text.back() == '/') text.pop_back();
+      return text;
+    };
+    return strip(left.string()) == strip(right.string());
+  };
+  auto const stop = std::filesystem::temp_directory_path();
+  for (auto directory = destination.parent_path(); !directory.empty() && !same_spelling(directory, stop); directory = directory.parent_path())
   {
     std::filesystem::permissions(directory, std::filesystem::perms::owner_all, std::filesystem::perm_options::replace);
   }
@@ -180,6 +195,91 @@ std::optional<ProcessMarker> wait_for_process_marker_for_test(std::filesystem::p
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
   return read_process_marker_for_test(path);
+}
+
+bool process_group_exists(pid_t pgid)
+{
+  errno = 0;
+  if (::kill(-pgid, 0) == 0)
+    return true;
+  return errno != ESRCH;
+}
+
+// kill(-pgid, 0) also reports orphaned zombies that only an external reaper can
+// collect. Teardown guarantees that no descendant can execute, so inspect that
+// property directly when procfs is available.
+std::optional<bool> process_group_has_non_zombie_member(pid_t pgid)
+{
+#ifdef __APPLE__
+  // macOS has no procfs; list the process group with sysctl KERN_PROC_PGRP
+  // and ignore zombies exactly like the /proc scan below. p_stat comes from
+  // <sys/proc.h> (SZOMB); anything else counts as an executable member.
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid};
+  std::size_t size = 0;
+  if (::sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0)
+    return std::nullopt;
+  if (size == 0)
+    return false;
+  std::vector<char> buffer(size);
+  if (::sysctl(mib, 4, buffer.data(), &size, nullptr, 0) != 0)
+    return std::nullopt;
+  std::size_t const count = size / sizeof(struct kinfo_proc);
+  auto const* processes = reinterpret_cast<struct kinfo_proc const*>(buffer.data());
+  for (std::size_t index = 0; index < count; ++index)
+  {
+    if (processes[index].kp_proc.p_stat != SZOMB && processes[index].kp_proc.p_stat != 0)
+      return true;
+  }
+  return false;
+#else
+  std::error_code error;
+  std::filesystem::directory_iterator entry("/proc", error);
+  if (error)
+    return std::nullopt;
+
+  for (std::filesystem::directory_iterator end; entry != end; entry.increment(error))
+  {
+    if (error)
+      return std::nullopt;
+    auto const name = entry->path().filename().string();
+    if (name.empty() || name.find_first_not_of("0123456789") != std::string::npos)
+      continue;
+
+    std::ifstream stat_file(entry->path() / "stat", std::ios::binary);
+    std::string stat;
+    std::getline(stat_file, stat);
+    auto const command_end = stat.rfind(") ");
+    if (!stat_file || command_end == std::string::npos)
+      continue;
+
+    std::istringstream fields(stat.substr(command_end + 2));
+    char state = '\0';
+    long long parent_pid = 0;
+    long long process_group = 0;
+    fields >> state >> parent_pid >> process_group;
+    if (fields && process_group == pgid && state != 'Z' && state != 'X')
+      return true;
+  }
+  return error ? std::nullopt : std::optional<bool>{false};
+#endif
+}
+
+bool process_group_has_live_member(pid_t pgid)
+{
+  if (auto const has_non_zombie = process_group_has_non_zombie_member(pgid))
+    return *has_non_zombie;
+  return process_group_exists(pgid);
+}
+
+bool wait_for_process_group_exit(pid_t pgid)
+{
+  for (int index = 0; index < 100; ++index)
+  {
+    if (!process_group_has_live_member(pgid))
+      return true;
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return !process_group_has_live_member(pgid);
 }
 
 class TestOwnedProcessGroupCleanup final
@@ -785,6 +885,12 @@ void test_lsp_manager_startup_timeout_and_validation()
   expect(direct_defaults.startup_timeout == std::chrono::milliseconds(10000) && direct_defaults.request_timeout == std::chrono::milliseconds(3000),
          "direct LSP ServerConfig callers retain independent startup and request defaults");
 
+#ifdef __APPLE__
+  // ASan process startup on macOS can exceed 200 ms under parallel CTest load.
+  constexpr auto startup_timeout = std::chrono::milliseconds(1000);
+#else
+  constexpr auto startup_timeout = std::chrono::milliseconds(200);
+#endif
   auto const timeout_workspace = make_lsp_workspace("lsp-startup-timeout");
   auto const timeout_pgid_file = timeout_workspace / "lsp-startup-timeout-pgid.txt";
   auto timed_out = ava::lsp::SubprocessLspClient::start(ava::lsp::ServerConfig{
@@ -792,12 +898,13 @@ void test_lsp_manager_startup_timeout_and_validation()
       .workspace_root = timeout_workspace,
       .anchor_set = lsp_anchors(timeout_workspace),
       .process_cwd = timeout_workspace,
-      .startup_timeout = std::chrono::milliseconds(200),
+      .startup_timeout = startup_timeout,
       .request_timeout = std::chrono::milliseconds(1000),
   });
   auto const timeout_pgid = read_pid_file_for_test(timeout_pgid_file);
   auto const timeout_detail = timed_out ? std::string{} : timed_out.error().format();
-  expect(!timed_out && timeout_detail.find("timed out") != std::string::npos && timeout_detail.find("timeout_ms: 200") != std::string::npos &&
+  expect(!timed_out && timeout_detail.find("timed out") != std::string::npos &&
+             timeout_detail.find("timeout_ms: " + std::to_string(startup_timeout.count())) != std::string::npos &&
              timeout_detail.find("phase: startup") != std::string::npos && timeout_detail.find("method: initialize") != std::string::npos && timeout_pgid &&
              wait_for_process_group_exit(*timeout_pgid),
          "LSP startup timeout reports initialize startup context and terminates the server process group");
@@ -980,9 +1087,9 @@ void test_lsp_manager_cancellation()
       },
       [&] { return read_pid_file_for_test(startup_cancel_pgid_file).has_value(); });
   auto const startup_cancel_pgid = read_pid_file_for_test(startup_cancel_pgid_file);
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid &&
-             wait_for_process_group_exit(*startup_cancel_pgid),
-         "LSP manager cancels hung startup and terminates the server process group before timeout");
+  bool const startup_group_cleaned = startup_cancel_pgid && wait_for_process_group_exit(*startup_cancel_pgid);
+  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid && startup_group_cleaned,
+          "LSP manager cancels hung startup and terminates the server process group before timeout");
 
   auto const diagnostics_workspace = make_lsp_workspace("lsp-diagnostics-cancel");
   auto const diagnostics_cancel_pgid_file = diagnostics_workspace / "lsp-diagnostics-cancel-pgid.txt";

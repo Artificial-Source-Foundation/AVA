@@ -2,6 +2,9 @@
 #include "ava/containment/containment.h"
 #include "ava/core/AnchorOpen.h"
 #include "ava/core/AnchorSet.h"
+#ifdef __APPLE__
+#include "ava/core/macos_fd_internal.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -13,9 +16,11 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#ifdef __linux__
 #include <linux/landlock.h>
-#include <sys/stat.h>
 #include <sys/syscall.h>
+#endif
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace ava::containment {
@@ -107,11 +112,17 @@ ava::core::VoidResult seal_filesystem_rule_identities(std::vector<ContainmentFil
 
 std::uint32_t probe_landlock_abi_version() noexcept
 {
+#ifdef __APPLE__
+  // Landlock is Linux-only; probing yields 0 so the plan below reports
+  // Unavailable with an explicit reason and callers downgrade to Ask.
+  return 0;
+#else
   errno = 0;
   long const result = ::syscall(SYS_landlock_create_ruleset, nullptr, 0u, LANDLOCK_CREATE_RULESET_VERSION);
   if (result < 0)
     return 0;
   return static_cast<std::uint32_t>(result);
+#endif
 }
 
 DevelopmentContainmentPlan prepare_development_containment(ava::command::CommandPreparation const& preparation, bool network_enabled)
@@ -119,6 +130,14 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
   DevelopmentContainmentPlan plan;
   plan.network_allowed = network_enabled;
   plan.anchor_set = preparation.plan().anchor_set();
+#ifdef __APPLE__
+  // Deliberate native macOS backend: preserve the sealed execution checks
+  // and require one-time Critical approval whenever Linux needs containment.
+  // This profile never represents an installed sandbox.
+  plan.profile_id = "ava-macos-uncontained-v1";
+  plan.unavailable_reason = "Native command containment unavailable on macOS; command requires one-time approval.";
+  return plan;
+#endif
   if (!plan.anchor_set)
   {
     plan.profile_id = "ava-landlock-seccomp-v1";
@@ -285,6 +304,9 @@ DevelopmentContainmentPlan prepare_development_containment(ava::command::Command
 
 ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan const& plan)
 {
+#ifdef __APPLE__
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "Native command containment unavailable on macOS"));
+#endif
   if (plan.availability != ContainmentAvailability::Available)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "containment plan is not available"));
 
@@ -313,11 +335,27 @@ ava::core::VoidResult apply_containment_in_child(DevelopmentContainmentPlan cons
 
 void close_inherited_fds_except(int keep_fd_a, int keep_fd_b, int keep_fd_c) noexcept
 {
+#ifdef __APPLE__
+  std::array<int, 3> const macos_keep_fds{keep_fd_a, keep_fd_b, keep_fd_c};
+  if (ava::core::detail::close_macos_fds_except(macos_keep_fds))
+  {
+    return;
+  }
+#endif
   // Use close_range(2) where available for O(1) bulk closure, then fall back
   // to a bounded loop. The handshake fds and the approved executable
   // descriptor are never closed before descriptor exec.
   int const lo = STDERR_FILENO + 1;
-  auto const close_range_available = [](unsigned int low, unsigned int high) { return ::syscall(SYS_close_range, low, high, 0u) == 0; };
+  auto const close_range_available = [](unsigned int low, unsigned int high) -> bool {
+#ifdef __linux__
+    return ::syscall(SYS_close_range, low, high, 0u) == 0;
+#else
+    // No close_range(2) on macOS; the bounded close() loop below handles it.
+    (void)low;
+    (void)high;
+    return false;
+#endif
+  };
 
   std::array<int, 3> keep_fds{keep_fd_a, keep_fd_b, keep_fd_c};
   std::ranges::sort(keep_fds);

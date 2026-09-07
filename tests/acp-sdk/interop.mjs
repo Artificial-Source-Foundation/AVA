@@ -2,7 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -584,8 +584,9 @@ async function main() {
   assert.equal(acp.PROTOCOL_VERSION, 1, "official SDK protocol pin drifted from v1");
   assert.equal(process.platform === "win32", false, "owned process-group interop harness currently requires POSIX");
 
-  const parent = path.resolve(args.root ?? os.tmpdir());
-  await mkdir(parent, { recursive: true });
+  const requestedParent = path.resolve(args.root ?? os.tmpdir());
+  await mkdir(requestedParent, { recursive: true });
+  const parent = await realpath(requestedParent);
   const base = await mkdtemp(path.join(parent, "ava-acp-sdk-"));
   try {
     await lifecycleScenario(acp, args, base);

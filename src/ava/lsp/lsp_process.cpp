@@ -2,6 +2,9 @@
 #include "ava/lsp/lsp_client.h"
 #include "ava/lsp/lsp_client_internal.h"
 #include "ava/core/AnchorOpen.h"
+#ifdef __APPLE__
+#include "ava/core/fd_exec.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -10,6 +13,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <string_view>
@@ -22,6 +26,11 @@
 #include <sys/wait.h>
 #ifdef __linux__
 #include <sys/syscall.h>
+#endif
+#ifdef __APPLE__
+#include <crt_externs.h>
+#include <sys/proc.h>
+#include <sys/sysctl.h>
 #endif
 #include <unistd.h>
 
@@ -84,6 +93,44 @@ pid_t waitpid_retry(pid_t pid, int* status, int options)
     return waited;
   }
 }
+
+#ifdef __APPLE__
+bool signal_process_group_members(pid_t pgid, int signal_number) noexcept
+{
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, pgid};
+  for (int attempt = 0; attempt < 3; ++attempt)
+  {
+    std::size_t size = 0;
+    if (sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0 || size == 0)
+      return false;
+
+    std::unique_ptr<void, decltype(&std::free)> buffer(std::malloc(size), &std::free);
+    if (!buffer)
+      return false;
+    if (sysctl(mib, 4, buffer.get(), &size, nullptr, 0) != 0)
+    {
+      if (errno == ENOMEM)
+        continue;
+      return false;
+    }
+
+    bool found_live_member = false;
+    std::size_t const count = size / sizeof(struct kinfo_proc);
+    auto const* processes = static_cast<struct kinfo_proc const*>(buffer.get());
+    for (std::size_t index = 0; index < count; ++index)
+    {
+      auto const& process = processes[index];
+      pid_t const member = process.kp_proc.p_pid;
+      if (process.kp_eproc.e_pgid != pgid || member <= 1 || process.kp_proc.p_stat == SZOMB || process.kp_proc.p_stat == 0)
+        continue;
+      found_live_member = true;
+      static_cast<void>(kill(member, signal_number));
+    }
+    return found_live_member;
+  }
+  return false;
+}
+#endif
 
 void close_fd(int& fd) noexcept
 {
@@ -155,7 +202,14 @@ std::vector<std::string> lsp_environment()
   // variables are never forwarded.
   std::vector<std::string> values;
   std::vector<std::string_view> names;
-  for (char** inherited = ::environ; inherited != nullptr && *inherited != nullptr; ++inherited)
+#ifdef __APPLE__
+  // macOS declares the environment via _NSGetEnviron() (see crt_externs.h)
+  // rather than a global ::environ symbol.
+  char** const inherited_environment = *_NSGetEnviron();
+#else
+  char** const inherited_environment = ::environ;
+#endif
+  for (char** inherited = inherited_environment; inherited != nullptr && *inherited != nullptr; ++inherited)
   {
     std::string_view const variable(*inherited);
     auto const separator = variable.find('=');
@@ -309,8 +363,16 @@ ava::core::VoidResult SubprocessLspClient::launch()
         static_cast<std::uintmax_t>(metadata.st_uid) == identity.owner_uid && static_cast<std::uintmax_t>(metadata.st_gid) == identity.owner_gid &&
         static_cast<std::uintmax_t>(metadata.st_mode) == identity.mode && static_cast<std::uintmax_t>(metadata.st_nlink) == identity.link_count &&
         static_cast<std::uintmax_t>(metadata.st_dev) == identity.device && static_cast<std::uintmax_t>(metadata.st_ino) == identity.inode &&
-        static_cast<std::uintmax_t>(metadata.st_size) == identity.size && static_cast<std::int64_t>(metadata.st_ctim.tv_sec) == identity.changed_seconds &&
-        static_cast<std::int64_t>(metadata.st_ctim.tv_nsec) == identity.changed_nanoseconds && (metadata.st_mode & (S_IWGRP | S_IWOTH)) == 0 &&
+        static_cast<std::uintmax_t>(metadata.st_size) == identity.size &&
+#ifdef __APPLE__
+        // macOS names the change-time member st_ctimespec; Linux st_ctim.
+        static_cast<std::int64_t>(metadata.st_ctimespec.tv_sec) == identity.changed_seconds &&
+        static_cast<std::int64_t>(metadata.st_ctimespec.tv_nsec) == identity.changed_nanoseconds &&
+#else
+        static_cast<std::int64_t>(metadata.st_ctim.tv_sec) == identity.changed_seconds &&
+        static_cast<std::int64_t>(metadata.st_ctim.tv_nsec) == identity.changed_nanoseconds &&
+#endif
+        (metadata.st_mode & (S_IWGRP | S_IWOTH)) == 0 &&
         (metadata.st_mode & (S_IXUSR | S_IXGRP | S_IXOTH)) != 0;
     if (!valid)
     {
@@ -373,7 +435,15 @@ ava::core::VoidResult SubprocessLspClient::launch()
     close(child_cwd_fd);
     close_nonstandard_fds(executable_fd);
     if (executable_fd >= 0)
+    {
+#ifdef __APPLE__
+      // macOS has no fexecve(3) and refuses to execute /dev/fd/N (EACCES);
+      // verify the fd identity at its own path and exec that instead.
+      static_cast<void>(ava::core::exec_verified_fd(executable_fd, argv.data(), environment.data()));
+#else
       fexecve(executable_fd, argv.data(), environment.data());
+#endif
+    }
     else
       for (auto const& executable : executable_candidates) execve(executable.c_str(), argv.data(), environment.data());
     _exit(127);
@@ -480,7 +550,19 @@ void SubprocessLspClient::terminate_child() noexcept
   pid_t const pgid = owned_pgid_;
   close_fd(stdin_fd_);
 
-  bool const verified_group = pid > 1 && pgid > 1 && pgid == pid && getpgid(pid) == pgid;
+  bool verified_group = pid > 1 && pgid > 1 && pgid == pid;
+  if (verified_group && getpgid(pid) != pgid)
+  {
+#ifdef __APPLE__
+    // getpgid() fails for a zombie leader on macOS. WNOWAIT proves that this
+    // unreaped child still owns the process-group identity established at
+    // launch, without losing its exit status.
+    siginfo_t info{};
+    verified_group = errno == ESRCH && waitid_retry(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) == 0 && info.si_pid == pid;
+#else
+    verified_group = false;
+#endif
+  }
   if (!verified_group)
   {
     if (pid > 1)
@@ -494,8 +576,16 @@ void SubprocessLspClient::terminate_child() noexcept
     return;
   }
 
+#ifdef __APPLE__
+  // macOS can reject a group signal when the group leader is a zombie, so
+  // signal each live member returned by the kernel instead.
+  signal_process_group_members(pgid, SIGTERM);
+#else
   kill(-pgid, SIGTERM);
+#endif
+#ifndef __APPLE__
   bool group_still_verified = true;
+#endif
   auto const grace_deadline = std::chrono::steady_clock::now() + kTerminationGrace;
   while (std::chrono::steady_clock::now() < grace_deadline)
   {
@@ -503,7 +593,9 @@ void SubprocessLspClient::terminate_child() noexcept
     if (waitid_retry(P_PID, static_cast<id_t>(pid), &info, WEXITED | WNOHANG | WNOWAIT) != 0)
     {
       if (errno == ECHILD)
+#ifndef __APPLE__
         group_still_verified = false;
+#endif
       break;
     }
     if (info.si_pid != 0)
@@ -511,8 +603,17 @@ void SubprocessLspClient::terminate_child() noexcept
     std::this_thread::sleep_for(kTerminationPollInterval);
   }
 
+#ifdef __APPLE__
+  for (int attempt = 0; attempt < 10; ++attempt)
+  {
+    if (!signal_process_group_members(pgid, SIGKILL))
+      break;
+    std::this_thread::sleep_for(kTerminationPollInterval);
+  }
+#else
   if (group_still_verified)
     kill(-pgid, SIGKILL);
+#endif
   int status = 0;
   waitpid_retry(pid, &status, 0);
   pid_ = -1;

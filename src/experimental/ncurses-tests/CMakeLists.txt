@@ -15,6 +15,16 @@ project(ava-ncurses-tests
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses REQUIRED)
 
+# FindCurses keeps the primary header directory only. Source-built wide ncurses
+# also requires its pkg-config parent directory for nested ncursesw includes.
+include_directories(SYSTEM ${CURSES_INCLUDE_DIRS} ${NCURSES_INCLUDE_DIRS})
+
+# FindCurses reports required compiler flags (e.g. Homebrew ncursesw needs
+# -DNCURSES_WIDECHAR and -D_DARWIN_C_SOURCE on macOS) via CURSES_CFLAGS.
+if(CURSES_CFLAGS)
+  add_compile_options(${CURSES_CFLAGS})
+endif()
+
 find_library(CURSES_PANELW_LIBRARY
   NAMES panelw
   REQUIRED

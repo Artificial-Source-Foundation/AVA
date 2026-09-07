@@ -333,6 +333,7 @@ ava::core::Result<std::string> SubprocessLspClient::read_message(std::chrono::st
     }
     std::array<char, 4096> buffer{};
     auto const bytes = read_retry(stdout_fd_, buffer.data(), buffer.size());
+    int const read_errno = errno;
     if (is_canceled(cancel_requested))
     {
       terminate_child();
@@ -356,7 +357,7 @@ ava::core::Result<std::string> SubprocessLspClient::read_message(std::chrono::st
       terminate_child();
       return std::unexpected(std::move(error));
     }
-    if (errno == EAGAIN || errno == EWOULDBLOCK)
+    if (read_errno == EAGAIN || read_errno == EWOULDBLOCK)
       continue;
     if (is_canceled(cancel_requested))
     {
@@ -364,6 +365,7 @@ ava::core::Result<std::string> SubprocessLspClient::read_message(std::chrono::st
       return std::unexpected(canceled_error("LSP request canceled", config_));
     }
     terminate_child();
+    errno = read_errno;
     return std::unexpected(errno_error("failed to read LSP response", config_));
   }
 }

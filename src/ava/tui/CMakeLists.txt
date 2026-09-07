@@ -2,7 +2,11 @@ set(CURSES_NEED_NCURSES TRUE)
 set(CURSES_NEED_WIDE TRUE)
 find_package(Curses QUIET)
 if(NOT CURSES_FOUND)
-  message(FATAL_ERROR "AVA requires ncursesw (wide-character ncurses) for ava_tui")
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    message(FATAL_ERROR "AVA requires ncursesw (wide-character ncurses) for ava_tui; on macOS install Homebrew ncurses (brew install ncurses) which is keg-only under <prefix>/opt/ncurses")
+  else()
+    message(FATAL_ERROR "AVA requires ncursesw (wide-character ncurses) for ava_tui")
+  endif()
 endif()
 
 add_library(ava_tui
@@ -62,13 +66,18 @@ target_link_libraries(ava_tui
   PRIVATE
   ${CURSES_LIBRARIES}
 )
+# FindCurses reports required compiler flags (e.g. Homebrew ncursesw needs
+# -DNCURSES_WIDECHAR and -D_DARWIN_C_SOURCE on macOS) via CURSES_CFLAGS.
+if(CURSES_CFLAGS)
+  target_compile_options(ava_tui PRIVATE ${CURSES_CFLAGS})
+endif()
 message(STATUS "AVA_GENERATED_INCLUDE_DIR = ${AVA_GENERATED_INCLUDE_DIR}")
 target_include_directories(ava_tui
   PUBLIC
     "${CMAKE_SOURCE_DIR}/src"
     "${AVA_GENERATED_INCLUDE_DIR}"
   PRIVATE
-     ${CURSES_INCLUDE_DIRS}
+     ${CURSES_INCLUDE_DIRS} ${NCURSES_INCLUDE_DIRS}
 )
 ava_apply_debugging(ava_tui)
 ava_apply_warnings(ava_tui)

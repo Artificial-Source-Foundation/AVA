@@ -492,7 +492,12 @@ class ReleaseProvenanceTests(unittest.TestCase):
                 check=False,
             )
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("rejects supplied-binary mode", result.stderr)
+        expected_error = (
+            "rejects supplied-binary mode"
+            if sys.platform.startswith("linux")
+            else "supports Linux hosts only"
+        )
+        self.assertIn(expected_error, result.stderr)
 
 
 if __name__ == "__main__":

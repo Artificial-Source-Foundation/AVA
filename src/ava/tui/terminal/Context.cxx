@@ -5,6 +5,7 @@
 #include <array>
 #include <clocale>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <limits>
 
@@ -13,7 +14,23 @@
 
 namespace ava::tui::terminal {
 
-Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? stdout : outfd), default_rendition_(ColorPair{{}, 0})
+namespace {
+
+// private_convert.h (included above) undefines the stdout macro for ncurses
+// hygiene. On glibc stdout is also a real symbol so it keeps working, but on
+// macOS stdout exists only as a macro for __stdoutp.
+FILE* default_output_file() noexcept
+{
+#ifdef __APPLE__
+  return __stdoutp;
+#else
+  return stdout;
+#endif
+}
+
+}  // namespace
+
+Context::Context(FILE* outfd, FILE* infd) : output_file_(outfd == nullptr ? default_output_file() : outfd), default_rendition_(ColorPair{{}, 0})
 {
   setlocale(LC_ALL, "");
 

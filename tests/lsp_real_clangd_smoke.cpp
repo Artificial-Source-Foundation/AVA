@@ -28,7 +28,10 @@ int main()
     std::cerr << "failed to create private clangd smoke fixture\n";
     return 1;
   }
-  auto const fixture = std::filesystem::path(created);
+  // Use the physical fixture root: macOS TMPDIR commonly starts at the
+  // /var alias, while clangd returns file URIs beneath /private/var.
+  // The workspace boundary intentionally compares logical paths exactly.
+  auto const fixture = std::filesystem::canonical(created);
   static_cast<void>(::chmod(fixture.c_str(), S_IRWXU));
   [[maybe_unused]] auto cleanup = std::shared_ptr<void>(nullptr, [fixture](void*) {
     std::error_code ignored;

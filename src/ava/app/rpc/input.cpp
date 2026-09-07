@@ -8,6 +8,9 @@
 #include <utility>
 #include <fcntl.h>
 #include <poll.h>
+#ifdef __APPLE__
+#include <sys/select.h>
+#endif
 #include <unistd.h>
 
 namespace ava::app::rpc {
@@ -63,10 +66,35 @@ class PosixRpcLineReader final : public RpcLineReader
             pollfd{.fd = wake_read_fd_, .events = POLLIN, .revents = 0},
         };
         int ready = 0;
+#ifdef __APPLE__
+        // macOS poll(2) never reports EOF on a FIFO whose writers have all
+        // closed (unlike Linux, and unlike select(2) on macOS itself), so the
+        // RPC loop would wait forever after stdin EOF. Wait with select(2)
+        // instead on Apple; it marks EOF-ready descriptors readable and the
+        // shared zero-byte-read handling below reports Eof.
+        {
+          int const max_fd = input_fd_ > wake_read_fd_ ? input_fd_ : wake_read_fd_;
+          fd_set read_fds{};
+          do
+          {
+            FD_ZERO(&read_fds);
+            FD_SET(input_fd_, &read_fds);
+            FD_SET(wake_read_fd_, &read_fds);
+            ready = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+          } while (ready == -1 && errno == EINTR);
+          if (ready >= 0)
+          {
+            descriptors[0].revents = FD_ISSET(input_fd_, &read_fds) != 0 ? POLLIN : 0;
+            descriptors[1].revents = FD_ISSET(wake_read_fd_, &read_fds) != 0 ? POLLIN : 0;
+            ready = (descriptors[0].revents != 0 || descriptors[1].revents != 0) ? 1 : 0;
+          }
+        }
+#else
         do
         {
           ready = poll(descriptors, 2, -1);
         } while (ready == -1 && errno == EINTR);
+#endif
         if (ready == -1)
         {
           notify_terminal(on_terminal, RpcInputTerminalOutcome::Error);

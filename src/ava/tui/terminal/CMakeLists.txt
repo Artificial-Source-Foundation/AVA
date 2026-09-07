@@ -38,7 +38,7 @@ target_include_directories(ava_terminal
   INTERFACE
     "${CMAKE_SOURCE_DIR}/src/ava/tui"
   PRIVATE
-    ${CURSES_INCLUDE_DIRS}
+    ${CURSES_INCLUDE_DIRS} ${NCURSES_INCLUDE_DIRS}
 )
 
 # Set link dependencies.
@@ -54,6 +54,12 @@ if (OptionEnableLibcwd)
       AVA::debug
   )
 endif ()
+
+# FindCurses reports required compiler flags (e.g. Homebrew ncursesw needs
+# -DNCURSES_WIDECHAR and -D_DARWIN_C_SOURCE on macOS) via CURSES_CFLAGS.
+if(CURSES_CFLAGS)
+  target_compile_options(ava_terminal PRIVATE ${CURSES_CFLAGS})
+endif()
 
 ava_apply_warnings(ava_terminal)
 ava_apply_sanitizers(ava_terminal)

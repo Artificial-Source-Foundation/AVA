@@ -162,11 +162,29 @@ bool write_all_to_descriptor_for_test(int descriptor, void const* buffer, std::s
   if (received_epipe && sigpipe_was_blocked == 0)
   {
     timespec const no_wait{};
+    static_cast<void>(no_wait);
     int waited = -1;
+#ifdef __APPLE__
+    // macOS has no sigtimedwait(2). The zero-timeout wait above only dequeues
+    // an already-pending SIGPIPE so it is not delivered when the mask is
+    // restored below; briefly ignoring SIGPIPE discards the pending instance
+    // just as well (the signal stays blocked throughout, so nothing runs).
+    struct sigaction ignore_action{};
+    ignore_action.sa_handler = SIG_IGN;
+    ::sigemptyset(&ignore_action.sa_mask);
+    struct sigaction previous_action{};
+    if (::sigaction(SIGPIPE, &ignore_action, &previous_action) == 0)
+    {
+      ::sigaction(SIGPIPE, &previous_action, nullptr);
+      waited = SIGPIPE;
+    }
+#else
     do
     {
       waited = ::sigtimedwait(&sigpipe_mask, nullptr, &no_wait);
     } while (waited < 0 && errno == EINTR);
+#endif
+    static_cast<void>(waited);
   }
 
   if (::pthread_sigmask(SIG_SETMASK, &previous_mask, nullptr) != 0)
@@ -195,7 +213,14 @@ std::filesystem::path temp_root()
   std::error_code create_error;
   std::filesystem::create_directories(root, create_error);
   if (!create_error)
+  {
     static_cast<void>(::chmod(root.c_str(), S_IRWXU));
+#ifdef __APPLE__
+    // BSD directory group inheritance gives /private/tmp children gid 0.
+    // Test fixtures model private user storage and must inherit our real gid.
+    static_cast<void>(::chown(root.c_str(), ::geteuid(), ::getegid()));
+#endif
+  }
   return root;
 }
 

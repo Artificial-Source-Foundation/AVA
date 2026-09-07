@@ -23,6 +23,8 @@
 #include <string_view>
 #include <system_error>
 #include <utility>
+#include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include "debug.h"
@@ -208,11 +210,20 @@ bool same_directory_identity(struct stat const& left, struct stat const& right)
 
 std::filesystem::path anchored_child_diagnostic_path(int parent_fd, std::string_view name, std::filesystem::path const& fallback_parent)
 {
+#ifdef __APPLE__
+  // macOS has no /proc/self/fd; F_GETPATH resolves the descriptor instead.
+  // Diagnostic-only: fall back to the parent spelling on any failure.
+  char parent_path[PATH_MAX];
+  if (::fcntl(parent_fd, F_GETPATH, parent_path) == 0 && parent_path[0] != '\0')
+    return std::filesystem::path(parent_path) / std::string(name);
+  return fallback_parent / std::string(name);
+#else
   std::error_code link_error;
   auto parent = std::filesystem::read_symlink("/proc/self/fd/" + std::to_string(parent_fd), link_error);
   if (link_error || parent.empty())
     parent = fallback_parent;
   return parent / std::string(name);
+#endif
 }
 
 SessionTraceScope::SessionTraceScope(std::shared_ptr<ava::observability::RunObservation> observation,

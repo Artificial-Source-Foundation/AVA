@@ -567,6 +567,10 @@ PermissionPromptView permission_prompt_view(ava::permissions::PermissionPrompt c
   view.diff_truncated = prompt.diff_truncated;
   if (prompt.command_metadata)
   {
+    if (ava::permissions::command_uses_macos_approval_fallback(*prompt.command_metadata))
+    {
+      view.security_notice = "macOS uncontained · not executed";
+    }
     view.recipe_display = prompt.command_metadata->recipe_display;
     view.workspace_recipe_key = prompt.command_metadata->workspace_recipe_key;
     for (std::size_t index = 0; index < prompt.command_metadata->effective_allowed_scopes.size(); ++index)

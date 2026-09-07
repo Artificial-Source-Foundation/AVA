@@ -446,6 +446,10 @@ struct PermissionPromptView
   std::string guidance_text = {};
   std::string request_id = {};
 
+  // Backend-owned state projected into a compact, non-authoritative notice.
+  // Keep existing aggregate construction valid with -Wmissing-field-initializers.
+  std::string security_notice = {};  // NOLINT(readability-redundant-member-init)
+
   // guidance_text must never appear in debug/log representations.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };

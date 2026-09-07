@@ -13,6 +13,7 @@
 #include "ava/tui/theme.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <clocale>
 #include <cstddef>
@@ -23,6 +24,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 #include <curses.h>
@@ -1242,6 +1244,46 @@ void run_tui_terminal_input_tests_part_2()
          "tui split treats crlf and carriage-return output as line breaks");
 }
 namespace {
+struct PtyMasterDrainer
+{
+  // Continuously drains PTY master output on a background thread. endwin()
+  // restores terminal modes with output drain, which blocks forever when the
+  // master buffer fills with nobody reading (notably on platforms with small
+  // PTY buffers); real terminals always drain, so this only affects tests.
+  // The tests write input to the master but never read output from it, so
+  // discarding output is safe.
+  explicit PtyMasterDrainer(int master_fd) : master_(master_fd)
+  {
+    int flags = ::fcntl(master_, F_GETFL);
+    if (flags >= 0)
+      static_cast<void>(::fcntl(master_, F_SETFL, flags | O_NONBLOCK));
+    worker_ = std::thread([this] {
+      char buffer[4096];
+      while (!stop_.load(std::memory_order_relaxed))
+      {
+        ssize_t const count = ::read(master_, buffer, sizeof(buffer));
+        if (count <= 0)
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      }
+    });
+  }
+
+  PtyMasterDrainer(PtyMasterDrainer const&) = delete;
+  PtyMasterDrainer& operator=(PtyMasterDrainer const&) = delete;
+
+  ~PtyMasterDrainer()
+  {
+    stop_.store(true, std::memory_order_relaxed);
+    if (worker_.joinable())
+      worker_.join();
+  }
+
+ private:
+  int master_ = -1;
+  std::atomic_bool stop_{false};
+  std::thread worker_;
+};
+
 struct VirtualTerminalProfile
 {
   std::string name;
@@ -1453,9 +1495,13 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         static_cast<void>(close(saved_stdout));
       };
       auto draw_and_capture = [&]() -> std::optional<std::string> {
-        if (std::fflush(stdout) != 0 || std::fflush(output) != 0 || std::fseek(output, 0, SEEK_END) != 0)
+        // Measure at the file-descriptor level: the draw writes through two
+        // FILE objects sharing one description (ncurses' output stream and
+        // C stdout redirected onto it), whose individual ftell positions do
+        // not account for each other's bytes on every libc.
+        if (std::fflush(stdout) != 0 || std::fflush(output) != 0)
           return std::nullopt;
-        auto const before = std::ftell(output);
+        off_t const before = ::lseek(::fileno(output), 0, SEEK_CUR);
         if (before < 0 ||
             !ava::tui::detail::draw_screen_cached(graphic_snapshot, completion_cache, graphic_snapshot.file_references_generation, transcript_cache,
                                                   graphic_snapshot.transcript_generation, screen_cache) ||
@@ -1463,13 +1509,11 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         {
           return std::nullopt;
         }
-        auto const after = std::ftell(output);
-        if (after < before || std::fseek(output, before, SEEK_SET) != 0)
+        off_t const after = ::lseek(::fileno(output), 0, SEEK_CUR);
+        if (after < before)
           return std::nullopt;
         std::string captured(static_cast<std::size_t>(after - before), '\0');
-        if (!captured.empty() && std::fread(captured.data(), 1, captured.size(), output) != captured.size())
-          return std::nullopt;
-        if (std::fseek(output, 0, SEEK_END) != 0)
+        if (!captured.empty() && ::pread(::fileno(output), captured.data(), captured.size(), before) != static_cast<ssize_t>(captured.size()))
           return std::nullopt;
         return captured;
       };
@@ -1520,7 +1564,11 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         return false;
       }
       static_cast<void>(std::fflush(output));
-      auto const output_before_footer = std::ftell(output);
+      // Measure at the file-descriptor level: footer bytes travel through two
+      // FILE objects sharing one description (see draw_and_capture below),
+      // whose individual ftell positions do not account for each other's
+      // bytes on every libc.
+      off_t const output_before_footer = ::lseek(::fileno(output), 0, SEEK_CUR);
       auto const footer_canvas = ava::tui::composer_canvas_layout(footer_snapshot);
       auto const expected_footer_column = footer_canvas.left + ava::tui::detail::input_cursor_column(footer_snapshot, footer_canvas.content_width);
       ava::tui::detail::CompletionMatchCache completion_cache;
@@ -1545,14 +1593,15 @@ VirtualTerminalResult exercise_virtual_terminal_profile(VirtualTerminalProfile c
         }
       }
       static_cast<void>(std::fflush(output));
-      auto const output_after_footer = std::ftell(output);
+      off_t const output_after_footer = ::lseek(::fileno(output), 0, SEEK_CUR);
       std::string footer_output;
       bool footer_output_read = false;
-      if (output_before_footer >= 0 && output_after_footer >= output_before_footer && std::fseek(output, output_before_footer, SEEK_SET) == 0)
+      if (output_before_footer >= 0 && output_after_footer >= output_before_footer)
       {
         footer_output.resize(static_cast<std::size_t>(output_after_footer - output_before_footer));
-        footer_output_read = std::fread(footer_output.data(), 1, footer_output.size(), output) == footer_output.size();
-        static_cast<void>(std::fseek(output, 0, SEEK_END));
+        footer_output_read = footer_output.empty() ||
+                             ::pread(::fileno(output), footer_output.data(), footer_output.size(), output_before_footer) ==
+                                 static_cast<ssize_t>(footer_output.size());
       }
       restore_stdout();
       auto const footer_output_is_quiet = footer_output_read && footer_output.find("\x1b[?25l") == std::string::npos &&
@@ -2875,6 +2924,10 @@ void test_same_size_geometry_refresh_does_not_inject_key_resize()
   size.ws_col = 80;
   static_cast<void>(::ioctl(slave_fd, TIOCSWINSZ, &size));
 
+  // Drain master output in the background so endwin() cannot block on a full
+  // PTY buffer with no reader (see PtyMasterDrainer).
+  std::optional<PtyMasterDrainer> drainer(std::in_place, master_fd);
+
   // Point STDOUT at the PTY so refresh_terminal_geometry_from_kernel's TIOCGWINSZ
   // observes the controlled geometry rather than the test runner's terminal.
   int saved_stdout = ::dup(STDOUT_FILENO);
@@ -2921,6 +2974,7 @@ void test_same_size_geometry_refresh_does_not_inject_key_resize()
   expect(screen != nullptr, "same-size geometry PTY creates an ncurses screen");
   if (!screen)
   {
+    drainer.reset();
     static_cast<void>(std::fclose(input));
     static_cast<void>(std::fclose(output));
     static_cast<void>(::dup2(saved_stdout, STDOUT_FILENO));
@@ -2977,6 +3031,7 @@ void test_same_size_geometry_refresh_does_not_inject_key_resize()
   static_cast<void>(std::fclose(output));
   static_cast<void>(::dup2(saved_stdout, STDOUT_FILENO));
   static_cast<void>(::close(saved_stdout));
+  drainer.reset();
   static_cast<void>(::close(master_fd));
   ava::tui::runtime_input::clear_startup_input_queue();
   static_cast<void>(std::setlocale(LC_ALL, previous_locale.c_str()));
@@ -3079,6 +3134,10 @@ void test_direct_terminal_ncurses_mouse_sgr_no_composer_leak()
     return;
   }
 
+  // Drain master output in the background so endwin() cannot block on a full
+  // PTY buffer with no reader (see PtyMasterDrainer).
+  std::optional<PtyMasterDrainer> drainer(std::in_place, master_fd);
+
   static_cast<void>(set_term(screen));
   static_cast<void>(raw());
   static_cast<void>(noecho());
@@ -3164,6 +3223,7 @@ void test_direct_terminal_ncurses_mouse_sgr_no_composer_leak()
   delscreen(screen);
   static_cast<void>(std::fclose(input));
   static_cast<void>(std::fclose(output));
+  drainer.reset();
   static_cast<void>(::close(master_fd));
   ava::tui::runtime_input::clear_startup_input_queue();
   ava::tui::terminal_reset_mouse_tracking();

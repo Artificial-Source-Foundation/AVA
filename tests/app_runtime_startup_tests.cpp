@@ -30,6 +30,7 @@
 #include "ava/core/error.h"
 #include "ava/core/json.h"
 #include "ava/core/result.h"
+#include "ava/core/stat_time.h"
 
 #include <algorithm>
 #include <expected>
@@ -243,7 +244,8 @@ void test_app_runtime_preserves_legacy_subagent_job_tree()
   struct stat after_sentinel{};
   auto exact_metadata = [](struct stat const& before, struct stat const& after) {
     return before.st_dev == after.st_dev && before.st_ino == after.st_ino && before.st_mode == after.st_mode && before.st_size == after.st_size &&
-           before.st_mtim.tv_sec == after.st_mtim.tv_sec && before.st_mtim.tv_nsec == after.st_mtim.tv_nsec;
+           ava::core::stat_modification_time(before).tv_sec == ava::core::stat_modification_time(after).tv_sec &&
+           ava::core::stat_modification_time(before).tv_nsec == ava::core::stat_modification_time(after).tv_nsec;
   };
   bool const metadata_unchanged = ::lstat(legacy.c_str(), &after_directory) == 0 && ::lstat(journal.c_str(), &after_journal) == 0 &&
                                   ::lstat(sentinel.c_str(), &after_sentinel) == 0 && exact_metadata(before_directory, after_directory) &&

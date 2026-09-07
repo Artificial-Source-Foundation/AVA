@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <filesystem>
 #include <iostream>
 #include <string>
 #include <string_view>
@@ -82,6 +83,9 @@ void run_terminal_window_tests();
 void run_run_observer_tests();
 void run_runtime_diagnostics_tests();
 void run_containment_tests();
+#ifdef __APPLE__
+void run_macos_command_security_tests();
+#endif
 #ifdef CWDEBUG
 void run_debug_tests();
 #endif
@@ -95,6 +99,9 @@ struct TestSuite
 };
 
 constexpr std::array kTestSuites{
+#ifdef __APPLE__
+    TestSuite{"macos_command_security", run_macos_command_security_tests},
+#endif
     TestSuite{"core_mode", run_core_mode_tests},
     TestSuite{"test_harness", run_test_harness_tests},
     TestSuite{"diagnostics", run_diagnostics_tests},
@@ -219,6 +226,16 @@ int main(int argc, char** argv)
 #ifdef DEBUGGLOBAL
   // Keep GlobalObjectManager's transition to main as the first operation.
   GlobalObjectManager::main_entered();
+#endif
+
+#ifdef __APPLE__
+  // macOS advertises a symlinked, per-user TMPDIR whose ctime is shared by all
+  // parallel test processes. Use the physical root-owned sticky namespace so
+  // command tests exercise the intended volatile-ancestor policy.
+  std::error_code temporary_error;
+  auto const physical_temporary_directory = std::filesystem::canonical("/tmp", temporary_error);
+  if (!temporary_error)
+    static_cast<void>(::setenv("TMPDIR", physical_temporary_directory.c_str(), 1));
 #endif
 
 #ifdef CWDEBUG

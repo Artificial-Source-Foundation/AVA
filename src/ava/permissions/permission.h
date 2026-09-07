@@ -209,6 +209,9 @@ using PermissionResolver = std::function<ava::core::Result<PermissionResolutionD
                                                                     bool unverified_delegated_executor = false);
 [[nodiscard]] PermissionDecision decide(PermissionRequest const& request);
 [[nodiscard]] PermissionDecision decide(CommandPermissionMetadata const& metadata);
+
+// Presentation of the native Mac backend; never grants execution authority.
+[[nodiscard]] auto command_uses_macos_approval_fallback(CommandPermissionMetadata const& metadata) noexcept -> bool;
 [[nodiscard]] std::vector<ava::command::InteractiveScope> command_permission_effective_scopes(CommandPermissionMetadata const& metadata);
 [[nodiscard]] bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& metadata) noexcept;
 [[nodiscard]] bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept;

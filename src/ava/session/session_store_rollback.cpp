@@ -13,10 +13,22 @@
 #include <system_error>
 #include <utility>
 #include <fcntl.h>
+#ifdef __APPLE__
+#include <stdio.h>
+#endif
+#ifdef __linux__
 #include <linux/fs.h>
+#endif
+#ifdef __linux__
 #include <sys/random.h>
+#endif
+#ifdef __APPLE__
+#include <cstdlib>
+#endif
 #include <sys/stat.h>
+#ifdef __linux__
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 namespace ava::session {
@@ -30,6 +42,11 @@ using detail::same_file_identity;
 ava::core::Result<std::string> rollback_quarantine_name(std::string_view session_name)
 {
   std::array<unsigned char, 16> random_bytes{};
+#ifdef __APPLE__
+  // macOS has no getrandom(2); arc4random_buf draws from the same CSPRNG and
+  // fills the whole buffer (no partial reads, no EINTR).
+  ::arc4random_buf(random_bytes.data(), random_bytes.size());
+#else
   std::size_t offset = 0;
   while (offset < random_bytes.size())
   {
@@ -44,6 +61,7 @@ ava::core::Result<std::string> rollback_quarantine_name(std::string_view session
       return std::unexpected(path_io_error("failed to obtain a complete CSPRNG rollback quarantine name", std::filesystem::path(session_name), EIO));
     offset += static_cast<std::size_t>(count);
   }
+#endif
 
   constexpr char hex[] = "0123456789abcdef";
   std::string suffix;
@@ -58,7 +76,15 @@ ava::core::Result<std::string> rollback_quarantine_name(std::string_view session
 
 int renameat2_no_replace(int parent_fd, std::string const& source_name, std::string const& destination_name)
 {
+#ifdef __APPLE__
+  // macOS has no renameat2(2)/RENAME_NOREPLACE; renameatx_np with RENAME_EXCL
+  // is the equivalent no-replace rename (EEXIST when the destination exists).
+  if (::renameatx_np(parent_fd, source_name.c_str(), parent_fd, destination_name.c_str(), RENAME_EXCL) != 0)
+    return -1;
+  return 0;
+#else
   return static_cast<int>(::syscall(SYS_renameat2, parent_fd, source_name.c_str(), parent_fd, destination_name.c_str(), RENAME_NOREPLACE));
+#endif
 }
 
 bool renameat2_no_replace_unavailable(int error_number)

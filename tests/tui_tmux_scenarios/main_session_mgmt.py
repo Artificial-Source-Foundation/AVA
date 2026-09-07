@@ -125,7 +125,16 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     path_start = next((index for index, line in enumerate(path_lines) if "Select session" in line), None)
     path_end = next((index for index, line in enumerate(path_lines) if index >= (path_start or 0) and "Ctrl+D archive" in line), None)
     path_modal = "\n".join(path_lines[path_start : path_end + 1]) if path_start is not None and path_end is not None else ""
-    if runtime_state_root not in path_modal and ".jsonl" not in path_modal:
+    # macOS temporary directories can exceed the modal's bounded row width.
+    # Require the selected row to disclose the actual state path, allowing the
+    # renderer's trailing ellipsis without accepting an unrelated path or label.
+    disclosed = re.search(r"›\s+TUI smoke\s+(/\S+)", path_modal)
+    visible_path = disclosed.group(1) if disclosed else ""
+    truncated_path = visible_path.removesuffix("...")
+    path_disclosed = runtime_state_root in visible_path or (
+        visible_path.endswith("...") and len(truncated_path) >= 16 and runtime_state_root.startswith(truncated_path)
+    )
+    if not path_disclosed:
         raise RuntimeError(f"Ctrl+P did not explicitly disclose the selected session path\nscreen:\n{path_toggle}")
     save_evidence(root, "session-selector-path-disclosed", path_toggle)
     send_keys(tmux_exe, session, "C-r")

@@ -12,21 +12,91 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# On macOS, Homebrew installs Boost/CMake packages under its prefix and keeps
+# ncurses keg-only under <prefix>/opt/ncurses. Extend the default prefix path
+# so FindCurses (ncursesw) and Boost work without manual -DCMAKE_PREFIX_PATH.
+# This appends only well-known Homebrew locations; explicit user-provided
+# CMAKE_PREFIX_PATH entries are preserved.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin")
+  foreach(_ava_brew_prefix IN ITEMS /opt/homebrew /usr/local)
+    if(EXISTS "${_ava_brew_prefix}/opt/ncurses" AND NOT "${_ava_brew_prefix}/opt/ncurses" IN_LIST CMAKE_PREFIX_PATH)
+      list(APPEND CMAKE_PREFIX_PATH "${_ava_brew_prefix}/opt/ncurses")
+    endif()
+  endforeach()
+  unset(_ava_brew_prefix)
+  if(DEFINED ENV{HOMEBREW_PREFIX} AND NOT "$ENV{HOMEBREW_PREFIX}" STREQUAL "")
+    if(NOT "$ENV{HOMEBREW_PREFIX}" IN_LIST CMAKE_PREFIX_PATH)
+      list(APPEND CMAKE_PREFIX_PATH "$ENV{HOMEBREW_PREFIX}")
+    endif()
+  else()
+    foreach(_ava_brew_prefix IN ITEMS /opt/homebrew /usr/local)
+      if(EXISTS "${_ava_brew_prefix}" AND NOT "${_ava_brew_prefix}" IN_LIST CMAKE_PREFIX_PATH)
+        list(APPEND CMAKE_PREFIX_PATH "${_ava_brew_prefix}")
+      endif()
+    endforeach()
+    unset(_ava_brew_prefix)
+  endif()
+  # The pinned aicxx submodules (ai-utils etc.) use header-only Boost via plain
+  # #include <boost/...> without linking an imported Boost target. Apple Clang
+  # does not search Homebrew prefixes by default, so add them as SYSTEM includes
+  # (warning-free under -Werror) plus library search paths on macOS only.
+  foreach(_ava_brew_prefix IN ITEMS /opt/homebrew /usr/local)
+    if(EXISTS "${_ava_brew_prefix}/include/boost/version.hpp")
+      include_directories(SYSTEM "${_ava_brew_prefix}/include")
+    elseif(EXISTS "${_ava_brew_prefix}/include")
+      include_directories(SYSTEM "${_ava_brew_prefix}/include")
+    endif()
+    if(EXISTS "${_ava_brew_prefix}/lib")
+      link_directories("${_ava_brew_prefix}/lib")
+    endif()
+  endforeach()
+  unset(_ava_brew_prefix)
+endif()
+
+# The CommandLineTools libc++ still ships <stop_token>/std::jthread as an
+# experimental feature; enable the vendor-sanctioned experimental library on
+# Apple builds so standard C++20 threading primitives are available.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  add_compile_options(-fexperimental-library)
+  add_link_options(-fexperimental-library)
+endif()
+
+# Force-include the macOS compatibility shim on Apple builds. It only defines
+# symbols missing from macOS/BSD libc (SIGRTMIN/SIGRTMAX, SIGSTKFLT, SIGPOLL,
+# SIGPWR, sigorset) needed by the pinned Linux-centric submodules, and is a
+# no-op everywhere else. An absolute path keeps it working regardless of the
+# including file's directory.
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+  add_compile_options(-include "${CMAKE_CURRENT_SOURCE_DIR}/cmake/macos-compat.h")
+endif()
+
 #==============================================================================
 # Begin of gitache configuration.
 
 include(FetchContent)
 option(AVA_ENABLE_GITACHE "Fetch and enable gitache-managed developer dependencies" ON)
 if(AVA_ENABLE_GITACHE)
-  set(GITACHE_PACKAGES libcwd)  # List of requested packages.
+  # libcwd requires libdw/libelf (elfutils) for location lookup and does not
+  # build on macOS/Mach-O targets. Skip the gitache-managed libcwd there; the
+  # aicxx modules then default EnableLibcwd to OFF while EnableDebug stays usable.
+  if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    set(GITACHE_PACKAGES "")  # List of requested packages.
+    message(STATUS "gitache libcwd skipped on macOS (libdw unavailable); EnableLibcwd defaults to OFF")
+  else()
+    set(GITACHE_PACKAGES libcwd)  # List of requested packages.
+  endif()
 
-  FetchContent_Declare(
-    gitache
-    GIT_REPOSITORY "https://github.com/CarloWood/gitache.git"
-    GIT_TAG        "c765a7199d8c789fe8d59af69a18a8eb08c5b945"
-    UPDATE_DISCONNECTED TRUE
-  )
-  FetchContent_MakeAvailable(gitache)
+  if(GITACHE_PACKAGES STREQUAL "")
+    message(STATUS "gitache disabled: no packages requested for this platform")
+  else()
+    FetchContent_Declare(
+      gitache
+      GIT_REPOSITORY "https://github.com/CarloWood/gitache.git"
+      GIT_TAG        "c765a7199d8c789fe8d59af69a18a8eb08c5b945"
+      UPDATE_DISCONNECTED TRUE
+    )
+    FetchContent_MakeAvailable(gitache)
+  endif()
 else()
   message(STATUS "gitache disabled by AVA_ENABLE_GITACHE=OFF")
 endif()
@@ -187,6 +257,15 @@ unset(_ava_system_processor)
 
 # Declare aicxx submodules.
 include(AICxxSubmodules)
+
+# AppleClang's -Wshift-count-overflow fires on the pinned ai-utils
+# `nearest_power_of_two` template instantiations that GCC 13/16 accept
+# without warning. Keep the warning visible but non-fatal on Apple builds
+# only; this touches pinned submodule code, not AVA sources.
+if((CMAKE_HOST_SYSTEM_NAME STREQUAL "Darwin" OR CMAKE_SYSTEM_NAME STREQUAL "Darwin") AND TARGET utils_ObjLib)
+  target_compile_options(utils_ObjLib PRIVATE
+    $<$<CXX_COMPILER_ID:AppleClang>:-Wno-error=shift-count-overflow>)
+endif()
 
 # libcwd publishes libdw/libelf as interface dependencies rather than recording
 # them as NEEDED entries. Linux toolchains that default to --as-needed can then

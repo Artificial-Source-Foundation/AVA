@@ -49,7 +49,7 @@ namespace {
 class ScopedRpcSignalIgnore
 {
  public:
-  explicit ScopedRpcSignalIgnore(int signal_number) : signal_number_(signal_number)
+  explicit ScopedRpcSignalIgnore(int signal_number, bool restore_previous = true) : signal_number_(signal_number), restore_previous_(restore_previous)
   {
     struct sigaction ignored{};
     ignored.sa_handler = SIG_IGN;
@@ -67,7 +67,7 @@ class ScopedRpcSignalIgnore
 
   ~ScopedRpcSignalIgnore()
   {
-    if (installed_)
+    if (installed_ && restore_previous_)
       static_cast<void>(sigaction(signal_number_, &previous_, nullptr));
   }
 
@@ -78,6 +78,7 @@ class ScopedRpcSignalIgnore
   int signal_number_ = 0;
   int error_number_ = 0;
   bool installed_ = false;
+  bool restore_previous_ = true;
   struct sigaction previous_{};
 };
 
@@ -1094,7 +1095,13 @@ ava::core::VoidResult run_rpc_loop(runtime::session_ts& unlocked_session, runtim
 
 int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& out, std::ostream& err, rpc::RpcInputWake wake)
 {
+#ifdef __APPLE__
+  // Keep SIGPIPE ignored through process teardown: Darwin may flush std::cout again
+  // after this function returns. Custom-stream callers still get scoped restoration.
+  ScopedRpcSignalIgnore const ignore_sigpipe(SIGPIPE, &in != &std::cin || &out != &std::cout);
+#else
   ScopedRpcSignalIgnore const ignore_sigpipe(SIGPIPE);
+#endif
   if (!ignore_sigpipe.installed())
   {
     auto error = ava::core::Error(ava::core::ErrorCategory::Io, "failed to suppress SIGPIPE for RPC mode");

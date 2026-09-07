@@ -1384,7 +1384,11 @@ void test_permission_rule_storage_requires_owner_only_final_directory()
 
 void test_permission_rule_storage_allows_root_sticky_temp_ancestor()
 {
+#ifdef __APPLE__
+  auto const temporary_root = std::filesystem::path("/private/tmp");
+#else
   auto const temporary_root = std::filesystem::temp_directory_path();
+#endif
   struct stat temporary_status{};
   auto const root = temporary_root / ("ava-permission-rules-sticky-" + std::to_string(static_cast<long long>(::getpid())));
   std::error_code remove_error;

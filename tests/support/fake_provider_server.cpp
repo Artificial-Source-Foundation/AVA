@@ -625,6 +625,18 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? bash_tool_body(target_path) : text_body("after bash process cleanup")};
   }
+  if (scenario == "bash-build-twice")
+  {
+    if (request_index == 0 || request_index == 2)
+      return ProviderResponse{.body = tool_body("call_native_build_" + std::to_string(request_index / 2 + 1), "bash",
+                                                R"({"command":"./cmake --build build","timeout_ms":2000,"max_lines":20})")};
+    return ProviderResponse{.body = text_body("native approved turn complete")};
+  }
+  if (scenario == "bash-git-status")
+  {
+    return ProviderResponse{.body = request_index == 0 ? tool_body("call_native_git_status", "bash", R"({"command":"git status"})")
+                                                       : text_body("git status approved turn complete")};
+  }
   if (scenario == "terminal-tool")
   {
     return ProviderResponse{.body = request_index == 0 ? terminal_tool_body() : text_body("after ACP terminal")};
@@ -723,10 +735,11 @@ int main(int argc, char** argv)
       : scenario == "streaming-scroll"         ? 2
       : scenario == "end-to-end-workflow"      ? 6
       : scenario == "read-tool-twice"          ? 4
+      : scenario == "bash-build-twice"         ? 3
       : scenario == "read-tool-thrice"         ? 6
       : scenario == "subagent-workspace"       ? 4
       : (scenario == "read-tool" || scenario == "read-missing-tool" || scenario == "grep-tool" || scenario == "write-tool" || scenario == "bash-timeout-tree" ||
-         scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
+         scenario == "bash-git-status" || scenario == "question-tool" || scenario == "question-tool-multi" || scenario == "skill-tool" || scenario == "websearch-tool" ||
          scenario == "webfetch-tool" || scenario == "mcp-tool" || scenario == "terminal-tool" || scenario == "compact" || scenario == "compact-delayed")
           ? 2
           : 1;
@@ -822,6 +835,8 @@ int main(int argc, char** argv)
       if (!wait_for_process_gate(*process_gates, static_cast<std::size_t>(request_index), "delayed provider release gate failed"))
         return 1;
     }
+    if (scenario == "text-timed")
+      std::this_thread::sleep_for(delay);
 
     auto provider_response = response_for(scenario, request_index, target_path);
     if (scenario == "branch-summary" && request.find("Summarize only the supplied abandoned parent-session branch") != std::string::npos)

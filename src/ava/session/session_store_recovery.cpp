@@ -6,6 +6,7 @@
 #include "ava/core/ids.h"
 #include "ava/core/json.h"
 #include "ava/core/path.h"
+#include "ava/core/stat_time.h"
 #include "ava/core/strict_json.h"
 
 #include <algorithm>
@@ -24,6 +25,7 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -75,9 +77,13 @@ using ava::core::normalized_absolute_path;
 
 bool unchanged_file_snapshot(struct stat const& current, struct stat const& initial)
 {
-  return same_file_identity(current, initial) && current.st_size == initial.st_size && current.st_mtim.tv_sec == initial.st_mtim.tv_sec &&
-         current.st_mtim.tv_nsec == initial.st_mtim.tv_nsec && current.st_ctim.tv_sec == initial.st_ctim.tv_sec &&
-         current.st_ctim.tv_nsec == initial.st_ctim.tv_nsec;
+  using ava::core::stat_change_time;
+  using ava::core::stat_modification_time;
+  return same_file_identity(current, initial) && current.st_size == initial.st_size &&
+         stat_modification_time(current).tv_sec == stat_modification_time(initial).tv_sec &&
+         stat_modification_time(current).tv_nsec == stat_modification_time(initial).tv_nsec &&
+         stat_change_time(current).tv_sec == stat_change_time(initial).tv_sec &&
+         stat_change_time(current).tv_nsec == stat_change_time(initial).tv_nsec;
 }
 
 ava::core::VoidResult require_unchanged_repair_namespace(int repair_fd, int parent_fd, struct stat const& initial_file_status,
@@ -258,7 +264,20 @@ ava::core::Result<std::filesystem::path> quarantine_session_suffix(int parent_fd
       return abandon_prepublication(std::move(error));
     }
 
-    if (::linkat(quarantine_fd.get(), "", parent_fd, final_name.c_str(), AT_EMPTY_PATH) != 0)
+    int link_result;
+#ifdef __APPLE__
+    // macOS linkat(2) has no AT_EMPTY_PATH; resolve the quarantine fd to its
+    // path and link that instead. The inode/content verification below fails
+    // closed if the path was swapped concurrently.
+    char quarantine_path[PATH_MAX];
+    if (::fcntl(quarantine_fd.get(), F_GETPATH, quarantine_path) == -1)
+      link_result = -1;
+    else
+      link_result = ::linkat(AT_FDCWD, quarantine_path, parent_fd, final_name.c_str(), 0);
+#else
+    link_result = ::linkat(quarantine_fd.get(), "", parent_fd, final_name.c_str(), AT_EMPTY_PATH);
+#endif
+    if (link_result != 0)
     {
       int const error_number = errno;
       auto failed = prepublication_io_failure("failed to publish exact session recovery quarantine inode", error_number);

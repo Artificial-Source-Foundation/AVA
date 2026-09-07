@@ -13,6 +13,7 @@
 #include <string_view>
 #include <utility>
 #include <netinet/in.h>
+#include <fcntl.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
@@ -248,17 +249,51 @@ void send_callback_response(int fd, std::string_view body)
   static_cast<void>(send_all_to_socket(fd, response));
 }
 
+#ifdef __APPLE__
+// macOS has neither SOCK_CLOEXEC nor accept4(2); accept plus an explicit
+// FD_CLOEXEC is the equivalent (failing closed when the flag cannot be set).
+int accept_cloexec(int server_fd) noexcept
+{
+  int const fd = ::accept(server_fd, nullptr, nullptr);
+  if (fd < 0)
+    return fd;
+  if (::fcntl(fd, F_SETFD, FD_CLOEXEC) != 0)
+  {
+    auto const saved_errno = errno;
+    ::close(fd);
+    errno = saved_errno;
+    return -1;
+  }
+  return fd;
+}
+#endif
+
 }  // namespace
 
 ava::core::Result<OAuthCallbackResult> wait_for_oauth_callback(std::string_view expected_state, std::function<bool()> const& cancel_requested)
 {
-  ScopedSocket const server(::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0));
+  ScopedSocket const server(::socket(AF_INET,
+#ifdef __APPLE__
+                                                                     // macOS has no SOCK_CLOEXEC; FD_CLOEXEC is set below.
+                                                                     SOCK_STREAM,
+#else
+                                                                     SOCK_STREAM | SOCK_CLOEXEC,
+#endif
+                                                                     0));
   if (server.get() < 0)
   {
     auto error = connect_error(ava::core::ErrorCategory::Io, "failed to create OAuth callback socket");
     error.with_context("cause", errno_message());
     return std::unexpected(std::move(error));
   }
+#ifdef __APPLE__
+  if (::fcntl(server.get(), F_SETFD, FD_CLOEXEC) != 0)
+  {
+    auto error = connect_error(ava::core::ErrorCategory::Io, "failed to set close-on-exec OAuth callback socket");
+    error.with_context("cause", errno_message());
+    return std::unexpected(std::move(error));
+  }
+#endif
   int reuse = 1;
   static_cast<void>(::setsockopt(server.get(), SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)));
 
@@ -303,7 +338,13 @@ ava::core::Result<OAuthCallbackResult> wait_for_oauth_callback(std::string_view 
       return std::unexpected(std::move(error));
     }
 
-    ScopedSocket const client(::accept4(server.get(), nullptr, nullptr, SOCK_CLOEXEC));
+    ScopedSocket const client(
+#ifdef __APPLE__
+        accept_cloexec(server.get())
+#else
+        ::accept4(server.get(), nullptr, nullptr, SOCK_CLOEXEC)
+#endif
+        );
     if (client.get() < 0)
     {
       auto error = connect_error(ava::core::ErrorCategory::Io, "failed to accept OAuth callback");

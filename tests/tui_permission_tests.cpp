@@ -6,6 +6,7 @@
 #include "ava/tui/composer.h"
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_internal.h"
+#include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/permissions/permission.h"
 
@@ -118,6 +119,55 @@ void run_tui_permission_tests_part_1()
   expect(!one_shot_remember_availability.allow_remember_available && one_shot_remember_availability.deny_remember_available &&
              !unavailable_storage_remember_availability.allow_remember_available && !unavailable_storage_remember_availability.deny_remember_available,
          "tui runtime enables a persistent deny but not a persistent allow for one-shot Critical prompts when rule storage exists");
+
+  auto macos_prompt = one_shot_prompt;
+  macos_prompt.tool_name = "bash";
+  macos_prompt.command = "cmake --build build";
+  macos_prompt.command_metadata->executor_identity_verified = true;
+  macos_prompt.command_metadata->containment_status = ava::permissions::CommandContainmentStatus::Unavailable;
+  macos_prompt.command_metadata->containment_profile_id = "ava-macos-uncontained-v1";
+  auto macos_decision = ava::permissions::decide(*macos_prompt.command_metadata);
+  macos_prompt.reason = macos_decision.reason;
+  macos_prompt.risk = macos_decision.risk;
+  auto macos_view = ava::tui::runtime_views::permission_prompt_view(macos_prompt);
+  macos_view.deny_remember_available = true;
+  expect(macos_decision.action == ava::permissions::PermissionAction::Ask && macos_decision.risk == ava::permissions::PermissionRisk::Critical &&
+             !ava::tui::tui_session_grant_eligible(macos_prompt) && macos_view.security_notice == "macOS uncontained · not executed",
+         "macOS permission view clearly identifies uncontained one-time execution without session grants");
+  for (auto const width : {40u, 80u, 120u})
+  {
+    ava::tui::ComposerSnapshot macos_snapshot;
+    macos_snapshot.permission_prompt = macos_view;
+    macos_snapshot.width = width;
+    macos_snapshot.height = 12;
+    auto const lines = ava::tui::render_composer(macos_snapshot);
+    std::string screen;
+    for (auto const& line : lines)
+      screen += strip_sgr(line) + '\n';
+    expect(screen.find("macOS uncontained") != std::string::npos && screen.find("not executed") != std::string::npos &&
+               screen.find("Always allow") == std::string::npos && screen.find("Allow session") == std::string::npos &&
+               std::ranges::all_of(lines, [width](std::string const& line) { return visible_columns(line) <= width; }),
+           "macOS uncontained permission notice and one-time choices stay visible and bounded across terminal widths");
+  }
+  auto linux_contained = *macos_prompt.command_metadata;
+  linux_contained.level = ava::command::CommandLevel::Standard;
+  linux_contained.executes_mutable_project_code = true;
+  linux_contained.containment_available = true;
+  linux_contained.containment_status = ava::permissions::CommandContainmentStatus::Available;
+  linux_contained.containment_profile_id = "ava-landlock-seccomp-v1";
+  auto const linux_decision = ava::permissions::decide(linux_contained);
+  auto ordinary = linux_contained;
+  ordinary.executes_mutable_project_code = false;
+  ordinary.containment_available = false;
+  ordinary.containment_status = ava::permissions::CommandContainmentStatus::NotRequired;
+  ordinary.containment_profile_id.clear();
+  auto const ordinary_decision = ava::permissions::decide(ordinary);
+  expect(linux_decision.action == ava::permissions::PermissionAction::Allow &&
+             linux_decision.reason == "sealed command executes mutable project code under verified development containment" &&
+             ordinary_decision.action == ava::permissions::PermissionAction::Allow &&
+             ordinary_decision.reason == "sealed command is a standard inspection recipe" &&
+             !ava::permissions::command_uses_macos_approval_fallback(linux_contained) && !ava::permissions::command_uses_macos_approval_fallback(ordinary),
+         "ordinary permitted, Linux-contained, and macOS uncontained decisions retain distinct truthful explanations without changing Linux policy");
 
   ava::tui::PermissionPromptView guidance_prompt{
       .tool_name = "bash", .operation = "bash", .target = "", .command = "true", .reason = "ask", .selected_choice = ava::tui::PermissionPromptChoice::Allow};

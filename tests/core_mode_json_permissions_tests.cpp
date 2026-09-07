@@ -102,6 +102,17 @@ class TestApplication final : public ava::core::Application
 
 constexpr int lifecycle_child_setup_failed = 125;
 constexpr int lifecycle_child_still_dumpable = 126;
+#ifdef __APPLE__
+constexpr int lifecycle_child_observed_abort = 126;
+
+void observe_lifecycle_abort(int signal)
+{
+  // Prove that the invariant delivered SIGABRT without entering macOS's
+  // default crash-reporting path, which can retain an exiting fork child.
+  // This handler exists only in the death-test child and performs no cleanup.
+  _exit(signal == SIGABRT ? lifecycle_child_observed_abort : lifecycle_child_setup_failed);
+}
+#endif
 
 struct ChildWaitResult
 {
@@ -147,19 +158,26 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
       _exit(lifecycle_child_setup_failed);
 #endif
 
+#ifdef __APPLE__
+    struct sigaction abort_action{};
+    abort_action.sa_handler = observe_lifecycle_abort;
+    if (::sigemptyset(&abort_action.sa_mask) != 0 || ::sigaction(SIGABRT, &abort_action, nullptr) != 0)
+      _exit(lifecycle_child_setup_failed);
+#endif
+
     // The child is expected to abort; nothing it writes is part of any test
-    // assertion (the parent only checks WTERMSIG == SIGABRT). In particular
+    // assertion (the parent only checks that SIGABRT was delivered). In particular
     // the intentional LIBCWD_ASSERT in the lifecycle invariants emits
     // libcwd's dc::core "COREDUMP" diagnostic to std::cerr, which would
     // otherwise leak into the test process's stderr. Point fd 2 at
     // /dev/null so the child may write whatever it wants before aborting
-    // without polluting the parent's stderr.
+    // without polluting the parent's stderr. Redirect stdout too, so a child
+    // that cannot be reaped never keeps CTest's output pipe open.
     int devnull = ::open("/dev/null", O_WRONLY);
-    if (devnull >= 0)
-    {
-      ::dup2(devnull, STDERR_FILENO);
+    if (devnull < 0 || ::dup2(devnull, STDOUT_FILENO) < 0 || ::dup2(devnull, STDERR_FILENO) < 0)
+      _exit(lifecycle_child_setup_failed);
+    if (devnull > STDERR_FILENO)
       ::close(devnull);
-    }
     child_action();
     _exit(EXIT_SUCCESS);
   }
@@ -180,7 +198,7 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
   }
   if (WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_setup_failed)
   {
-    expect(false, "Application lifecycle death test child could not disable core dumps: " + std::string(description));
+    expect(false, "Application lifecycle death test child setup failed: " + std::string(description));
     return;
   }
   if (WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_still_dumpable)
@@ -189,7 +207,12 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
     return;
   }
 
-  expect(WIFSIGNALED(result.status) && WTERMSIG(result.status) == SIGABRT, "Application lifecycle invariant aborts: " + std::string(description));
+#ifdef __APPLE__
+  bool const observed_abort = WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_observed_abort;
+#else
+  bool const observed_abort = WIFSIGNALED(result.status) && WTERMSIG(result.status) == SIGABRT;
+#endif
+  expect(observed_abort, "Application lifecycle invariant aborts: " + std::string(description));
 }
 
 void initialize_test_application(ava::core::Application& application)

@@ -67,7 +67,7 @@ def _write_plugin_fixture(ctx: SmokeContext) -> dict[str, pathlib.Path]:
         "IFS= read -r initialize\n"
         "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
         "IFS= read -r command\n"
-        "request_id=$(printf '%s' \"$command\" | /bin/sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n"
+        "request_id=$(printf '%s' \"$command\" | sed -n 's/.*\"id\":\"\\([^\"]*\\)\".*/\\1/p')\n"
         "case \"$command\" in\n"
         "  *'\"command\":\"demo\"'*)\n"
         "    printf '%s\\n' '{\"id\":\"tmux-status\",\"type\":\"ui.status\",\"text\":\"TMUX plugin UI working\"}'\n"

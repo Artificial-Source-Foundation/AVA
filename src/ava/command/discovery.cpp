@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 #include <fcntl.h>
+#include <limits.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -26,6 +27,17 @@ namespace {
 #ifndef O_PATH
 #define O_PATH O_RDONLY
 #endif
+
+// macOS names the stat(2) change-time member st_ctimespec while Linux (and
+// POSIX.1-2008) names it st_ctim. One accessor keeps every use site portable.
+timespec stat_change_time(struct stat const& status) noexcept
+{
+#ifdef __APPLE__
+  return status.st_ctimespec;
+#else
+  return status.st_ctim;
+#endif
+}
 
 class UniqueFd final
 {
@@ -130,6 +142,18 @@ ava::core::Result<struct stat> metadata_stat(std::filesystem::path const& path, 
   UniqueFd fd(::open(path.c_str(), O_PATH | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC));
   if (fd.get() < 0)
   {
+#ifdef __APPLE__
+    // macOS has no O_PATH, so O_NOFOLLOW opens of symlinks themselves (such as
+    // the /tmp and /var compatibility links every macOS path traverses) fail
+    // with ELOOP instead of returning a link descriptor. fstatat with
+    // AT_SYMLINK_NOFOLLOW yields exactly the link metadata O_PATH would have.
+    if (errno == ELOOP)
+    {
+      struct stat link_status{};
+      if (::fstatat(AT_FDCWD, path.c_str(), &link_status, AT_SYMLINK_NOFOLLOW) == 0)
+        return link_status;
+    }
+#endif
     auto result = command_error(errno == ENOENT ? ava::core::ErrorCategory::NotFound : ava::core::ErrorCategory::Io, "failed to inspect " + std::string(label),
                                 "path", path.string());
     result.with_context("cause", std::strerror(errno));
@@ -154,8 +178,8 @@ PathAncestorMetadata ancestor_metadata_from(std::filesystem::path path, struct s
                               .owner = static_cast<std::uintmax_t>(status.st_uid),
                               .group = static_cast<std::uintmax_t>(status.st_gid),
                               .link_count = static_cast<std::uintmax_t>(status.st_nlink),
-                              .changed_seconds = static_cast<std::int64_t>(status.st_ctim.tv_sec),
-                              .changed_nanoseconds = static_cast<std::int64_t>(status.st_ctim.tv_nsec),
+                              .changed_seconds = static_cast<std::int64_t>(stat_change_time(status).tv_sec),
+                              .changed_nanoseconds = static_cast<std::int64_t>(stat_change_time(status).tv_nsec),
                               .is_symlink = S_ISLNK(status.st_mode),
                               // Root-owned sticky namespaces such as /tmp are
                               // shared by unrelated processes, so bind their
@@ -203,8 +227,8 @@ PathMetadata metadata_from(std::filesystem::path requested, struct stat const& r
                       .owner = static_cast<std::uintmax_t>(target_status.st_uid),
                       .group = static_cast<std::uintmax_t>(target_status.st_gid),
                       .link_count = static_cast<std::uintmax_t>(target_status.st_nlink),
-                      .changed_seconds = static_cast<std::int64_t>(target_status.st_ctim.tv_sec),
-                      .changed_nanoseconds = static_cast<std::int64_t>(target_status.st_ctim.tv_nsec),
+                      .changed_seconds = static_cast<std::int64_t>(stat_change_time(target_status).tv_sec),
+                      .changed_nanoseconds = static_cast<std::int64_t>(stat_change_time(target_status).tv_nsec),
                       .requested_path_is_symlink = S_ISLNK(requested_status.st_mode),
                       .requested_device = static_cast<std::uintmax_t>(requested_status.st_dev),
                       .requested_inode = static_cast<std::uintmax_t>(requested_status.st_ino),
@@ -212,8 +236,8 @@ PathMetadata metadata_from(std::filesystem::path requested, struct stat const& r
                       .requested_owner = static_cast<std::uintmax_t>(requested_status.st_uid),
                       .requested_group = static_cast<std::uintmax_t>(requested_status.st_gid),
                       .requested_link_count = static_cast<std::uintmax_t>(requested_status.st_nlink),
-                      .requested_changed_seconds = static_cast<std::int64_t>(requested_status.st_ctim.tv_sec),
-                      .requested_changed_nanoseconds = static_cast<std::int64_t>(requested_status.st_ctim.tv_nsec),
+                      .requested_changed_seconds = static_cast<std::int64_t>(stat_change_time(requested_status).tv_sec),
+                      .requested_changed_nanoseconds = static_cast<std::int64_t>(stat_change_time(requested_status).tv_nsec),
                       .ancestor_metadata = std::move(ancestors)};
 }
 
@@ -319,8 +343,8 @@ ava::core::Result<PathMetadata> inspect_path_metadata(std::filesystem::path cons
     auto observed = anchored_final_status(*anchor, label);
     if (!observed || observed->st_dev != requested_status.st_dev || observed->st_ino != requested_status.st_ino ||
         observed->st_mode != requested_status.st_mode || observed->st_uid != requested_status.st_uid || observed->st_gid != requested_status.st_gid ||
-        observed->st_nlink != requested_status.st_nlink || observed->st_ctim.tv_sec != requested_status.st_ctim.tv_sec ||
-        observed->st_ctim.tv_nsec != requested_status.st_ctim.tv_nsec)
+        observed->st_nlink != requested_status.st_nlink || stat_change_time(*observed).tv_sec != stat_change_time(requested_status).tv_sec ||
+        stat_change_time(*observed).tv_nsec != stat_change_time(requested_status).tv_nsec)
     {
       return std::unexpected(
           command_error(ava::core::ErrorCategory::Io, std::string(label) + " changed during descriptor inspection", "path", requested->string()));
@@ -476,7 +500,14 @@ ava::core::VoidResult validate_safe_executable(ExecutableMetadata const& metadat
     return std::unexpected(command_error(ava::core::ErrorCategory::InvalidArgument, "resolved command is not a regular executable file", "path",
                                          metadata.canonical_path.string()));
   }
-  if (!mode_is_safe(status) || !owner_is_safe(status, false) || metadata.link_count != 1)
+  bool safe_link_count = metadata.link_count == 1;
+#ifdef __APPLE__
+  // Apple ships some immutable system tools as root-owned hard links (for
+  // example, /usr/bin/git and /bin/rm). Multiple links add no same-user
+  // mutation authority when only root can modify the inode.
+  safe_link_count = safe_link_count || (metadata.owner == 0 && metadata.link_count > 1);
+#endif
+  if (!mode_is_safe(status) || !owner_is_safe(status, false) || !safe_link_count)
   {
     return std::unexpected(command_error(ava::core::ErrorCategory::PermissionDenied, "resolved command has unsafe owner, writable mode, or link count", "path",
                                          metadata.canonical_path.string()));
@@ -517,6 +548,23 @@ ExecutableMetadata executable_from(PathMetadata const& metadata)
 
 ava::core::Result<std::filesystem::path> descriptor_executable_path(int fd, std::filesystem::path const& logical)
 {
+#ifdef __APPLE__
+  // macOS has no /proc/self/fd; F_GETPATH resolves the descriptor instead. An
+  // unlinked-but-open file still reports its former path here (there is no
+  // " (deleted)" marker); the st_nlink comparisons elsewhere fail closed on
+  // replacements.
+  char target[PATH_MAX];
+  if (::fcntl(fd, F_GETPATH, target) != 0)
+  {
+    auto error = command_error(ava::core::ErrorCategory::Io, "failed to derive narrow executable identity from its descriptor", "path", logical.string());
+    error.with_context("cause", std::strerror(errno));
+    return std::unexpected(std::move(error));
+  }
+  std::filesystem::path physical(target);
+  if (!physical.is_absolute())
+    return std::unexpected(command_error(ava::core::ErrorCategory::Io, "executable descriptor identity is not absolute", "path", logical.string()));
+  return physical.lexically_normal();
+#else
   auto const descriptor_path = "/proc/self/fd/" + std::to_string(fd);
   std::array<char, 64 * 1024> target{};
   auto const size = ::readlink(descriptor_path.c_str(), target.data(), target.size());
@@ -533,6 +581,7 @@ ava::core::Result<std::filesystem::path> descriptor_executable_path(int fd, std:
   if (!physical.is_absolute())
     return std::unexpected(command_error(ava::core::ErrorCategory::Io, "executable descriptor identity is not absolute", "path", logical.string()));
   return physical.lexically_normal();
+#endif
 }
 
 ava::core::Result<ExecutableMetadata> executable_metadata(std::filesystem::path const& requested, ava::core::AnchorSet const& anchors)
@@ -546,8 +595,8 @@ ava::core::Result<ExecutableMetadata> executable_metadata(std::filesystem::path 
   struct stat opened_status{};
   if (::fstat(opened->fd(), &opened_status) != 0 || static_cast<std::uintmax_t>(opened_status.st_dev) != metadata->device ||
       static_cast<std::uintmax_t>(opened_status.st_ino) != metadata->inode ||
-      static_cast<std::int64_t>(opened_status.st_ctim.tv_sec) != metadata->changed_seconds ||
-      static_cast<std::int64_t>(opened_status.st_ctim.tv_nsec) != metadata->changed_nanoseconds)
+      static_cast<std::int64_t>(stat_change_time(opened_status).tv_sec) != metadata->changed_seconds ||
+      static_cast<std::int64_t>(stat_change_time(opened_status).tv_nsec) != metadata->changed_nanoseconds)
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::Io, "executable changed during descriptor identity capture", "path", metadata->requested_path.string()));
@@ -705,8 +754,8 @@ ava::core::Result<std::optional<ShebangParse>> shebang_interpreter_path(Executab
     return std::unexpected(std::move(opened.error()));
   struct stat status{};
   if (::fstat(opened->fd(), &status) != 0 || !S_ISREG(status.st_mode) || static_cast<std::uintmax_t>(status.st_dev) != executable.device ||
-      static_cast<std::uintmax_t>(status.st_ino) != executable.inode || static_cast<std::int64_t>(status.st_ctim.tv_sec) != executable.changed_seconds ||
-      static_cast<std::int64_t>(status.st_ctim.tv_nsec) != executable.changed_nanoseconds)
+      static_cast<std::uintmax_t>(status.st_ino) != executable.inode || static_cast<std::int64_t>(stat_change_time(status).tv_sec) != executable.changed_seconds ||
+      static_cast<std::int64_t>(stat_change_time(status).tv_nsec) != executable.changed_nanoseconds)
   {
     return std::unexpected(
         command_error(ava::core::ErrorCategory::Io, "executable changed during shebang inspection", "path", executable.canonical_path.string()));
@@ -958,9 +1007,8 @@ ava::core::Result<SealedCommandContext> discover_command_context(CommandIntent c
     auto const overlaps = [&candidate](std::filesystem::path const& protected_root) {
       return is_within(candidate, protected_root) || is_within(protected_root, candidate);
     };
-    // Synthetic roots live under the pre-opened spill anchor, which can itself
-    // be nested beneath a broader AVA session authority root. Granting the
-    // exact synthetic descriptor does not expose that parent authority.
+    // Only the exact synthetic directory descriptor is exposed to a command;
+    // its allocation parent is never part of the child environment authority.
     return overlaps(workspace_metadata->canonical_path) || overlaps(trusted_home->canonical_path);
   };
   auto const capture_synthetic_root = [&options, &overlaps_synthetic_host_root](std::filesystem::path const& path,

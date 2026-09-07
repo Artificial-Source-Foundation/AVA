@@ -8,10 +8,12 @@
 #include <array>
 #include <cerrno>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string_view>
 #include <utility>
+#include <dirent.h>
 #include <fcntl.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -77,6 +79,36 @@ ava::core::Error context_io_error(std::string message, std::filesystem::path con
   return error;
 }
 
+ava::core::Result<bool> has_exact_directory_entry(UniqueFd const& root, std::filesystem::path const& relative, std::filesystem::path const& display_path)
+{
+  auto const parent = relative.parent_path();
+  int const fd = parent.empty() ? ::openat(root.get(), ".", O_RDONLY | O_DIRECTORY | O_CLOEXEC)
+                                : ava::core::open_beneath(root.get(), parent, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (fd < 0)
+  {
+    if (errno == ENOENT)
+      return false;
+    return std::unexpected(context_io_error("failed to inspect context directory", display_path.parent_path(), errno));
+  }
+  // glibc's function attributes must not become template arguments under GCC.
+  std::unique_ptr<DIR, int (*)(DIR*)> directory(::fdopendir(fd), &::closedir);
+  if (!directory)
+  {
+    int const error_number = errno;
+    ::close(fd);
+    return std::unexpected(context_io_error("failed to inspect context directory", display_path.parent_path(), error_number));
+  }
+
+  auto const expected_name = relative.filename().string();
+  errno = 0;
+  while (auto const* entry = ::readdir(directory.get()))
+    if (expected_name == entry->d_name)
+      return true;
+  if (errno != 0)
+    return std::unexpected(context_io_error("failed to enumerate context directory", display_path.parent_path(), errno));
+  return false;
+}
+
 ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::path const& root, bool missing_ok)
 {
   auto const absolute = normalized_absolute_path(root);
@@ -104,6 +136,11 @@ ava::core::Result<std::optional<UniqueFd>> open_secure_root(std::filesystem::pat
 ava::core::Result<std::optional<std::string>> read_file_beneath(UniqueFd const& root, std::filesystem::path const& relative,
                                                                 std::filesystem::path const& display_path, std::size_t max_file_bytes)
 {
+  auto exact_entry = has_exact_directory_entry(root, relative, display_path);
+  if (!exact_entry)
+    return std::unexpected(std::move(exact_entry.error()));
+  if (!*exact_entry)
+    return std::optional<std::string>{};
   int const fd = ava::core::open_beneath(root.get(), relative, O_RDONLY | O_CLOEXEC);
   if (fd < 0)
   {

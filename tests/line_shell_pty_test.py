@@ -56,15 +56,21 @@ def process_group_exists(pgid: int) -> bool:
     except ProcessLookupError:
         return False
     except PermissionError:
-        return True
+        # Darwin reports EPERM for a zombie-only process group. Every group
+        # probed here was created by this test, so no live foreign process can
+        # legitimately cause the error.
+        return sys.platform != "darwin"
 
 
 def terminate_group(process: subprocess.Popen[bytes], timeout: float = 2.0) -> None:
     pgid = process.pid
+    # Reap an exited leader before probing its group. Darwin reports EPERM for
+    # killpg against a zombie-only process group instead of ESRCH.
+    process.poll()
     if process_group_exists(pgid):
         try:
             os.killpg(pgid, signal.SIGTERM)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline and process_group_exists(pgid):
@@ -73,7 +79,7 @@ def terminate_group(process: subprocess.Popen[bytes], timeout: float = 2.0) -> N
     if process_group_exists(pgid):
         try:
             os.killpg(pgid, signal.SIGKILL)
-        except ProcessLookupError:
+        except (ProcessLookupError, PermissionError):
             pass
     try:
         process.wait(timeout=2)

@@ -106,6 +106,18 @@ class EnvironmentSandbox final
     }
     for (auto const& name : names)
       static_cast<void>(_putenv_s(name.c_str(), ""));
+#elif defined(__APPLE__)
+    // macOS has no clearenv(2): unset every name individually.
+    std::vector<std::string> names;
+    for (auto current = ::environ; current != nullptr && *current != nullptr; ++current)
+    {
+      std::string_view entry(*current);
+      auto const separator = entry.find('=');
+      if (separator != std::string_view::npos && separator != 0)
+        names.emplace_back(entry.substr(0, separator));
+    }
+    for (auto const& name : names)
+      static_cast<void>(::unsetenv(name.c_str()));
 #else
     static_cast<void>(::clearenv());
 #endif

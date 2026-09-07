@@ -460,26 +460,59 @@ int run_tui(ShellState state)
             return ava::tui::TuiActiveRunQueues{
                 .active_request_id = queue->active_request_id(),
                 .queue_steering = [queue](std::string message) { return queue->queue_steering(std::move(message)); },
-                .queue_follow_up = [queue](std::string message) { return queue->queue_follow_up(std::move(message)); },
+                .queue_follow_up =
+                    [queue](std::string message, std::vector<ava::session::ImageAttachmentRef> images) {
+                      return queue->queue_follow_up(std::move(message), std::move(images));
+                    },
                 .take_steering_messages = [queue]() { return queue->take_steering_messages(); },
                 .skip_active_steering = [queue](std::string_view reason) { return queue->skip_active_steering(reason); },
                 .take_next_follow_up = [queue]() -> std::optional<ava::tui::TuiQueuedFollowUp> {
                   auto next = queue->take_next_follow_up();
                   if (!next)
                     return std::nullopt;
-                  return ava::tui::TuiQueuedFollowUp{.request_id = next->request_id, .message = next->message};
+                  return ava::tui::TuiQueuedFollowUp{
+                      .request_id = next->request_id, .message = std::move(next->message), .image_attachments = std::move(next->image_attachments)};
                 },
                 .mark_follow_up_started =
                     [queue](ava::tui::TuiQueuedFollowUp const& follow_up) {
-                      return queue->mark_follow_up_started(ava::app::InteractiveQueuedMessage{
-                          .request_id = follow_up.request_id, .correlation_id = follow_up.request_id, .message = follow_up.message});
+                      return queue->mark_follow_up_started(ava::app::InteractiveQueuedMessage{.request_id = follow_up.request_id,
+                                                                                              .correlation_id = follow_up.request_id,
+                                                                                              .message = follow_up.message,
+                                                                                              .image_attachments = follow_up.image_attachments});
                     },
                 .restore_latest = [queue]() -> ava::core::Result<ava::tui::TuiRestoredQueuedMessage> {
                   auto restored = queue->restore_latest();
                   if (!restored)
                     return std::unexpected(std::move(restored.error()));
-                  return ava::tui::TuiRestoredQueuedMessage{.message = restored->message, .steering = restored->steering};
+                  return ava::tui::TuiRestoredQueuedMessage{
+                      .message = std::move(restored->message), .steering = restored->steering, .image_attachments = std::move(restored->image_attachments)};
                 },
+                .pending_selector = [queue]() -> ava::tui::SelectListView {
+                  ava::tui::SelectListView view;
+                  view.title = "Pending messages";
+                  view.subtitle = "Enter restores a message for editing; submit it again to queue it";
+                  view.empty_text = "No pending messages";
+                  view.placeholder.clear();
+                  view.footer_hint = "Enter edit · Ctrl+D remove · type filter · Esc close";
+                  for (auto const& item : queue->pending_messages())
+                  {
+                    ava::tui::SelectListItemView choice;
+                    choice.value = item.request_id;
+                    choice.label = item.message.substr(0, 512);
+                    choice.description = item.steering ? "Steering" : "Follow-up";
+                    choice.detail = item.image_attachments.empty() ? "" : std::to_string(item.image_attachments.size()) + " images";
+                    view.items.push_back(std::move(choice));
+                  }
+                  return view;
+                },
+                .restore_pending = [queue](std::string_view request_id) -> ava::core::Result<ava::tui::TuiRestoredQueuedMessage> {
+                  auto restored = queue->restore_pending(request_id);
+                  if (!restored)
+                    return std::unexpected(std::move(restored.error()));
+                  return ava::tui::TuiRestoredQueuedMessage{
+                      .message = std::move(restored->message), .steering = restored->steering, .image_attachments = std::move(restored->image_attachments)};
+                },
+                .remove_pending = [queue](std::string_view request_id) -> ava::core::VoidResult { return queue->remove_pending(request_id); },
                 .run_nonblocking_command = [active_job_coordinator, active_job_owner](std::string const& submitted) -> std::optional<std::vector<std::string>> {
                   auto arguments = ava::app::active_jobs_command_arguments(submitted);
                   if (!arguments)
@@ -863,12 +896,14 @@ int run_tui(ShellState state)
                                                                 std::stop_token stop) -> ava::core::Result<ava::permissions::CommandReview> {
         try
         {
-          auto const inputs = [&]() -> std::pair<std::shared_ptr<ava::provider::ProviderCatalog const>, bool> {
+          auto const inputs = [&] {
             auto session = runtime::session_ts::crat(unlocked_session);
-            return std::pair{session->provider_catalog(), session->is_offline()};
+            return std::tuple{session->provider_catalog(), session->is_offline(), session->session_process_scope()};
           }();
-          ava::http::CurlCliTransport transport;
-          return ava::app::explain_command(invocation_paths, inputs.first, prompt, inputs.second, std::move(stop), transport);
+          if (!std::get<2>(inputs))
+            return ava::permissions::CommandReview{};
+          ava::http::CurlCliTransport transport(*std::get<2>(inputs));
+          return ava::app::explain_command(invocation_paths, std::get<0>(inputs), prompt, std::get<1>(inputs), std::move(stop), transport);
         }
         catch (...)
         {

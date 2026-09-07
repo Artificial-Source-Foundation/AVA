@@ -99,8 +99,13 @@ ava::process::ExpectedFileIdentityV1 identity_for(std::filesystem::path const& p
           .dev = static_cast<std::uint64_t>(status.st_dev),
           .inode = static_cast<std::uint64_t>(status.st_ino),
           .size = static_cast<std::uint64_t>(status.st_size),
+#if defined(__APPLE__)
+          .ctime_sec = static_cast<std::int64_t>(status.st_ctimespec.tv_sec),
+          .ctime_nsec = static_cast<std::int64_t>(status.st_ctimespec.tv_nsec)};
+#else
           .ctime_sec = static_cast<std::int64_t>(status.st_ctim.tv_sec),
           .ctime_nsec = static_cast<std::int64_t>(status.st_ctim.tv_nsec)};
+#endif
 }
 
 PreopenedExecutableV1 mint_executable(std::shared_ptr<ava::core::AnchorSet const> const& anchors, std::filesystem::path const& path)

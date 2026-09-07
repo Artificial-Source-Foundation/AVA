@@ -36,7 +36,9 @@
 
 namespace {
 
-using ava::test::wait_for_process_group_exit;
+// The file-local wait below stays zombie-aware on macOS (sysctl scan); the
+// shared helper degrades to kill(2)-based checks without procfs, so the
+// upstream using-declaration is intentionally not imported here.
 
 #ifndef AVA_FAKE_LSP_SERVER_PATH
 #define AVA_FAKE_LSP_SERVER_PATH ""

@@ -35,7 +35,9 @@ namespace {
 std::mutex external_reopen_hook_mutex;
 std::shared_ptr<std::function<void()>> external_reopen_hook;
 
-void invoke_external_reopen_hook()
+// The Apple reopen path below does not invoke the test hook yet; keep the
+// helper available without tripping -Wunused-function on Apple builds.
+[[maybe_unused]] void invoke_external_reopen_hook()
 {
   std::shared_ptr<std::function<void()>> hook;
   {
@@ -374,6 +376,9 @@ bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& 
 Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesystem::path const& absolute, bool nofollow_logical_final)
 {
 #ifdef __APPLE__
+  // The Apple physical-anchor walk below resolves the complete path itself;
+  // the Linux logical-final option has no Apple equivalent.
+  static_cast<void>(nofollow_logical_final);
   std::vector<PhysicalAnchor> anchor_ids;
   anchor_ids.reserve(anchors.anchors().size());
   for (auto const& anchor : anchors.anchors())
@@ -413,7 +418,7 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
       continue;
     }
     bool const is_directory = file_type(opened.object.get()) == S_IFDIR;
-    ResolvedPath resolved{std::move(opened.object), duplicate_fd(directories.back().get()), is_directory, std::move(component)};
+    ResolvedPath resolved{std::move(opened.object), duplicate_fd(directories.back().get()), component, is_directory, component};
     if (is_beneath_any_anchor(resolved, anchor_ids))
       return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
     if (components.empty())
@@ -422,7 +427,7 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
       throw_error(ENOTDIR, "non-directory pathname component");
     directories.push_back(std::move(resolved.object));
   }
-  ResolvedPath resolved{duplicate_fd(directories.back().get()), duplicate_fd(directories.back().get()), true, "."};
+  ResolvedPath resolved{duplicate_fd(directories.back().get()), duplicate_fd(directories.back().get()), ".", true, "."};
   if (is_beneath_any_anchor(resolved, anchor_ids))
     return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
   return resolved;
@@ -495,6 +500,8 @@ UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags, mode_t 
 #ifdef __APPLE__
   // Reopen only from the inspected, retained parent; the held object remains
   // alive while identity equality is checked. Never reopen an absolute path.
+  // The Apple reopen is always read-only, so no creation mode applies.
+  static_cast<void>(mode);
   auto const expected = file_id(resolved.object.get());
   int const fd = open_beneath(resolved.parent.get(), resolved.name, O_RDONLY | O_NONBLOCK | O_CLOEXEC | O_NOFOLLOW | (flags & O_DIRECTORY));
   if (fd == -1)

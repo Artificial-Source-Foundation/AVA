@@ -35,6 +35,18 @@ namespace {
 
 using namespace std::chrono_literals;
 
+bool test_cloexec_pipe(std::array<int, 2>& fds) noexcept
+{
+#if defined(__linux__)
+  return ::pipe2(fds.data(), O_CLOEXEC) == 0;
+#else
+  // macOS lacks pipe2(2); close-on-exec via fcntl matches make_cloexec_pipe.
+  if (::pipe(fds.data()) != 0)
+    return false;
+  return ::fcntl(fds[0], F_SETFD, FD_CLOEXEC) == 0 && ::fcntl(fds[1], F_SETFD, FD_CLOEXEC) == 0;
+#endif
+}
+
 #if !defined(_WIN32)
 
 ava::process::OwnerPathV1 application_owner()
@@ -314,7 +326,7 @@ void test_required_containment_exact_environment_sentinel_and_confirmation()
   std::array<int, 2> ready{-1, -1};
   std::array<int, 2> proceed{-1, -1};
   std::array<int, 2> output{-1, -1};
-  bool const pipes_ready = ::pipe2(ready.data(), O_CLOEXEC) == 0 && ::pipe2(proceed.data(), O_CLOEXEC) == 0 && ::pipe2(output.data(), O_CLOEXEC) == 0;
+  bool const pipes_ready = test_cloexec_pipe(ready) && test_cloexec_pipe(proceed) && test_cloexec_pipe(output);
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
 
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
@@ -442,7 +454,7 @@ void test_cancellation_after_release_before_confirmation()
   ava::process::Supervisor supervisor;
   std::array<int, 2> reached{-1, -1};
   std::array<int, 2> hold{-1, -1};
-  bool const pipes_ready = ::pipe2(reached.data(), O_CLOEXEC) == 0 && ::pipe2(hold.data(), O_CLOEXEC) == 0;
+  bool const pipes_ready = test_cloexec_pipe(reached) && test_cloexec_pipe(hold);
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
   auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec())
                           : ava::core::Result<ava::process::AdoptionGate>(std::unexpected(reservation.error()));
@@ -521,7 +533,7 @@ void test_sentinel_descriptor_hygiene_while_leader_runs()
   std::array<int, 2> control{-1, -1};
   std::array<int, 2> output{-1, -1};
   std::array<int, 2> unrelated{-1, -1};
-  bool const pipes_ready = ::pipe2(control.data(), O_CLOEXEC) == 0 && ::pipe2(output.data(), O_CLOEXEC) == 0 && ::pipe2(unrelated.data(), O_CLOEXEC) == 0;
+  bool const pipes_ready = test_cloexec_pipe(control) && test_cloexec_pipe(output) && test_cloexec_pipe(unrelated);
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
   auto reservation = supervisor.reserve(operation_owner(application), ava::process::ProcessRoleV1::Bash);
   auto gate = reservation ? supervisor.begin_secure_adoption(std::move(*reservation), bash_spec(ava::process::BashContainmentHandshakeV1::None,
@@ -559,7 +571,7 @@ void test_retained_script_descriptor_and_invalid_keep_sets()
   auto application = application_owner();
   ava::process::Supervisor supervisor;
   std::array<int, 2> output{-1, -1};
-  bool const pipe_ready = ::pipe2(output.data(), O_CLOEXEC) == 0;
+  bool const pipe_ready = test_cloexec_pipe(output);
   int executable = ::open(AVA_FAKE_PROCESS_CHILD_PATH, O_RDONLY | O_CLOEXEC);
   int retained = ::open("/dev/null", O_RDONLY | O_CLOEXEC);
   int unrelated = ::open("/dev/null", O_RDONLY | O_CLOEXEC);

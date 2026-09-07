@@ -14,6 +14,8 @@
 #if defined(__linux__)
 #include <sys/eventfd.h>
 #include <sys/syscall.h>
+#elif defined(__APPLE__)
+#include <sys/event.h>
 #endif
 #endif
 
@@ -81,6 +83,36 @@ PreparedDescriptor prepare_descriptor(int raw_descriptor, std::shared_ptr<Monito
   return {.descriptor = std::move(descriptor)};
 }
 
+#if defined(__APPLE__)
+PreparedDescriptor prepare_kqueue_descriptor(int raw_descriptor, std::shared_ptr<MonitorTelemetry> const& telemetry) noexcept
+{
+  // kqueue descriptors reject F_GETFL/F_SETFL with ENOTTY: O_NONBLOCK is
+  // meaningless for a queue the monitor only poll()s and never reads/writes.
+  // Enforce the same CLOEXEC placement as prepare_descriptor and record the
+  // vacuously true nonblocking invariant so backend-selection telemetry keeps
+  // identical coverage on both kernels.
+  int descriptor_value = raw_descriptor;
+  if (descriptor_value <= STDERR_FILENO)
+  {
+    int const moved = fcntl_retry(descriptor_value, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    int const move_error = errno;
+    static_cast<void>(::close(descriptor_value));
+    if (moved < 0)
+      return {.descriptor = UniqueFd{}, .error_number = move_error == 0 ? EIO : move_error};
+    descriptor_value = moved;
+  }
+  UniqueFd descriptor(descriptor_value);
+
+  telemetry->cloexec_checks.fetch_add(1, std::memory_order_relaxed);
+  int descriptor_flags = fcntl_retry(descriptor.get(), F_GETFD);
+  if (descriptor_flags < 0 || ((descriptor_flags & FD_CLOEXEC) == 0 && fcntl_retry(descriptor.get(), F_SETFD, descriptor_flags | FD_CLOEXEC) != 0))
+    return {.descriptor = UniqueFd{}, .error_number = errno == 0 ? EIO : errno};
+
+  telemetry->nonblocking_checks.fetch_add(1, std::memory_order_relaxed);
+  return {.descriptor = std::move(descriptor)};
+}
+#endif
+
 void count_pidfd_failure(std::shared_ptr<MonitorTelemetry> const& telemetry, PidfdFailureClass failure) noexcept
 {
   switch (failure)
@@ -102,7 +134,7 @@ void count_pidfd_failure(std::shared_ptr<MonitorTelemetry> const& telemetry, Pid
   }
 }
 
-PidfdFailureClass classify_pidfd_error(int error_number) noexcept
+[[maybe_unused]] PidfdFailureClass classify_pidfd_error(int error_number) noexcept
 {
   if (error_number == ENOSYS || error_number == EINVAL || error_number == ENODEV)
     return PidfdFailureClass::Unavailable;
@@ -279,6 +311,51 @@ PidfdOpenResult open_pidfd_watch(pid_t process, MonitorBackendMode mode, bool ru
           .failure = failure,
           .cache_runtime_unavailable = failure == PidfdFailureClass::Unavailable,
           .prompt_exact_probe = failure == PidfdFailureClass::Other};
+#elif defined(__APPLE__)
+  // Darwin has no pidfd_open(2): observe the member with a per-process kqueue
+  // EVFILT_PROC NOTE_EXIT watch. The queue descriptor is polled for
+  // readability exactly like a pidfd and is consumed one-shot on readiness,
+  // so the monitor loop needs no Darwin-specific path beyond this backend.
+  // Telemetry counts the queue as an event watch (pidfd_* counters) so the
+  // backend-selection contracts observe identical behavior on both kernels.
+  // PID reuse is impossible here: the watch attaches to our direct, unreaped
+  // child, whose pid the kernel holds until the supervisor reaps it.
+  // Authoritative exit status still comes from waitid(2), unchanged.
+  telemetry->pidfd_attempts.fetch_add(1, std::memory_order_relaxed);
+  int const queue = ::kqueue();
+  if (queue < 0)
+  {
+    int const queue_error = errno == 0 ? EIO : errno;
+    auto const failure = queue_error == EMFILE || queue_error == ENFILE || queue_error == ENOMEM ? PidfdFailureClass::Resource : PidfdFailureClass::Other;
+    count_pidfd_failure(telemetry, failure);
+    return {.watch = {}, .failure = failure, .cache_runtime_unavailable = false, .prompt_exact_probe = true};
+  }
+  struct kevent registration{};
+  EV_SET(&registration, static_cast<std::uint64_t>(process), EVFILT_PROC, EV_ADD | EV_ENABLE, NOTE_EXIT, 0, nullptr);
+  if (::kevent(queue, &registration, 1, nullptr, 0, nullptr) != 0)
+  {
+    static_cast<void>(::close(queue));
+    count_pidfd_failure(telemetry, PidfdFailureClass::Other);
+    return {.watch = {}, .failure = PidfdFailureClass::Other, .cache_runtime_unavailable = false, .prompt_exact_probe = true};
+  }
+  auto prepared = prepare_kqueue_descriptor(queue, telemetry);
+  if (prepared.descriptor.get() < 0)
+  {
+    auto const failure = classify_pidfd_error(prepared.error_number);
+    count_pidfd_failure(telemetry, failure);
+    return {.watch = {}, .failure = failure, .cache_runtime_unavailable = false, .prompt_exact_probe = true};
+  }
+  try
+  {
+    auto watch = std::make_shared<PidfdWatch>(std::move(prepared.descriptor), telemetry);
+    telemetry->pidfd_successes.fetch_add(1, std::memory_order_relaxed);
+    return {.watch = std::move(watch), .failure = PidfdFailureClass::None, .cache_runtime_unavailable = false, .prompt_exact_probe = false};
+  }
+  catch (...)
+  {
+    count_pidfd_failure(telemetry, PidfdFailureClass::Resource);
+    return {.watch = {}, .failure = PidfdFailureClass::Resource, .cache_runtime_unavailable = false, .prompt_exact_probe = true};
+  }
 #else
   static_cast<void>(process);
   count_pidfd_failure(telemetry, PidfdFailureClass::Unavailable);

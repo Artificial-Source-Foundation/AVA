@@ -7,6 +7,7 @@
 #include <chrono>
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -21,6 +22,9 @@
 #include <unistd.h>
 #if defined(__linux__)
 #include <dirent.h>
+#elif defined(__APPLE__)
+#include <sys/proc.h>
+#include <sys/sysctl.h>
 #endif
 #endif
 
@@ -84,6 +88,16 @@ bool valid_linux_process_state(char state) noexcept
       return true;
   }
   return false;
+}
+#elif defined(__APPLE__)
+bool darwin_group_member_live(struct kinfo_proc const& process, pid_t group) noexcept
+{
+  // Commit 1's qualified Darwin group scan excludes zombies and zero-state
+  // entries. Preserve that mapping so an exited child cannot keep its own
+  // cleanup proof artificially live while the kernel removes its proc row.
+  if (process.kp_proc.p_pid <= 1 || process.kp_eproc.e_pgid != group)
+    return false;
+  return process.kp_proc.p_stat != SZOMB && process.kp_proc.p_stat != 0;
 }
 #endif
 
@@ -702,6 +716,14 @@ bool signal_verified_group(Record& record, int signal_number) noexcept
   }
   if (::kill(-record.leader, signal_number) == 0 || errno == ESRCH)
     return true;
+#if defined(__APPLE__)
+  // Darwin can report EPERM while an exiting member still has a live-looking
+  // proc row, then report the group quiet on the next observation. Do not
+  // permanently poison cleanup for that transient result: Complete still
+  // requires two subsequent quiet proofs and an exact reap.
+  if (errno == EPERM)
+    return true;
+#endif
   record.cleanup_failed = true;
   return false;
 }
@@ -807,6 +829,49 @@ std::optional<bool> verified_group_has_live_member(pid_t group) noexcept
   if (::closedir(directory) != 0 && !live)
     failed = true;
   return live ? std::optional<bool>(true) : (failed ? std::nullopt : std::optional<bool>(false));
+#elif defined(__APPLE__)
+  // Darwin has no /proc: enumerate the verified group with sysctl
+  // KERN_PROC_PGRP, the same public mechanism as the qualified Commit 1
+  // process-group scan. An empty group is quiet; a failed scan is Unknown
+  // (matching the Linux failure contract, never a forged proof).
+  int mib[4] = {CTL_KERN, KERN_PROC, KERN_PROC_PGRP, group};
+  for (int attempt = 0; attempt < 2; ++attempt)
+  {
+    std::size_t size = 0;
+    if (::sysctl(mib, 4, nullptr, &size, nullptr, 0) != 0)
+      return std::nullopt;
+    if (size == 0)
+      return std::optional<bool>(false);
+    if (size % sizeof(struct kinfo_proc) != 0)
+      return std::nullopt;
+    void* buffer = std::malloc(size);
+    if (buffer == nullptr)
+      return std::nullopt;
+    std::size_t fetched = size;
+    int const fetch_result = ::sysctl(mib, 4, buffer, &fetched, nullptr, 0);
+    int const fetch_error = errno;
+    if (fetch_result != 0)
+    {
+      std::free(buffer);
+      if (fetch_error == ENOMEM)
+        continue;
+      return std::nullopt;
+    }
+    std::size_t const count = fetched / sizeof(struct kinfo_proc);
+    auto const* processes = static_cast<struct kinfo_proc const*>(buffer);
+    bool live = false;
+    for (std::size_t index = 0; index < count; ++index)
+    {
+      if (darwin_group_member_live(processes[index], group))
+      {
+        live = true;
+        break;
+      }
+    }
+    std::free(buffer);
+    return std::optional<bool>(live);
+  }
+  return std::nullopt;
 #else
   static_cast<void>(group);
   return std::nullopt;

@@ -118,10 +118,23 @@ ava::core::Result<PipeIoResultV1> PipeEndpoint::write(std::span<std::byte const>
   bool const was_blocked = ::sigismember(&previous, SIGPIPE) == 1;
   if (result < 0 && saved_errno == EPIPE && !was_blocked)
   {
+#if defined(__APPLE__)
+    // macOS lacks sigtimedwait(2): drain one pending SIGPIPE with a pending
+    // check plus sigwait(2) so the zero-timeout drain can never block.
+    sigset_t pending_signals{};
+    if (::sigpending(&pending_signals) == 0 && ::sigismember(&pending_signals, SIGPIPE) == 1)
+    {
+      int delivered = 0;
+      while (::sigwait(&blocked, &delivered) != 0 && errno == EINTR)
+      {
+      }
+    }
+#else
     timespec const no_wait{};
     while (::sigtimedwait(&blocked, nullptr, &no_wait) < 0 && errno == EINTR)
     {
     }
+#endif
   }
   if (::pthread_sigmask(SIG_SETMASK, &previous, nullptr) != 0)
     return std::unexpected(detail::io_error("failed to restore the signal mask after process pipe write", errno));

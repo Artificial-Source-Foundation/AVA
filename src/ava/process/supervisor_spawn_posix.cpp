@@ -1,6 +1,9 @@
 #include "sys.h"
 #include "ava/process/launch_protocol_posix.h"
 #include "ava/process/supervisor_internal.h"
+#if defined(__APPLE__)
+#include "ava/core/fd_exec.h"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -164,10 +167,23 @@ bool write_without_sigpipe(int descriptor, void const* data, std::size_t size) n
   }
   if (broken && !was_blocked)
   {
+#if defined(__APPLE__)
+    // macOS lacks sigtimedwait(2): drain one pending SIGPIPE with a pending
+    // check plus sigwait(2) so the zero-timeout drain can never block.
+    sigset_t pending_signals{};
+    if (::sigpending(&pending_signals) == 0 && ::sigismember(&pending_signals, SIGPIPE) == 1)
+    {
+      int delivered = 0;
+      while (::sigwait(&blocked, &delivered) != 0 && errno == EINTR)
+      {
+      }
+    }
+#else
     timespec const no_wait{};
     while (::sigtimedwait(&blocked, nullptr, &no_wait) < 0 && errno == EINTR)
     {
     }
+#endif
   }
   if (::pthread_sigmask(SIG_SETMASK, &previous, nullptr) != 0)
     success = false;
@@ -687,6 +703,14 @@ void child_duplicate_stream(PreparedStream const& stream, int target, int launch
   {
 #if defined(__linux__) && defined(SYS_execveat) && defined(AT_EMPTY_PATH)
     static_cast<void>(::syscall(SYS_execveat, executable_descriptor, "", prepared.argv.data(), prepared.environment.data(), AT_EMPTY_PATH));
+#elif defined(__APPLE__)
+    // macOS has neither execveat(AT_EMPTY_PATH) nor fexecve(2): re-verify the
+    // open executable description against its own path immediately before
+    // exec, then exec the verified path. This is the qualified Commit 1
+    // descriptor-verified exec (ava::core::exec_verified_fd): anything swapped
+    // before the check fails closed with EIO. A same-uid swap in the residual
+    // window between the final check and execve is inherent to macOS.
+    static_cast<void>(ava::core::exec_verified_fd(executable_descriptor, prepared.argv.data(), prepared.environment.data()));
 #else
     static_cast<void>(::fexecve(executable_descriptor, prepared.argv.data(), prepared.environment.data()));
 #endif

@@ -28,6 +28,7 @@
 #include "ava/session/attachments.h"
 #include "ava/provider/catalog.h"
 #include "ava/core/ids.h"
+#include "ava/core/string_utils.h"
 #include "ava/core/version.h"
 
 #include <chrono>
@@ -527,6 +528,20 @@ int run_tui(ShellState state)
       .on_submit =
           [&state, &unlocked_session, &invocation_paths, &hotkeys, &refresh_display_watch_state, &refresh_session_tree_catalog, &refresh_title_catalog,
            &state_snapshot, &application_catalog, remember_effective_display_settings](std::string const& submitted, ava::tui::TuiSubmitContext context) {
+            auto const clipboard_command = ava::core::trim_view(submitted);
+            if (clipboard_command == "/export" || clipboard_command == "/export markdown")
+            {
+              ava::tui::TuiSubmitResult exported;
+              exported.local_command_result = ava::tui::TuiLocalCommandResult{};
+              if (context.cancel_requested && context.cancel_requested())
+                return exported;
+              auto markdown = ava::app::read_session_markdown(unlocked_session);
+              if (markdown)
+                exported.clipboard_markdown = std::move(*markdown);
+              else
+                exported.local_command_result->output.push_back(markdown.error().format());
+              return exported;
+            }
             // Persistent rules resolve before the TUI fallback resolver in
             // context, so an exact durable Deny never reaches the in-memory
             // session-grant registry.
@@ -587,7 +602,8 @@ int run_tui(ShellState state)
                 [&](ava::tui::TuiQueuedFollowUp const& follow_up) {
                   auto follow_up_result =
                       handle_line(state, follow_up.message, permission_resolver, context.question_resolver, hotkeys, context.event_sink,
-                                  context.cancel_requested, context.take_steering_messages, {}, follow_up.request_id, context.on_subagent_launch, nullptr);
+                                  context.cancel_requested, context.take_steering_messages, follow_up.image_attachments, follow_up.request_id,
+                                  context.on_subagent_launch, nullptr);
                   capture_request_presentation(follow_up.message, follow_up.request_id, follow_up_result);
                   return follow_up_result;
                 });

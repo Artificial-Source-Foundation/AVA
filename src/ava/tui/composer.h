@@ -142,6 +142,14 @@ struct TranscriptItem
 
 // TUI-only local command presentation. The title is a sanitized command token;
 // blocks and tools are bounded before storage and never enter session/provider content.
+struct ChangeReviewFile
+{
+  std::string path;
+  std::string patch;
+  bool reviewed = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct CommandOutputView
 {
   std::string title_token = {};
@@ -149,6 +157,8 @@ struct CommandOutputView
   std::vector<ToolTimelineItem> tools = {};
   std::size_t scroll_offset = 0;
   bool truncated = false;
+  std::vector<ChangeReviewFile> review_files;
+  std::size_t review_index = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -686,6 +696,7 @@ struct ComposerSnapshot
   std::size_t draft_scroll_offset = 0;
   ToolPresentation tool_presentation = ToolPresentation::Rich;
   bool thinking_visible = true;
+  bool attention_enabled = false;
   std::optional<ProjectTrustSnapshot> project_trust = std::nullopt;
   // Effective image presentation from the application-owned display document.
   bool show_images = true;

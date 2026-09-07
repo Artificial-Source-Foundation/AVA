@@ -2,6 +2,7 @@
 #include "ava/tools/secure_workspace.h"
 #include "ava/core/ids.h"
 #include "ava/core/open_beneath.h"
+#include "ava/core/stat_time.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -324,6 +325,27 @@ void SecureWorkspace::StagedWrite::cleanup() noexcept
   temp_name_.clear();
 }
 
+auto SecureWorkspace::StagedWrite::commit_if_unchanged(struct stat const& expected) -> ava::core::VoidResult
+{
+  struct stat current{};
+  if (parent_fd_ < 0 || ::fstatat(parent_fd_, target_name_.c_str(), &current, AT_SYMLINK_NOFOLLOW) != 0)
+  {
+    return std::unexpected(workspace_error(ava::core::ErrorCategory::PermissionDenied, "undo target is no longer available", workspace_root_, path_));
+  }
+  auto const expected_time = ava::core::stat_modification_time(expected);
+  auto const current_time = ava::core::stat_modification_time(current);
+  auto const expected_change = ava::core::stat_change_time(expected);
+  auto const current_change = ava::core::stat_change_time(current);
+  if (current.st_dev != expected.st_dev || current.st_ino != expected.st_ino || current.st_size != expected.st_size || current.st_mode != expected.st_mode ||
+      current.st_uid != expected.st_uid || current.st_gid != expected.st_gid || current.st_nlink != expected.st_nlink ||
+      current_time.tv_sec != expected_time.tv_sec || current_time.tv_nsec != expected_time.tv_nsec || current_change.tv_sec != expected_change.tv_sec ||
+      current_change.tv_nsec != expected_change.tv_nsec)
+  {
+    return std::unexpected(workspace_error(ava::core::ErrorCategory::PermissionDenied, "undo target changed before commit", workspace_root_, path_));
+  }
+  return commit();
+}
+
 ava::core::VoidResult SecureWorkspace::StagedWrite::commit()
 {
   if (parent_fd_ < 0 || temp_name_.empty())
@@ -414,6 +436,21 @@ ava::core::Result<std::shared_ptr<SecureWorkspace>> SecureWorkspace::open(std::f
     return std::unexpected(lookup_error(absolute, absolute, open_error, "root anchor open"));
 
   return std::shared_ptr<SecureWorkspace>(new SecureWorkspace(anchored, std::move(absolute)));
+}
+
+auto SecureWorkspace::from_directory_fd(int directory_fd, std::filesystem::path const& root) -> ava::core::Result<std::shared_ptr<SecureWorkspace>>
+{
+  struct stat identity{};
+  if (!root.is_absolute() || ::fstat(directory_fd, &identity) != 0 || !S_ISDIR(identity.st_mode))
+  {
+    return std::unexpected(workspace_error(ava::core::ErrorCategory::PermissionDenied, "invalid workspace directory anchor", root, root));
+  }
+  int const owned = ::fcntl(directory_fd, F_DUPFD_CLOEXEC, 3);
+  if (owned < 0)
+  {
+    return std::unexpected(lookup_error(root, root, errno, "workspace anchor duplication"));
+  }
+  return std::shared_ptr<SecureWorkspace>(new SecureWorkspace(owned, root.lexically_normal()));
 }
 
 std::filesystem::path const& SecureWorkspace::root() const noexcept

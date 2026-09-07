@@ -192,6 +192,8 @@ ava::tools::ToolContext make_tool_context(runtime::session_ts& unlocked_session,
       .anchor_set = anchor_set,
       .ava_authority_roots = ava_authority_roots,
       .process_scope = process_scope,
+      .edit_history = runtime::session_ts::crat(unlocked_session)->edit_history(),
+      .edit_turn_id = ava::core::make_id("edit-command"),
       .lsp_diagnostics_provider = lsp_provider ? *lsp_provider : nullptr,
       .plugin_global_plugins_dir = resource_policy.plugin_discovery.global_plugins_dir,
       .plugin_project_plugins_dir = resource_policy.plugin_discovery.project_plugins_dir,
@@ -238,6 +240,39 @@ ava::core::Result<CommandResult> run_tool_command(runtime::session_ts& unlocked_
   auto linked_permission_ids = [&]() -> std::vector<std::string> {
     return context.permission_request_ids ? *context.permission_request_ids : std::vector<std::string>{};
   };
+
+  auto const command_end = line.find_last_not_of(" \t\r\n");
+  auto const undo_line = std::string_view(line).substr(0, command_end == std::string::npos ? 0 : command_end + 1);
+  if (undo_line == "/undo" || undo_line == "/undo --confirm")
+  {
+    auto history = context.edit_history;
+    context.edit_history.reset();
+    context.permission_tool_name = "undo";
+    auto output = undo_line == "/undo" ? history->preview(context) : history->undo(context);
+    result.output.push_back(output ? *output : output.error().format());
+    if (undo_line == "/undo --confirm")
+    {
+      auto receipt = ava::session::SessionEntry{.id = ava::core::make_id("entry"),
+                                                .parent_id = "",
+                                                .type = ava::session::EntryType::UserMessage,
+                                                .timestamp = ava::session::now_timestamp(),
+                                                .data_json = R"({"text":")" +
+                                                             ava::core::json::escape("Local file undo requested by the user. Result: " + result.output.back()) +
+                                                             R"(","source":"local_undo"})"};
+      if (auto recorded = runtime::session_ts::wat(unlocked_session)->append_owned(std::move(receipt)); !recorded)
+      {
+        auto error = std::move(recorded.error());
+        error.with_context("undo_result", result.output.back());
+        return std::unexpected(std::move(error));
+      }
+    }
+    return result;
+  }
+  if (line.starts_with("/undo "))
+  {
+    result.output.emplace_back("Usage: /undo to preview; /undo --confirm to apply the reviewed changes.");
+    return result;
+  }
 
   if (line.starts_with("/read "))
   {

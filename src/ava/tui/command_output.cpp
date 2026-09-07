@@ -7,7 +7,9 @@
 
 #include <algorithm>
 #include <cctype>
+#include <charconv>
 #include <iterator>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -99,6 +101,16 @@ std::vector<std::string> command_output_content_lines(CommandOutputView const& v
 {
   auto const content_width = std::max<std::size_t>(detail::modal_content_width(width), 1);
   std::vector<std::string> lines;
+  if (!view.review_files.empty())
+  {
+    auto const& file = view.review_files.at(std::min(view.review_index, view.review_files.size() - 1));
+    for (auto const& raw_line : split_lines(file.patch))
+    {
+      auto wrapped = detail::wrap_transcript_text(sanitize_terminal_text(raw_line), content_width);
+      lines.insert(lines.end(), std::make_move_iterator(wrapped.begin()), std::make_move_iterator(wrapped.end()));
+    }
+    return lines;
+  }
   auto add_gap = [&]() {
     if (!lines.empty() && !lines.back().empty())
       lines.emplace_back();
@@ -129,6 +141,10 @@ std::string command_output_footer(CommandOutputView const& view, std::size_t wid
   auto const max_scroll = line_count > body_height ? line_count - body_height : std::size_t{0};
   auto const scroll = std::min(view.scroll_offset, max_scroll);
   std::string hint;
+  if (!view.review_files.empty())
+  {
+    return modal_line("n/p file · ]/[ hunk · m reviewed · Esc close", width);
+  }
   if (max_scroll > 0)
   {
     auto const first = scroll + 1;
@@ -143,6 +159,134 @@ std::string command_output_footer(CommandOutputView const& view, std::size_t wid
 }
 
 }  // namespace
+
+namespace {
+auto hunk_line_count(std::string_view field) -> std::size_t
+{
+  auto const comma = field.find(',');
+  if (comma == std::string_view::npos)
+  {
+    return 1;
+  }
+  std::size_t count = 0;
+  auto number = field.substr(comma + 1);
+  auto parsed = std::from_chars(std::to_address(number.begin()), std::to_address(number.end()), count);
+  return parsed.ec == std::errc{} ? count : 0;
+}
+
+auto review_section_end(std::vector<std::string> const& lines, std::size_t start) -> std::size_t
+{
+  std::size_t old_lines = 0;
+  std::size_t new_lines = 0;
+  for (auto index = start + 2; index < lines.size(); ++index)
+  {
+    auto const& line = lines.at(index);
+    if (old_lines == 0 && new_lines == 0 && line.starts_with("--- ") && index + 1 < lines.size() && lines.at(index + 1).starts_with("+++ "))
+    {
+      return index;
+    }
+    if (line.starts_with("@@ -"))
+    {
+      auto fields = std::string_view(line).substr(3);
+      auto split = fields.find(' ');
+      old_lines = hunk_line_count(fields.substr(0, split));
+      new_lines = split == std::string_view::npos ? 0 : hunk_line_count(fields.substr(split + 1));
+    }
+    else
+    {
+      if (old_lines > 0 && (line.starts_with('-') || line.starts_with(' ')))
+      {
+        --old_lines;
+      }
+      if (new_lines > 0 && (line.starts_with('+') || line.starts_with(' ')))
+      {
+        --new_lines;
+      }
+    }
+  }
+  return lines.size();
+}
+
+void append_review_diff(CommandOutputView& view, ToolTimelineItem const& tool, std::size_t& retained)
+{
+  auto const patch = sanitize_output_block(ava::core::json::replace_invalid_utf8(tool.diff.substr(0, kMaxCommandOutputBytes)));
+  auto const lines = split_lines(patch);
+  for (std::size_t index = 0; index + 1 < lines.size(); ++index)
+  {
+    if (!lines.at(index).starts_with("--- ") || !lines.at(index + 1).starts_with("+++ "))
+    {
+      continue;
+    }
+    auto path = lines.at(index + 1).substr(4);
+    if (path == "/dev/null")
+    {
+      path = lines.at(index).substr(4);
+    }
+    if (path.starts_with("a/") || path.starts_with("b/"))
+    {
+      path.erase(0, 2);
+    }
+    auto const end = review_section_end(lines, index);
+    std::string section;
+    for (auto line = index; line < end; ++line)
+    {
+      section += lines.at(line) + "\n";
+    }
+    if (retained + section.size() > kMaxCommandOutputBytes || view.review_files.size() >= 100)
+    {
+      view.truncated = true;
+      break;
+    }
+    retained += section.size();
+    auto file = std::ranges::find(view.review_files, path, &ChangeReviewFile::path);
+    if (file == view.review_files.end())
+    {
+      view.review_files.push_back({.path = std::move(path), .patch = std::move(section)});
+    }
+    else
+    {
+      file->patch += "\n" + section;
+    }
+    index = end - 1;
+  }
+  view.truncated = view.truncated || tool.diff_truncated || tool.diff.size() > kMaxCommandOutputBytes;
+}
+}  // namespace
+
+void open_change_review(ComposerSnapshot& snapshot)
+{
+  CommandOutputView view;
+  view.title_token = "/diff all";
+  std::size_t retained = 0;
+  // Recorded patches only: no Git execution or inference about missing changes.
+  for (auto const& entry : snapshot.tool_index)
+  {
+    if (entry.tool.status == ToolTimelineStatus::Success && !entry.tool.diff.empty())
+    {
+      append_review_diff(view, entry.tool, retained);
+    }
+  }
+  if (view.review_files.empty())
+  {
+    open_command_output(snapshot, "/diff all", {"No retained file diffs to review. Shell edits and older evicted tool records may not be represented."});
+    return;
+  }
+  snapshot.command_output = std::move(view);
+}
+
+void apply_command_output_input(CommandOutputView& view, CommandOutputInputResult const& input)
+{
+  view.scroll_offset = input.scroll_offset;
+  if (input.toggle_reviewed && view.review_index < view.review_files.size())
+  {
+    auto& reviewed = view.review_files.at(view.review_index).reviewed;
+    reviewed = !reviewed;
+  }
+  if (input.review_index)
+  {
+    view.review_index = *input.review_index;
+  }
+}
 
 TuiSubmissionProjectionPolicy tui_submission_projection_policy(bool is_command_submission, bool ordinary_turn_committed) noexcept
 {
@@ -402,11 +546,77 @@ std::size_t command_output_max_scroll_offset(CommandOutputView const& view, std:
   return lines.size() > body_height ? lines.size() - body_height : std::size_t{0};
 }
 
+namespace {
+auto review_hunk_target(CommandOutputView const& view, std::size_t width, ToolPresentation presentation, std::size_t scroll, char key) -> std::size_t
+{
+  auto const lines = command_output_content_lines(view, width, presentation);
+  auto target = scroll;
+  for (std::size_t line = 0; line < lines.size(); ++line)
+  {
+    if (!lines.at(line).starts_with("@@"))
+    {
+      continue;
+    }
+    if (key == ']' && line > scroll)
+    {
+      target = line;
+      break;
+    }
+    if (key == '[' && line < scroll)
+    {
+      target = line;
+    }
+  }
+  return target;
+}
+
+auto handle_review_input(CommandOutputView const& view, InputEvent const& event, std::size_t width, std::size_t height, ToolPresentation presentation)
+    -> CommandOutputInputResult
+{
+  auto const max_scroll = command_output_max_scroll_offset(view, width, height, presentation);
+  auto result = CommandOutputInputResult{.scroll_offset = std::min(view.scroll_offset, max_scroll)};
+
+  auto const index = std::min(view.review_index, view.review_files.size() - 1);
+  auto key = event.character;
+  if (key == '\0' && event.text.size() == 1)
+  {
+    key = event.text.front();
+  }
+  if (key == 'n' || key == 'p' || key == 'm')
+  {
+    result.action = CommandOutputInputAction::Redraw;
+    result.scroll_offset = 0;
+    auto const previous = index > 0 ? index - 1 : 0;
+    result.review_index = key == 'p' ? previous : std::min(index + 1, view.review_files.size() - 1);
+    result.toggle_reviewed = key == 'm';
+    if (result.toggle_reviewed && view.review_files.at(index).reviewed)
+    {
+      result.review_index = index;
+    }
+    return result;
+  }
+  if (key == ']' || key == '[')
+  {
+    auto const target = review_hunk_target(view, width, presentation, result.scroll_offset, key);
+    result.scroll_offset = std::min(target, max_scroll);
+    result.action = CommandOutputInputAction::Redraw;
+    return result;
+  }
+    // Other typing is consumed while reviewing; it cannot become a prompt.
+  result.action = CommandOutputInputAction::Redraw;
+  return result;
+}
+}  // namespace
+
 CommandOutputInputResult handle_command_output_input(CommandOutputView const& view, InputEvent event, std::size_t width, std::size_t height,
                                                      ToolPresentation presentation)
 {
   auto const max_scroll = command_output_max_scroll_offset(view, width, height, presentation);
   auto result = CommandOutputInputResult{.scroll_offset = std::min(view.scroll_offset, max_scroll)};
+  if (!view.review_files.empty() && event.key == Key::Character)
+  {
+    return handle_review_input(view, event, width, height, presentation);
+  }
   auto const page = std::max<std::size_t>(command_output_body_height(height), 1);
   switch (event.key)
   {
@@ -462,6 +672,15 @@ std::vector<std::string> detail::render_command_output_modal(CommandOutputView c
   lines.reserve(height);
   auto title = std::string(detail::kSgrBold) + "Command " + sanitize_terminal_text(view.title_token) + std::string(detail::kSgrReset) +
                std::string(detail::kSgrComposerBg);
+  if (!view.review_files.empty())
+  {
+    auto const index = std::min(view.review_index, view.review_files.size() - 1);
+    auto const& file = view.review_files.at(index);
+    auto const filename_start = file.path.find_last_of('/');
+    auto const title_path = filename_start == std::string::npos ? file.path : file.path.substr(filename_start + 1);
+    title = "Recorded changes " + std::to_string(index + 1) + "/" + std::to_string(view.review_files.size()) + " · " + (file.reviewed ? "[reviewed] " : "") +
+            sanitize_terminal_text(title_path) + (view.truncated ? " · truncated" : "");
+  }
   lines.push_back(modal_line(std::move(title), width));
   for (std::size_t row = 0; row < body_height; ++row)
   {

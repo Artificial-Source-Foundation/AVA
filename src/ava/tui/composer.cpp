@@ -1865,7 +1865,7 @@ ComposerCanvasLayout composer_canvas_layout(ComposerSnapshot const& snapshot)
   if (sidebar_visible(snapshot, width, height))
     return {.content_width = main_width_for(snapshot, width), .left = 0, .rail_visible = true};
   auto const content_width = std::min(width, kCanvasMaxWidth);
-  return {.content_width = content_width, .left = (width - content_width) / 2, .rail_visible = false};
+  return {.content_width = content_width, .left = 0, .rail_visible = false};
 }
 
 ComposerFrame detail::render_composer_frame_cached(ComposerSnapshot const& snapshot, CompletionMatchCache& completion_cache, std::size_t source_revision,

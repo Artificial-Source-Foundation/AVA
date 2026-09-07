@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import base64
+import json
 import re
 import shlex
 import time
@@ -166,6 +168,13 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     active_workspace.joinpath("active-card.txt").write_text(
         "".join(f"ACTIVE-OLD-LINE-{line:02d}\n" for line in range(1, 31)), encoding="utf-8"
     )
+    # Synthetic image input uses an explicit file; never read the host clipboard.
+    queued_image = active_workspace / "queued-image.png"
+    queued_image.write_bytes(ctx.workspace.joinpath("screen.png").read_bytes())
+    fake_models_path = ctx.active_ava_config / "models.json"
+    fake_models = json.loads(fake_models_path.read_text(encoding="utf-8"))
+    fake_models["models"][0]["input_modalities"] = ["text", "image"]
+    fake_models_path.write_text(json.dumps(fake_models) + "\n", encoding="utf-8")
     active_session = ctx.session_name("active")
     active_provider = ctx.start_fake_provider("active", delay_ms=0, scenario="text-three-delayed-third")
     active_request_log = active_provider.request_log
@@ -176,6 +185,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         state=ctx.active_state,
         data=ctx.active_data,
     )
+    active_env_prefix = f"AVA_CLIPBOARD_IMAGE_FILE={shlex.quote(str(queued_image))} {active_env_prefix}"
 
     def wait_for_tmux_clipboard_transport(path, label: str) -> bytes:
         deadline = time.monotonic() + 8.0
@@ -511,8 +521,27 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         lambda screen: transcript_rows(screen) == active_wheel_live_rows and "tmux active follow-up" in screen and "second lineX" in screen,
         "active-run mouse wheel return to live tail",
     )
+    send_keys(tmux_exe, active_session, "C-v")
+    wait_for(tmux_exe, active_session, r"attached image clipboard image", "active-run image paste ready")
     send_literal(tmux_exe, active_session, "\x1b\r")
-    queued_follow_up = wait_for(tmux_exe, active_session, r"follow-up queued", "active-run Alt+Enter follow-up queued")
+    queued_follow_up = wait_for_screen_state(
+        tmux_exe, active_session,
+        lambda screen: "follow-up queued" in screen and "[1 image]" in screen and "attached image" not in screen,
+        "active-run caption and image queued together",
+    )
+    send_literal(tmux_exe, active_session, "/restore")
+    send_keys(tmux_exe, active_session, "Enter")
+    wait_for(
+        tmux_exe, active_session, r"(?s)attached image restored image.*second lineX",
+        "queued caption and image restored to composer",
+    )
+    send_literal(tmux_exe, active_session, " edited")
+    send_literal(tmux_exe, active_session, "\x1b\r")
+    queued_follow_up = wait_for_screen_state(
+        tmux_exe, active_session,
+        lambda screen: "second lineX edited" in screen and "[1 image]" in screen and "attached image" not in screen,
+        "edited image follow-up queued once",
+    )
     if "tmux active follow-up" not in queued_follow_up:
         raise RuntimeError(f"active-run Alt+Enter did not render the queued follow-up text\nscreen:\n{queued_follow_up}")
     save_evidence(root, "active-run-follow-up-queued", queued_follow_up)
@@ -526,6 +555,11 @@ def scenario_active_run(ctx: SmokeContext) -> None:
         or "second lineX" not in active_log
     ):
         raise RuntimeError(f"active-run follow-up did not reach the fake provider intact\nrequest log:\n{active_log}")
+    expected_image_url = "data:image/png;base64," + base64.b64encode(queued_image.read_bytes()).decode("ascii")
+    if expected_image_url not in active_log or "second lineX edited" not in active_log:
+        raise RuntimeError("queued image and edited caption were not delivered to the fake provider together")
+    if active_log.count(expected_image_url) != 1:
+        raise RuntimeError("restoring and requeueing duplicated image delivery")
     wait_for(tmux_exe, active_session, r"follow-up started|headless active prompt complete", "active-run follow-up delivery")
     send_keys(tmux_exe, active_session, "C-d")
     wait_for_session_exit(tmux_exe, active_session)

@@ -59,7 +59,7 @@ ComposerSnapshot const& RuntimeActiveRunController::completion_snapshot()
   return snapshot;
 }
 
-bool RuntimeActiveRunController::restore_latest_queued_message(RuntimeActiveRunState& state)
+auto RuntimeActiveRunController::restore_latest_queued_message(RuntimeActiveRunState& state, std::string_view request_id) -> bool
 {
   auto& snapshot = presentation_state_.snapshot;
   auto& draft = draft_state_.draft;
@@ -75,13 +75,29 @@ bool RuntimeActiveRunController::restore_latest_queued_message(RuntimeActiveRunS
     snapshot.status = "active-run restore unavailable";
     return renderer_.request_render();
   }
-  auto restored = active_queues->restore_latest();
+  if (action_controller_.clipboard_image_blocks_submit() || !presentation_state_.pending_image_attachments.empty())
+  {
+    snapshot.status = "send or clear attached images before restoring a queued message";
+    return renderer_.request_render();
+  }
+  if (!request_id.empty() && (!draft.text.empty() || !active_queues->restore_pending))
+  {
+    snapshot.status = "invalid_argument: clear the draft before editing a queued message";
+    return renderer_.request_render();
+  }
+  auto restored = request_id.empty() ? active_queues->restore_latest() : active_queues->restore_pending(request_id);
   if (!restored)
   {
     snapshot.status = restored.error().format();
     static_cast<void>(beep());
     return renderer_.request_render();
   }
+  // Restore lightweight chips immediately, without decoding images on the UI thread.
+  snapshot.pending_attachments.clear();
+  for (auto const& image : restored->image_attachments)
+    snapshot.pending_attachments.push_back(
+        PendingAttachmentItem{.label = "restored image", .detail = "(" + image.mime_type + ", " + std::to_string(image.byte_size) + " bytes)"});
+  presentation_state_.pending_image_attachments = std::move(restored->image_attachments);
   auto const restored_text = restored->steering ? "/steer " + restored->message : restored->message;
   draft_state_.clear_selection();
   static_cast<void>(replace_composer_draft(draft, restored_text));
@@ -122,6 +138,24 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
     slash_palette_suppressed = false;
     path_completion_force_active = false;
   };
+  if (runtime_commands::exact_command(draft.text, "/queue"))
+  {
+    clear_local_command_draft();
+    if (!state.active_queues || !state.active_queues->pending_selector)
+    {
+      snapshot.status = "invalid_argument: pending message editor unavailable";
+      return renderer_.request_render();
+    }
+    snapshot.select_list = state.active_queues->pending_selector();
+    state.queue_picker_open = true;
+    return renderer_.request_render();
+  }
+  if (runtime_commands::exact_command(draft.text, "/diff all"))
+  {
+    clear_local_command_draft();
+    open_change_review(snapshot);
+    return renderer_.request_render();
+  }
   if (draft.text == "/sidebar")
   {
     push_history(input_history, draft.text);
@@ -287,6 +321,11 @@ std::optional<bool> RuntimeActiveRunController::reject_disabled_visible_completi
 bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state, bool follow_up_only)
 {
   auto& snapshot = presentation_state_.snapshot;
+  if (action_controller_.clipboard_image_blocks_submit())
+  {
+    snapshot.status = "image paste in progress; press Enter when ready";
+    return renderer_.request_render();
+  }
   auto& draft = draft_state_.draft;
   auto& draft_scroll_offset = draft_state_.draft_scroll_offset;
   auto& jump_mode = draft_state_.jump_mode;
@@ -336,14 +375,23 @@ bool RuntimeActiveRunController::queue_active_draft(RuntimeActiveRunState& state
     return renderer_.request_render();
   }
 
+  auto& pending_images = presentation_state_.pending_image_attachments;
+  if (steering_draft && !pending_images.empty())
+  {
+    snapshot.status = "images require a normal follow-up; remove /steer";
+    return renderer_.request_render();
+  }
   auto queued_text = expanded_composer_draft_text(draft);
-  auto queued = steering_draft ? active_queues->queue_steering(queued_text.substr(steering_prefix.size())) : active_queues->queue_follow_up(queued_text);
+  auto queued =
+      steering_draft ? active_queues->queue_steering(queued_text.substr(steering_prefix.size())) : active_queues->queue_follow_up(queued_text, pending_images);
   if (!queued)
   {
     snapshot.status = queued.error().format();
     static_cast<void>(beep());
     return renderer_.request_render();
   }
+  pending_images.clear();
+  snapshot.pending_attachments.clear();
   push_history(input_history, queued_text);
   draft_state_.clear_selection();
   reset_composer_draft(draft);
@@ -408,8 +456,70 @@ std::optional<bool> RuntimeActiveRunController::handle_transcript_search_input(r
   return transcript_search_.handle_input(active_input.event).value_or(true);
 }
 
+auto RuntimeActiveRunController::handle_queue_picker(RuntimeActiveRunState& state, InputEvent const& event) -> std::optional<bool>
+{
+  auto& snapshot = presentation_state_.snapshot;
+  if (!state.queue_picker_open)
+  {
+    return std::nullopt;
+  }
+  if (snapshot.permission_prompt || snapshot.question_prompt)
+  {
+    return std::nullopt;
+  }
+  if (!snapshot.select_list || !state.active_queues)
+  {
+    state.queue_picker_open = false;
+    return std::nullopt;
+  }
+  auto& view = *snapshot.select_list;
+  auto const input = handle_select_list_input(view, event, options_.key_bindings);
+  view.query = input.query;
+  view.selected_item_index = input.selected_item_index;
+  if (input.action == SelectListInputAction::Cancel)
+  {
+    snapshot.select_list.reset();
+    state.queue_picker_open = false;
+  }
+  else if (input.action == SelectListInputAction::Resolve || event.key == Key::CtrlD)
+  {
+    if (filter_select_list_items(view).empty())
+    {
+      return renderer_.request_render();
+    }
+    if (input.selected_item_index >= view.items.size())
+    {
+      return renderer_.request_render();
+    }
+    auto request_id = view.items.at(input.selected_item_index).value;
+    if (event.key == Key::CtrlD)
+    {
+      if (state.active_queues->remove_pending)
+      {
+        auto removed = state.active_queues->remove_pending(request_id);
+        view = state.active_queues->pending_selector();
+        if (!removed)
+        {
+          view.subtitle = removed.error().format();
+        }
+      }
+    }
+    else
+    {
+      snapshot.select_list.reset();
+      state.queue_picker_open = false;
+      return restore_latest_queued_message(state, request_id);
+    }
+  }
+  return renderer_.request_render();
+}
+
 bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runtime_input::RuntimeInput const& active_input)
 {
+  if (auto handled = handle_queue_picker(state, active_input.event))
+  {
+    return *handled;
+  }
   auto& snapshot = presentation_state_.snapshot;
   if (snapshot.command_output && !snapshot.permission_prompt && !snapshot.question_prompt)
   {
@@ -433,7 +543,7 @@ bool RuntimeActiveRunController::handle_input(RuntimeActiveRunState& state, runt
     }
     if (output_input.action == CommandOutputInputAction::Redraw)
     {
-      snapshot.command_output->scroll_offset = output_input.scroll_offset;
+      apply_command_output_input(*snapshot.command_output, output_input);
       return renderer_.request_render();
     }
     if (active_input.event.key == Key::Character || active_input.event.key == Key::Space || active_input.event.key == Key::CtrlU)

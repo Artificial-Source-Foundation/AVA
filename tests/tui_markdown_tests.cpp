@@ -583,7 +583,7 @@ void run_tui_markdown_tests()
              std::ranges::none_of(too_narrow_table_transcript,
                                   [](std::string const& line) {
                                     auto const visible = strip_sgr(line);
-                                    auto const quiet_composer_row = visible.starts_with("│  Type a message...") || visible.starts_with("│  GPT-") ||
+                                    auto const quiet_composer_row = visible.starts_with("│  Type a message...") || visible.starts_with("│  Build · GPT-") ||
                                                                     (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos);
                                     return !quiet_composer_row && (visible.find("┌") != std::string::npos || visible.find("│") != std::string::npos ||
                                                                    visible.find("└") != std::string::npos);
@@ -661,7 +661,7 @@ void run_tui_markdown_tests()
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
-                                          visible.starts_with("│  GPT-") ||
+                                          visible.starts_with("│  Build · GPT-") ||
                                           (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos) || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer supports one-column tables and wraps long unbroken table tokens without losing borders");
@@ -701,7 +701,7 @@ void run_tui_markdown_tests()
                                  [&](std::string const& line) {
                                    auto const visible = strip_sgr(line);
                                    return visible.find("│") == std::string::npos || visible.starts_with("│  Type a message...") ||
-                                          visible.starts_with("│  GPT-") ||
+                                          visible.starts_with("│  Build · GPT-") ||
                                           (visible.starts_with("│") && visible.find_first_not_of("│ ") == std::string::npos) || count_table_borders(line) == 2;
                                  }),
          "tui assistant renderer wraps styled inline code inside table cells without breaking borders");

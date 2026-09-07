@@ -7,6 +7,7 @@
 #include <chrono>
 #include <csignal>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <mutex>
 #include <optional>
@@ -14,6 +15,18 @@
 #include "debug.h"
 
 namespace ava::tui {
+
+enum class AttentionEvent : std::uint8_t
+{
+  Approval,
+  Question,
+  Finished,
+  Failed
+};
+[[nodiscard]] auto attention_sequence(AttentionEvent event) -> std::string_view;
+// Emits fixed, content-free OSC 9 requests only when the user opts in. Delivery
+// is controlled by the terminal; no subprocess, provider call, or polling.
+void request_attention(ComposerSnapshot const& snapshot, AttentionEvent event);
 
 class SignalBlockGuard
 {

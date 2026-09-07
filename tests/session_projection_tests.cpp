@@ -211,25 +211,29 @@ void test_logical_session_projection_v4_public_privacy_and_compatibility()
       (*imported_exact_target_messages)[2].content_parts[0].tool_call_id == (*imported_exact_target_messages)[1].content_parts[1].tool_call_id &&
       (*imported_exact_target_messages)[1].content.find("visible reasoning") == std::string::npos;
   auto markdown_commentary = markdown ? markdown->find("commentary ") : std::string::npos;
-  auto markdown_reasoning = markdown ? markdown->find("visible reasoning") : std::string::npos;
   auto markdown_function = markdown ? markdown->find("read_file") : std::string::npos;
   auto markdown_final = markdown ? markdown->find("final") : std::string::npos;
   auto html_commentary = html ? html->find("commentary ") : std::string::npos;
-  auto html_reasoning = html ? html->find("visible reasoning") : std::string::npos;
   auto html_function = html ? html->find("read_file") : std::string::npos;
   auto html_final = html ? html->find("final") : std::string::npos;
+  auto compaction_commentary = compaction_prompt ? compaction_prompt->find("commentary ") : std::string::npos;
+  auto compaction_function = compaction_prompt ? compaction_prompt->find("read_file") : std::string::npos;
+  auto compaction_final = compaction_prompt ? compaction_prompt->find("final") : std::string::npos;
   bool private_values_absent =
       jsonl && markdown && html && compaction_prompt && jsonl->starts_with("{\"id\":\"legacy_user\"") &&
       jsonl->find("PRIVATE_PROVIDER_ITEM_ID") == std::string::npos && jsonl->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
       jsonl->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos && jsonl->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos &&
       jsonl->find("INCOMPLETE_STAGING_CANARY") == std::string::npos && jsonl->find("attachments/private-source.png") == std::string::npos &&
-      jsonl->find("attachments/portable-redacted") != std::string::npos && markdown->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
-      html->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos && compaction_prompt->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
+      jsonl->find("visible reasoning") != std::string::npos && jsonl->find("attachments/portable-redacted") != std::string::npos &&
+      markdown->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos && markdown->find("visible reasoning") == std::string::npos &&
+      html->find("visible reasoning") == std::string::npos && html->find("PRIVATE_REDACTED_PROJECTION") == std::string::npos &&
+      compaction_prompt->find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&
       compaction_prompt->find("PRIVATE_NATIVE_REASONING_ID") == std::string::npos && compaction_prompt->find("visible reasoning") == std::string::npos;
-  bool rendered_order = markdown_commentary < markdown_reasoning && markdown_reasoning < markdown_function && markdown_function < markdown_final &&
-                        html_commentary < html_reasoning && html_reasoning < html_function && html_function < html_final &&
-                        compaction_prompt->find("commentary ") < compaction_prompt->find("read_file") &&
-                        compaction_prompt->find("read_file") < compaction_prompt->find("final");
+  bool rendered_order = markdown_commentary != std::string::npos && markdown_function != std::string::npos && markdown_final != std::string::npos &&
+                        html_commentary != std::string::npos && html_function != std::string::npos && html_final != std::string::npos &&
+                        compaction_commentary != std::string::npos && compaction_function != std::string::npos && compaction_final != std::string::npos &&
+                        markdown_commentary < markdown_function && markdown_function < markdown_final && html_commentary < html_function &&
+                        html_function < html_final && compaction_commentary < compaction_function && compaction_function < compaction_final;
   expect(compatibility_shape && ordered_shape && portable_shape && parsed_jsonl && replay.ok() && provider_replay_order && exact_target_portable_archive &&
              private_values_absent && portable_openai_request && portable_anthropic_request &&
              portable_openai_request->body.find("PRIVATE_SIGNATURE_PROJECTION") == std::string::npos &&

@@ -219,16 +219,16 @@ void run_tui_completion_tests()
              !ava::tui::slash_palette_selection_for_screen_position(automatic_rail_dock_snapshot, automatic_rail_dock_layout->first_item_row, 160),
          "F3 slash palette screen-position hit testing accepts the automatic-rail main pane and rejects column zero, divider, and sidebar while retaining dock "
          "mapping");
-  auto centered_dock_snapshot = dock_snapshot;
-  centered_dock_snapshot.width = 160;
-  centered_dock_snapshot.height = 36;
-  auto const centered_dock_layout = ava::tui::composer_palette_screen_layout(centered_dock_snapshot);
-  expect(centered_dock_layout && ava::tui::composer_canvas_layout(centered_dock_snapshot).left == 20 &&
-             ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 21) == 0 &&
-             ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 140) == 0 &&
-             !ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 20) &&
-             !ava::tui::slash_palette_selection_for_screen_position(centered_dock_snapshot, centered_dock_layout->first_item_row, 141),
-         "F3 centered slash palette accepts both canvas edges and rejects the exact left and right gutters");
+  auto wide_dock_snapshot = dock_snapshot;
+  wide_dock_snapshot.width = 160;
+  wide_dock_snapshot.height = 36;
+  auto const wide_dock_layout = ava::tui::composer_palette_screen_layout(wide_dock_snapshot);
+  expect(wide_dock_layout && ava::tui::composer_canvas_layout(wide_dock_snapshot).left == 0 &&
+             ava::tui::slash_palette_selection_for_screen_position(wide_dock_snapshot, wide_dock_layout->first_item_row, 1) == 0 &&
+             ava::tui::slash_palette_selection_for_screen_position(wide_dock_snapshot, wide_dock_layout->first_item_row, 120) == 0 &&
+             !ava::tui::slash_palette_selection_for_screen_position(wide_dock_snapshot, wide_dock_layout->first_item_row, 0) &&
+             !ava::tui::slash_palette_selection_for_screen_position(wide_dock_snapshot, wide_dock_layout->first_item_row, 121),
+         "F3 left-aligned slash palette accepts both canvas edges and rejects the out-of-canvas columns");
 
   auto active_hint_snapshot = ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -481,16 +481,16 @@ void run_tui_completion_tests()
              !ava::tui::file_reference_palette_selection_for_screen_position(automatic_rail_reference_snapshot, automatic_rail_reference_layout->first_item_row,
                                                                              160),
          "F3 @ palette screen-position hit testing rejects automatic-rail divider and sidebar columns");
-  auto centered_reference_snapshot = reference_snapshot;
-  centered_reference_snapshot.width = 160;
-  centered_reference_snapshot.height = 36;
-  auto const centered_reference_layout = ava::tui::composer_palette_screen_layout(centered_reference_snapshot);
-  expect(centered_reference_layout &&
-             ava::tui::file_reference_palette_selection_for_screen_position(centered_reference_snapshot, centered_reference_layout->first_item_row, 21) == 0 &&
-             ava::tui::file_reference_palette_selection_for_screen_position(centered_reference_snapshot, centered_reference_layout->first_item_row, 140) == 0 &&
-             !ava::tui::file_reference_palette_selection_for_screen_position(centered_reference_snapshot, centered_reference_layout->first_item_row, 20) &&
-             !ava::tui::file_reference_palette_selection_for_screen_position(centered_reference_snapshot, centered_reference_layout->first_item_row, 141),
-         "F3 centered @ palette accepts both canvas edges and rejects the exact left and right gutters");
+  auto wide_reference_snapshot = reference_snapshot;
+  wide_reference_snapshot.width = 160;
+  wide_reference_snapshot.height = 36;
+  auto const wide_reference_layout = ava::tui::composer_palette_screen_layout(wide_reference_snapshot);
+  expect(wide_reference_layout &&
+             ava::tui::file_reference_palette_selection_for_screen_position(wide_reference_snapshot, wide_reference_layout->first_item_row, 1) == 0 &&
+             ava::tui::file_reference_palette_selection_for_screen_position(wide_reference_snapshot, wide_reference_layout->first_item_row, 120) == 0 &&
+             !ava::tui::file_reference_palette_selection_for_screen_position(wide_reference_snapshot, wide_reference_layout->first_item_row, 0) &&
+             !ava::tui::file_reference_palette_selection_for_screen_position(wide_reference_snapshot, wide_reference_layout->first_item_row, 121),
+         "F3 left-aligned @ palette accepts both canvas edges and rejects the out-of-canvas columns");
   auto const spaced_reference_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                              .provider = "openai",
                                                                                              .model = "gpt-5.5",
@@ -631,16 +631,15 @@ void run_tui_completion_tests()
           !ava::tui::path_completion_palette_selection_for_screen_position(automatic_rail_path_snapshot, automatic_rail_path_layout->first_item_row, 138) &&
           !ava::tui::path_completion_palette_selection_for_screen_position(automatic_rail_path_snapshot, automatic_rail_path_layout->first_item_row, 160),
       "F3 path palette screen-position hit testing rejects automatic-rail divider and sidebar columns");
-  auto centered_path_snapshot = normal_path_snapshot;
-  centered_path_snapshot.width = 160;
-  centered_path_snapshot.height = 36;
-  auto const centered_path_layout = ava::tui::composer_palette_screen_layout(centered_path_snapshot);
-  expect(centered_path_layout &&
-             ava::tui::path_completion_palette_selection_for_screen_position(centered_path_snapshot, centered_path_layout->first_item_row, 21) == 0 &&
-             ava::tui::path_completion_palette_selection_for_screen_position(centered_path_snapshot, centered_path_layout->first_item_row, 140) == 0 &&
-             !ava::tui::path_completion_palette_selection_for_screen_position(centered_path_snapshot, centered_path_layout->first_item_row, 20) &&
-             !ava::tui::path_completion_palette_selection_for_screen_position(centered_path_snapshot, centered_path_layout->first_item_row, 141),
-         "F3 centered path palette accepts both canvas edges and rejects the exact left and right gutters");
+  auto wide_path_snapshot = normal_path_snapshot;
+  wide_path_snapshot.width = 160;
+  wide_path_snapshot.height = 36;
+  auto const wide_path_layout = ava::tui::composer_palette_screen_layout(wide_path_snapshot);
+  expect(wide_path_layout && ava::tui::path_completion_palette_selection_for_screen_position(wide_path_snapshot, wide_path_layout->first_item_row, 1) == 0 &&
+             ava::tui::path_completion_palette_selection_for_screen_position(wide_path_snapshot, wide_path_layout->first_item_row, 120) == 0 &&
+             !ava::tui::path_completion_palette_selection_for_screen_position(wide_path_snapshot, wide_path_layout->first_item_row, 0) &&
+             !ava::tui::path_completion_palette_selection_for_screen_position(wide_path_snapshot, wide_path_layout->first_item_row, 121),
+         "F3 left-aligned path palette accepts both canvas edges and rejects the out-of-canvas columns");
   auto const forced_path_palette = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                         .provider = "openai",
                                                                                         .model = "gpt-5.5",

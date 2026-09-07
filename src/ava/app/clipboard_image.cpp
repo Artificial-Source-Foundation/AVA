@@ -3,6 +3,7 @@
 #include "ava/process/supervisor.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/clipboard_image_test_support.h"
+#include "ava/core/native_clipboard.h"
 #include "ava/session/session_store.h"
 #include "ava/core/error.h"
 
@@ -484,6 +485,12 @@ ava::core::Result<std::optional<std::string>> read_clipboard_image_bytes(std::op
 {
   if (env_value("TERMUX_VERSION"))
     return std::optional<std::string>{};
+
+  // Native macOS pasteboard reads run in-process under Pasteboard Services and
+  // need no helper scope. Fake-helper injections always bypass the native
+  // board so helper scenarios stay deterministic and never touch user data.
+  if (test_injection == nullptr && ava::core::native_clipboard_enabled())
+    return ava::core::read_native_clipboard_image(ava::session::kMaxImageAttachmentBytes);
 
   if (!session_process_scope)
   {

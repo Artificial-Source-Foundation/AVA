@@ -751,6 +751,11 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
         request_close_after_submit();
         break;
       }
+      if (!action_controller_.poll_clipboard_image())
+      {
+        fail_active_run();
+        break;
+      }
       auto const prompt_result = service_pending_prompt();
       if (prompt_result == detail::PendingPromptServiceResult::Failed)
       {
@@ -847,6 +852,11 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
     // worker or applying an application/session transition.
     plugin_ui_.finish_submission(snapshot);
     result = submit_future.get();
+    if (state.queue_picker_open)
+    {
+      snapshot.select_list.reset();
+      state.queue_picker_open = false;
+    }
     state.ordinary_turn_request_ids = result.ordinary_turn_request_ids;
     state.command_events_released = !is_command_submission || !state.ordinary_turn_request_ids.empty();
     if (state.command_events_released)
@@ -902,6 +912,10 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
       }
     }
     prompt_coordinator.set_audit_sink(nullptr);
+    if (!is_command_submission && !run_cancel_requested.load() && !session_changed)
+    {
+      request_attention(snapshot, state.event_state.error_text.empty() ? AttentionEvent::Finished : AttentionEvent::Failed);
+    }
     if (render_failed)
       return RuntimeActiveRunOutcome{.break_loop = true, .terminal_write_failed = terminal_write_failed};
   }
@@ -1011,6 +1025,26 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                          : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
                                                                                                  : "done")
                                       : (result.output.empty() ? "ok" : "done");
+  }
+  if (result.clipboard_markdown && !session_changed && !run_cancel_requested.load() &&
+      (runtime_commands::exact_command(submitted, "/export") || runtime_commands::exact_command(submitted, "/export markdown")))
+  {
+    auto const copied = runtime_transcript::copy_text_to_clipboard_result(*result.clipboard_markdown);
+    switch (copied)
+    {
+      case runtime_transcript::ClipboardCopyResult::Copied:
+        settle_local_command_status(snapshot, "Markdown copied to clipboard");
+        break;
+      case runtime_transcript::ClipboardCopyResult::RequestSent:
+        settle_local_command_status(snapshot, "Markdown copy request sent");
+        break;
+      case runtime_transcript::ClipboardCopyResult::Oversize:
+        open_command_error(snapshot, submitted, "Conversation exceeds the clipboard limit. Use /export markdown <path> to save it.");
+        break;
+      case runtime_transcript::ClipboardCopyResult::WriteFailure:
+        open_command_error(snapshot, submitted, "Could not copy Markdown. Try again, or use /export markdown <path> to save it.");
+        break;
+    }
   }
   snapshot.processing = false;
   if (result.context_source_count)

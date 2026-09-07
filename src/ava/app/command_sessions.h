@@ -32,6 +32,9 @@ void set_after_session_import_open_for_test(std::function<void()> hook);
 [[nodiscard]] ava::core::Result<CommandResult> run_compact_command(runtime::session_ts& unlocked_session, CommandRequest const& request);
 [[nodiscard]] ava::core::Result<CommandResult> run_import_command(runtime::session_ts& unlocked_session, std::string_view argument);
 [[nodiscard]] ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocked_session, CommandRequest const& request);
+// Reads the current session through its authority and uses the same sanitized
+// Markdown projection as file exports. Called by the TUI submit worker only.
+[[nodiscard]] ava::core::Result<std::string> read_session_markdown(runtime::session_ts const& unlocked_session);
 // Explicit fail-closed recovery after a verified terminal/drained append failure.
 [[nodiscard]] ava::core::Result<CommandResult> run_recover_persistence_command(runtime::session_ts& unlocked_session);
 

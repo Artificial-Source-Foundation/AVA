@@ -7,12 +7,16 @@
 #include "ava/tui/event_state.h"
 #include "ava/tui/runtime_active_run_internal.h"
 #include "ava/tui/runtime_active_run_state_internal.h"
+#include "ava/tui/runtime_render_internal.h"
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <string>
 #include <tuple>
 #include <vector>
+#include <unistd.h>
 
 namespace {
 
@@ -30,6 +34,109 @@ std::vector<TranscriptSemantic> transcript_semantics(std::vector<ava::tui::Trans
 bool frame_contains(std::vector<std::string> const& frame, std::string_view needle)
 {
   return std::ranges::any_of(frame, [&](std::string const& line) { return strip_sgr(line).find(needle) != std::string::npos; });
+}
+
+void test_attention_notifications()
+{
+  using ava::tui::AttentionEvent;
+  std::array<int, 2> descriptors{-1, -1};
+  auto const pipe_ready = ::pipe(descriptors.data()) == 0;
+  auto const saved_stdout = pipe_ready ? ::dup(STDOUT_FILENO) : -1;
+  bool const redirected = saved_stdout >= 0 && std::fflush(stdout) == 0 && ::dup2(descriptors.at(1), STDOUT_FILENO) >= 0;
+  std::string captured;
+  if (redirected)
+  {
+    ava::tui::ComposerSnapshot snapshot;
+    snapshot.input = "PRIVATE-DRAFT";
+    ava::tui::request_attention(snapshot, AttentionEvent::Finished);
+    snapshot.attention_enabled = true;
+    for (auto event : {AttentionEvent::Approval, AttentionEvent::Question, AttentionEvent::Finished, AttentionEvent::Failed})
+    {
+      ava::tui::request_attention(snapshot, event);
+    }
+    static_cast<void>(std::fflush(stdout));
+    if (::dup2(saved_stdout, STDOUT_FILENO) >= 0)
+    {
+      std::array<char, 512> bytes{};
+      auto const count = ::read(descriptors.at(0), bytes.data(), bytes.size());
+      if (count > 0)
+      {
+        captured.assign(bytes.data(), static_cast<std::size_t>(count));
+      }
+    }
+  }
+  if (saved_stdout >= 0)
+  {
+    ::close(saved_stdout);
+  }
+  for (auto descriptor : descriptors)
+  {
+    if (descriptor >= 0)
+    {
+      ::close(descriptor);
+    }
+  }
+  expect(redirected && captured == "\033]9;AVA needs approval\033\\\033]9;AVA needs your answer\033\\\033]9;AVA finished\033\\\033]9;AVA run failed\033\\",
+         "attention requests are opt-in fixed messages, distinguish outcomes, and never include draft content");
+}
+
+void test_change_review()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  ava::tui::ToolTimelineItem first{
+      .status = ava::tui::ToolTimelineStatus::Success,
+      .name = "edit",
+      .call_id = "review-1",
+      .diff = "--- a/one.cpp\n+++ b/one.cpp\n@@ -1 +1 @@\n-old\n+new\n--- a/two.cpp\n+++ b/two.cpp\n@@ -1 +1 @@\n-before\n+after\n"};
+  ava::tui::record_tui_tool(snapshot, first, ava::tui::TuiToolIndexOrigin::Provider);
+  auto denied = first;
+  denied.call_id = "review-denied";
+  denied.status = ava::tui::ToolTimelineStatus::Error;
+  denied.diff = "--- a/not-written\n+++ b/not-written\n@@ -1 +1 @@\n-a\n+b\n";
+  ava::tui::record_tui_tool(snapshot, denied, ava::tui::TuiToolIndexOrigin::Provider);
+  ava::tui::open_change_review(snapshot);
+  expect(snapshot.command_output && snapshot.command_output->review_files.size() == 2, "review splits multi-file diffs and excludes denied edits");
+  if (!snapshot.command_output)
+  {
+    return;
+  }
+  auto& view = *snapshot.command_output;
+  auto input = ava::tui::handle_command_output_input(view, {.key = ava::tui::Key::Character, .character = 'm'}, 80, 12);
+  ava::tui::apply_command_output_input(view, input);
+  expect(view.review_files.at(0).reviewed && view.review_index == 1, "review marks current file and advances without touching files");
+  input = ava::tui::handle_command_output_input(view, {.key = ava::tui::Key::Character, .text = "p"}, 80, 12);
+  ava::tui::apply_command_output_input(view, input);
+  expect(view.review_index == 0 && frame_contains(ava::tui::render_command_output(view, 80, 12), "[reviewed] one.cpp"),
+         "review remembers marks across file navigation");
+  for (auto const width : {24U, 80U, 160U})
+  {
+    auto frame = ava::tui::render_command_output(view, width, 8);
+    expect(frame.size() == 8 && std::ranges::all_of(frame, [width](std::string const& line) -> bool { return visible_columns(line) <= width; }),
+           "review stays bounded on narrow and wide terminals");
+  }
+}
+
+void test_review_hunk_content_is_not_a_filename()
+{
+  ava::tui::ComposerSnapshot snapshot;
+  ava::tui::ToolTimelineItem item;
+  item.status = ava::tui::ToolTimelineStatus::Success;
+  item.call_id = "hunk-headers";
+  item.diff = "--- a/real.txt\n+++ b/real.txt\n@@ -1 +1 @@\n--- pretend-old\n+++ pretend-new\n@@ -8 +8 @@\n-before\n+after\n";
+  ava::tui::record_tui_tool(snapshot, item, ava::tui::TuiToolIndexOrigin::Provider);
+  ava::tui::open_change_review(snapshot);
+  expect(snapshot.command_output && snapshot.command_output->review_files.size() == 1 && snapshot.command_output->review_files.front().path == "real.txt",
+         "hunk text resembling file headers cannot fabricate a reviewed path");
+  if (!snapshot.command_output)
+  {
+    return;
+  }
+  auto& view = *snapshot.command_output;
+  auto next = ava::tui::handle_command_output_input(view, {.key = ava::tui::Key::Character, .character = ']'}, 80, 5);
+  ava::tui::apply_command_output_input(view, next);
+  expect(view.scroll_offset > 0, "next-hunk key moves the review viewport");
+  auto previous = ava::tui::handle_command_output_input(view, {.key = ava::tui::Key::Character, .character = '['}, 80, 5);
+  expect(previous.scroll_offset <= view.scroll_offset, "previous-hunk navigation stays bounded");
 }
 
 void test_command_output_rendering_and_input()
@@ -441,6 +548,9 @@ void test_buffered_runtime_event_completion_settlement()
 
 void run_tui_command_output_tests()
 {
+  test_change_review();
+  test_review_hunk_content_is_not_a_filename();
+  test_attention_notifications();
   test_command_output_rendering_and_input();
   test_command_output_modal_precedence_and_hits();
   test_catalog_driven_local_command_transcript_invariant();

@@ -11,6 +11,7 @@
 #include <string>
 #include <string_view>
 #include <vector>
+#include <sys/stat.h>
 
 namespace ava::tools {
 
@@ -108,6 +109,9 @@ class SecureWorkspace
     ~StagedWrite();
 
     [[nodiscard]] ava::core::VoidResult commit();
+    // Conditional restore: revalidate the captured target through the retained
+    // parent descriptor immediately before the existing atomic replacement.
+    [[nodiscard]] auto commit_if_unchanged(struct stat const& expected) -> ava::core::VoidResult;
     [[nodiscard]] std::filesystem::path const& path() const noexcept;
     [[nodiscard]] std::size_t bytes_written() const noexcept;
     [[nodiscard]] bool target_changed() const noexcept;
@@ -136,6 +140,8 @@ class SecureWorkspace
   ~SecureWorkspace();
 
   [[nodiscard]] static ava::core::Result<std::shared_ptr<SecureWorkspace>> open(std::filesystem::path const& root);
+  // Duplicate an already trusted workspace anchor; do not reopen its pathname.
+  [[nodiscard]] static auto from_directory_fd(int directory_fd, std::filesystem::path const& root) -> ava::core::Result<std::shared_ptr<SecureWorkspace>>;
 
   [[nodiscard]] std::filesystem::path const& root() const noexcept;
   [[nodiscard]] ava::core::Result<SecureWorkspacePath> resolve(std::filesystem::path const& candidate, SecureWorkspaceResolveMode mode) const;

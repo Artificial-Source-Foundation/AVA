@@ -3,6 +3,7 @@
 #include "ava/event/events.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/line_shell_internal.h"
+#include "ava/tui/event_state.h"
 #include "ava/core/json.h"
 
 #include <string>
@@ -695,6 +696,101 @@ void test_interactive_run_queue_restores_latest_pending_message()
          "interactive run queue emits a skipped event when restoring a queued message to the composer");
 }
 
+void test_interactive_run_queue_preserves_and_bounds_images()
+{
+  ava::session::ImageAttachmentRef image{
+      .id = "image_synthetic", .mime_type = "image/png", .storage_path = "PRIVATE-REFERENCE.png", .sha256 = "synthetic-hash", .byte_size = 24};
+  bool fail_events = false;
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("session_images", "request_initial", [&](ava::event::EventEnvelope const& envelope) -> ava::core::VoidResult {
+    if (fail_events)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "synthetic event failure"));
+    events.push_back(envelope);
+    return {};
+  });
+  auto queued = queue.queue_follow_up("describe queued images", {image, image});
+  auto next = queue.take_next_follow_up();
+  expect(queued && next && next->image_attachments.size() == 2 && next->image_attachments[0].storage_path == image.storage_path &&
+             next->image_attachments[1].sha256 == image.sha256,
+         "follow-up delivery retains verified image references without reading image bytes");
+  if (!next)
+    return;
+  ava::tui::TuiEventState presentation;
+  ava::tui::apply_control_event_envelope(presentation, events.front());
+  expect(presentation.queued_messages.size() == 1 && presentation.queued_messages[0].text == "describe queued images [2 images]",
+         "queued image count is visible beside the follow-up caption");
+  auto started = queue.mark_follow_up_started(*next);
+  expect(started && events.back().name == "follow_up_started" && events.back().payload_json.find("\"image_count\":2") != std::string::npos &&
+             events.back().payload_json.find(image.storage_path) == std::string::npos && events.back().payload_json.find(image.sha256) == std::string::npos,
+         "queue lifecycle receipts expose image counts without storage paths or image content");
+
+  auto queued_for_restore = queue.queue_follow_up("restore image", {image});
+  auto restored = queue.restore_latest();
+  expect(queued_for_restore && restored && !restored->steering && restored->message == "restore image" && restored->image_attachments.size() == 1 &&
+             restored->image_attachments[0].id == image.id && !queue.take_next_follow_up(),
+         "restoring a follow-up removes both its caption and image references from the delivery queue");
+
+  fail_events = true;
+  auto failed = queue.queue_follow_up("event rejected image", {image});
+  expect(!failed && !queue.take_next_follow_up(), "event publication failure rolls back the entire queued image message");
+  fail_events = false;
+  std::vector<ava::session::ImageAttachmentRef> many(ava::app::kMaxInteractiveQueuedImages, image);
+  auto at_limit = queue.queue_follow_up("image limit", many);
+  auto over_limit = queue.queue_follow_up("one too many", {image});
+  expect(at_limit && !over_limit, "queued image count is bounded across pending messages");
+  static_cast<void>(queue.restore_latest());
+  image.storage_path.assign(ava::app::kMaxInteractiveQueuedMessageBytes, 'x');
+  auto oversized_metadata = queue.queue_follow_up("oversized metadata", {image});
+  expect(!oversized_metadata && !queue.take_next_follow_up(), "image reference metadata shares the queue byte budget");
+  image.storage_path = "PRIVATE-REFERENCE.png";
+  auto before_finish = queue.queue_follow_up("cancel images", {image});
+  auto finished = queue.finish(true);
+  expect(before_finish && finished && !queue.take_next_follow_up() && !queue.queue_follow_up("after finish", {image}),
+         "cancellation clears queued images and prevents later delivery");
+}
+
+void test_interactive_run_queue_edits_selected_pending_message()
+{
+  bool fail_events = false;
+  std::vector<ava::event::EventEnvelope> events;
+  ava::app::InteractiveRunQueue queue("queue-editor", "active", [&](ava::event::EventEnvelope const& event) -> ava::core::VoidResult {
+    if (fail_events)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "synthetic sink failure"));
+    }
+    events.push_back(event);
+    return {};
+  });
+  ava::session::ImageAttachmentRef image{.id = "synthetic-image", .mime_type = "image/png", .storage_path = "synthetic.png"};
+  expect(queue.queue_follow_up("first", {image}) && queue.queue_follow_up("second") && queue.queue_steering("steering"), "queue editor setup");
+  auto items = queue.pending_messages();
+  expect(items.size() == 3, "queue editor exposes all pending message types");
+  if (items.size() != 3)
+  {
+    return;
+  }
+  auto first = std::ranges::find(items, std::string("first"), &ava::app::InteractiveRestoredMessage::message);
+  auto second = std::ranges::find(items, std::string("second"), &ava::app::InteractiveRestoredMessage::message);
+  if (first == items.end() || second == items.end())
+  {
+    expect(false, "queue editor preserves item text");
+    return;
+  }
+  fail_events = true;
+  expect(!queue.remove_pending(second->request_id) && queue.pending_messages().size() == 3, "failed receipt cannot silently remove pending message");
+  fail_events = false;
+  expect(queue.remove_pending(second->request_id).has_value(), "queue editor can remove a non-latest follow-up");
+  expect(events.back().payload_json.contains("removed_by_user"), "queue removal emits precise skipped receipt");
+  auto restored = queue.restore_pending(first->request_id);
+  expect(restored && restored->message == "first" && restored->image_attachments.size() == 1 && restored->image_attachments.at(0).id == image.id,
+         "selected restoration retains full message and attachments");
+  expect(!queue.restore_pending(first->request_id) && !queue.take_next_follow_up(), "restored and removed messages cannot later execute");
+  auto steering = queue.take_steering_messages();
+  expect(steering && steering->size() == 1 && steering->front() == "steering", "queue editing preserves unrelated pending steering");
+  expect(!queue.remove_pending(items.front().request_id), "already-delivered steering cannot be edited");
+  expect(queue.finish(false) && queue.pending_messages().empty() && !queue.restore_pending("unknown"), "finished queue rejects stale editor selection");
+}
+
 void test_interactive_run_queue_bounds_and_truncates_event_payloads()
 {
   std::vector<ava::event::EventEnvelope> events;
@@ -744,5 +840,7 @@ void run_app_event_bus_tests()
   test_interactive_tui_stops_follow_ups_at_session_transition();
   test_interactive_run_queue_skips_pending_messages_on_finish();
   test_interactive_run_queue_restores_latest_pending_message();
+  test_interactive_run_queue_preserves_and_bounds_images();
+  test_interactive_run_queue_edits_selected_pending_message();
   test_interactive_run_queue_bounds_and_truncates_event_payloads();
 }

@@ -480,6 +480,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                 .command_executor = runtime_options.command_executor,
                 .cancel_requested = run_cancel_requested,
                 .process_scope = run_process_scope,
+                .edit_history = session_r->edit_history(),
+                .edit_turn_id = ava::core::make_id("edit-turn"),
             },
         .subagents = std::move(subagents),
         .tool_visibility = session_r->tool_visibility(),

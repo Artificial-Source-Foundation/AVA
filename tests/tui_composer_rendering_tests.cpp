@@ -31,11 +31,13 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdio>
+#include <future>
 #include <iostream>
 #include <iterator>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -1270,8 +1272,122 @@ bool test_display_settings_reload_rebuilds_open_startup_overview()
   return rebuilt && rendered;
 }
 
+bool test_clipboard_image_worker_lifecycle()
+{
+  tui_test_support::ScopedTerminalCapabilityProfile terminal_profile("iTerm.app");
+  FILE* input = std::tmpfile();
+  FILE* output = std::tmpfile();
+  SCREEN* screen = input && output ? newterm(nullptr, output, input) : nullptr;
+  if (!screen)
+  {
+    if (input)
+      std::fclose(input);
+    if (output)
+      std::fclose(output);
+    return false;
+  }
+  static_cast<void>(set_term(screen));
+  static_cast<void>(resizeterm(24, 100));
+  auto const ui_thread = std::this_thread::get_id();
+  bool passed = true;
+  // Each synthetic reader waits until the UI explicitly releases it. A future
+  // timeout bounds a regression to synchronous paste instead of hanging CTest.
+  for (int scenario = 0; scenario < 5; ++scenario)
+  {
+    std::promise<void> release;
+    auto gate = release.get_future().share();
+    std::atomic<int> reads{0};
+    std::atomic<int> preview_reads{0};
+    std::atomic<bool> context_valid{false};
+    std::atomic<bool> preview_off_ui{false};
+    ava::tui::TuiRuntimeOptions options;
+    options.mode = "build";
+    options.session_id = "clipboard-original";
+    options.session_path = "/synthetic/clipboard-original.jsonl";
+    options.show_images = true;
+    options.on_paste_clipboard_image = [&](ava::tui::TuiClipboardPasteContext context) -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
+      ++reads;
+      context_valid.store(context.session_id == "clipboard-original" && context.session_path == "/synthetic/clipboard-original.jsonl" &&
+                          std::this_thread::get_id() != ui_thread);
+      static_cast<void>(gate.wait_for(std::chrono::seconds(2)));
+      if (scenario == 3)
+        return std::optional<ava::session::ImageAttachmentRef>{};
+      if (scenario == 4)
+        throw std::runtime_error("synthetic callback failure");
+      return std::optional<ava::session::ImageAttachmentRef>{ava::session::ImageAttachmentRef{
+          .id = "img_synthetic", .mime_type = "image/png", .storage_path = "attachments/img_synthetic.png", .sha256 = "01234567", .byte_size = 16}};
+    };
+    options.on_load_image_attachment = [&](ava::session::ImageAttachmentRef const& attachment) -> ava::core::Result<ava::session::LoadedImageAttachment> {
+      ++preview_reads;
+      preview_off_ui.store(std::this_thread::get_id() != ui_thread);
+      return ava::session::LoadedImageAttachment{.metadata = attachment, .bytes = "synthetic-image", .path = {}};
+    };
+    ava::tui::RuntimePresentationState presentation(options);
+    ava::tui::RuntimeDraftState draft;
+    draft.draft.text = "a draft kept while pasting";
+    draft.draft.cursor = draft.draft.text.size();
+    ava::tui::RuntimeRenderer renderer(presentation.snapshot, presentation.sidebar, draft);
+    auto selected = ava::tui::ActiveSelectList::None;
+    std::optional<ava::tui::PendingSessionArchiveAction> archive;
+    ava::tui::RuntimeActionController controller(options, presentation, draft, renderer, selected, archive);
+    auto const started_at = std::chrono::steady_clock::now();
+    passed = controller.paste_clipboard_image() && passed;
+    passed = std::chrono::steady_clock::now() - started_at < std::chrono::milliseconds(500) && passed;
+    passed = controller.clipboard_image_blocks_submit() && draft.draft.text == "a draft kept while pasting" && passed;
+    passed = controller.paste_clipboard_image() && controller.poll_clipboard_image() && presentation.pending_image_attachments.empty() && passed;
+    // Ordinary editing and resize remain renderable while the reader is blocked.
+    draft.draft.text += " and edited";
+    draft.draft.cursor = draft.draft.text.size();
+    static_cast<void>(resizeterm(20, 80));
+    passed = renderer.render() && passed;
+    if (scenario == 1)
+    {
+      // Same id at a new path must also invalidate the paste's session binding.
+      presentation.sidebar.session_path = "/synthetic/other-session.jsonl";
+      presentation.snapshot.status = "session switched";
+      passed = controller.poll_clipboard_image() && !controller.clipboard_image_blocks_submit() && passed;
+    }
+    if (scenario == 2)
+    {
+      static_cast<void>(controller.clear_draft_for_interrupt());
+      presentation.snapshot.status = "cancelled";
+      passed = !controller.clipboard_image_blocks_submit() && passed;
+    }
+    release.set_value();
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (controller.clipboard_image_pending() && std::chrono::steady_clock::now() < deadline)
+    {
+      passed = controller.poll_clipboard_image() && passed;
+      std::this_thread::yield();
+    }
+    passed = !controller.clipboard_image_pending() && reads.load() == 1 && context_valid.load() && passed;
+    if (scenario == 0)
+      passed = presentation.pending_image_attachments.size() == 1 && presentation.snapshot.pending_attachments.size() == 1 &&
+               presentation.snapshot.pending_attachments.front().preview.has_value() && preview_reads.load() == 1 && preview_off_ui.load() &&
+               presentation.snapshot.status == "pasted clipboard image for next prompt" && draft.draft.text.ends_with(" and edited") && passed;
+    else
+      passed = presentation.pending_image_attachments.empty() && presentation.snapshot.pending_attachments.empty() && preview_reads.load() == 0 && passed;
+    if (scenario == 1)
+      passed = presentation.snapshot.status == "session switched" && passed;
+    if (scenario == 2)
+      passed = presentation.snapshot.status == "cancelled" && passed;
+    if (scenario == 3)
+      passed = presentation.snapshot.status == "no clipboard image available" && passed;
+    if (scenario == 4)
+      passed = presentation.snapshot.status.find("clipboard image paste failed") != std::string::npos && passed;
+  }
+  static_cast<void>(endwin());
+  delscreen(screen);
+  std::fclose(input);
+  std::fclose(output);
+  return passed;
+}
+
 void run_tui_composer_rendering_tests_part_1()
 {
+  expect(test_clipboard_image_worker_lifecycle(),
+         "clipboard image reads and previews run off the UI thread, preserve editing and resize, coalesce repeated paste, prevent premature submission, "
+         "drop cancelled or stale-session results, and settle empty and throwing readers without a stuck job");
   expect(test_display_settings_reload_poll_outcome_and_preview_staging(),
          "display reload poll uses optional snapshot as applied/unchanged signal, hydrates without final render, restages overlay before paint, and Esc "
          "restores new authority even when overlay values equal the hydrated baseline");
@@ -1531,7 +1647,7 @@ void run_tui_composer_rendering_tests_part_1()
   }
   expect(lines.size() == 14, "tui fills the viewport with transcript, spacer, and composer lines");
   expect(!lines.empty() && strip_sgr(lines.front()).find("hello") != std::string::npos, "tui starts short chats at the top of the transcript area");
-  expect(lines.size() == 14 && strip_sgr(lines[12]).starts_with("│  /help") && strip_sgr(lines[13]).starts_with("│  GPT-5.5") &&
+  expect(lines.size() == 14 && strip_sgr(lines[12]).starts_with("│  /help") && strip_sgr(lines[13]).starts_with("│  Build · GPT-5.5") &&
              strip_sgr(lines[11]).starts_with("│  ") && lines[11].find("\x1b[49m") != std::string::npos &&
              lines[11].find("\x1b[48;2;26;31;46m") == std::string::npos && lines[12].find("\x1b[49m") != std::string::npos &&
              lines[12].find("\x1b[48;2;26;31;46m") == std::string::npos && lines[13].find("\x1b[49m") != std::string::npos &&
@@ -1613,7 +1729,7 @@ void run_tui_composer_rendering_tests_part_1()
     idle_input.pop_back();
   while (!idle_footer.empty() && idle_footer.back() == ' ')
     idle_footer.pop_back();
-  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  GPT-5.5 · ctx 870 (3.2%)" &&
+  expect(idle_two_row_lines.size() == 10 && idle_input == "│  Type a message..." && idle_footer == "│  Build · GPT-5.5 · ctx 870 (3.2%)" &&
              idle_two_row_lines[8].find("\x1b[49m") != std::string::npos && idle_two_row_lines[9].find("\x1b[49m") != std::string::npos &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return line.find("\x1b[48;2;26;31;46m") != std::string::npos; }) &&
              std::ranges::none_of(idle_two_row_lines, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
@@ -1739,7 +1855,7 @@ void run_tui_composer_rendering_tests_part_1()
                roomy_gap_frame[9].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[10]).starts_with("│  ") &&
                roomy_gap_frame[10].find("\x1b[49m") != std::string::npos && roomy_gap_frame[10].find("\x1b[48;2;26;31;46m") == std::string::npos &&
                strip_sgr(roomy_gap_frame[11]).starts_with("│  Type a message...") && roomy_gap_frame[11].find("\x1b[49m") != std::string::npos &&
-               roomy_gap_frame[11].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[12]).starts_with("│  GPT-5.5") &&
+               roomy_gap_frame[11].find("\x1b[48;2;26;31;46m") == std::string::npos && strip_sgr(roomy_gap_frame[12]).starts_with("│  Build · GPT-5.5") &&
                roomy_gap_frame[12].find("\x1b[49m") != std::string::npos && compact_gap_frame.size() == 12 &&
                strip_sgr(compact_gap_frame[9]).find("gap item 19") != std::string::npos && strip_sgr(compact_gap_frame[10]).starts_with("│  ") &&
                strip_sgr(crowded_gap_frame.front()).find("gap item 19") != std::string::npos && roomy_max == compact_max + 1 &&
@@ -1749,7 +1865,8 @@ void run_tui_composer_rendering_tests_part_1()
                ava::tui::detail::composer_layout_policy(compact_gap_snapshot, 12).composer_top_padding_lines == 0 &&
                ava::tui::detail::composer_layout_policy(modal_policy_snapshot, 24).composer_top_padding_lines == 0 &&
                ava::tui::detail::composer_block_line_count(permission_policy_snapshot, 13, 80) == 2 &&
-               strip_sgr(permission_policy_frame[11]).starts_with("│  Type a message...") && strip_sgr(permission_policy_frame[12]).starts_with("│  GPT-5.5"),
+               strip_sgr(permission_policy_frame[11]).starts_with("│  Type a message...") &&
+               strip_sgr(permission_policy_frame[12]).starts_with("│  Build · GPT-5.5"),
            "tui roomy ordinary layouts reserve a screen-background breathing gap and one guttered screen-background composer row above the unchanged "
            "input/footer rows, while compact and authoritative layouts reclaim that padding row");
   }
@@ -1775,7 +1892,7 @@ void run_tui_composer_rendering_tests_part_1()
                scrolled_layout.first_visible == 1 && elevated_draft.size() == 14 && strip_sgr(elevated_draft[6]).starts_with("│  ") &&
                elevated_draft[6].find("\x1b[49m") != std::string::npos && elevated_draft[6].find("\x1b[48;2;26;31;46m") == std::string::npos &&
                strip_sgr(elevated_draft[7]).starts_with("│  four") && elevated_draft[7].find("\x1b[49m") != std::string::npos &&
-               strip_sgr(elevated_draft[13]).starts_with("│  GPT-5.5") && elevated_draft[13].find("\x1b[49m") != std::string::npos &&
+               strip_sgr(elevated_draft[13]).starts_with("│  Build · GPT-5.5") && elevated_draft[13].find("\x1b[49m") != std::string::npos &&
                !ava::tui::composer_input_cursor_for_screen_position(roomy_multiline_snapshot, 7, 4) && first_visible_draft_cursor &&
                *first_visible_draft_cursor == std::string("one\ntwo\nthree\n").size(),
            "tui roomy multiline drafts reserve the screen-background padding row before deriving their viewport, scrolling, cursor, and hit-test rows");
@@ -1799,7 +1916,7 @@ void run_tui_composer_rendering_tests_part_1()
   auto const muted_outer = std::string(ava::tui::detail::kSgrMuted) + "▃";
   auto const accent_inner = std::string(ava::tui::detail::kSgrAccent) + "▆";
   expect(processing_lines.size() == 10 && strip_sgr(processing_lines[7]).find("Esc stop · type a follow-up") != std::string::npos &&
-             strip_sgr(processing_lines[8]).starts_with("│  Type a message...") && strip_sgr(processing_lines[9]).starts_with("│  GPT-5.5") &&
+             strip_sgr(processing_lines[8]).starts_with("│  Type a message...") && strip_sgr(processing_lines[9]).starts_with("│  Build · GPT-5.5") &&
              strip_sgr(processing_lines[9]).find(processing_meter_raw) != std::string::npos && processing_lines[9].find(muted_outer) != std::string::npos &&
              processing_lines[9].find(accent_inner) != std::string::npos && processing_lines[7].find("\x1b[49m") != std::string::npos &&
              processing_lines[7].find("\x1b[48;2;26;31;46m") == std::string::npos && processing_lines[8].find("\x1b[49m") != std::string::npos &&
@@ -1845,9 +1962,10 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(narrow_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-") != std::string::npos && visible.find("ctx ~12k") != std::string::npos && visible_columns(line) == 20;
+                               return visible.find("Build") != std::string::npos && visible.find("ctx ~12k") != std::string::npos &&
+                                      visible_columns(line) == 20;
                              }),
-         "tui shortens a long model label before dropping multi-digit context metadata at the supported minimum width");
+         "tui preserves mode and context before a long model label at the supported minimum width");
 
   narrow_footer_snapshot.status = "thinking...";
   narrow_footer_snapshot.processing = true;
@@ -1856,15 +1974,15 @@ void run_tui_composer_rendering_tests_part_1()
   auto const narrow_meter_raw = std::string(ava::tui::detail::processing_indicator_frame(1));
   auto const narrow_muted_outer = std::string(ava::tui::detail::kSgrMuted) + "▃";
   auto const narrow_accent_inner = std::string(ava::tui::detail::kSgrAccent) + "▆";
-  // At width 20 the fixed four-cell meter keeps ctx metadata; the model label may collapse to ellipsis.
+  // At width 20 the mode and fixed four-cell meter take priority over model/context detail.
   expect(std::ranges::any_of(narrow_processing_lines,
                              [&](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("ctx ~12k") != std::string::npos && visible.find(narrow_meter_raw) != std::string::npos &&
+                               return visible.find("Build") != std::string::npos && visible.find(narrow_meter_raw) != std::string::npos &&
                                       line.find(narrow_muted_outer) != std::string::npos && line.find(narrow_accent_inner) != std::string::npos &&
                                       visible_columns(line) == 20;
                              }),
-         "tui preserves multi-digit context metadata and the four-cell signal meter at the supported minimum width");
+         "tui preserves mode and the four-cell signal meter at the supported minimum width");
 
   auto combined_narrow_footer = narrow_footer_snapshot;
   combined_narrow_footer.model = "gpt-5.6-terra";
@@ -1877,12 +1995,12 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(combined_narrow_lines,
                              [&](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("ctx 150.3k (55.3%)") != std::string::npos && visible.find(narrow_meter_raw) != std::string::npos &&
-                                      line.find(narrow_muted_outer) != std::string::npos && line.find(narrow_accent_inner) != std::string::npos &&
-                                      visible_columns(line) == 28;
+                               return visible.find("Build") != std::string::npos && visible.find("ctx ") != std::string::npos &&
+                                      visible.find(narrow_meter_raw) != std::string::npos && line.find(narrow_muted_outer) != std::string::npos &&
+                                      line.find(narrow_accent_inner) != std::string::npos && visible_columns(line) == 28;
                              }) &&
              std::ranges::all_of(combined_narrow_lines, [](std::string const& line) { return visible_columns(line) <= 28; }),
-         "tui keeps combined count/percent context and the four-cell meter width-bounded on a narrow canvas");
+         "tui keeps mode, bounded context text, and the four-cell meter on a narrow canvas");
 
   auto normal_combined_footer = combined_narrow_footer;
   normal_combined_footer.model = "gpt-5.5";
@@ -1923,11 +2041,11 @@ void run_tui_composer_rendering_tests_part_1()
            "tui direct footer renderer matches the full composer footer for " + layout_name);
   };
   expect_direct_footer_matches_frame(idle_two_row_snapshot, "ordinary canvas");
-  auto centered_footer_snapshot = idle_two_row_snapshot;
-  centered_footer_snapshot.width = 160;
-  centered_footer_snapshot.height = 14;
-  expect_direct_footer_matches_frame(centered_footer_snapshot, "centered canvas");
-  auto rail_footer_snapshot = centered_footer_snapshot;
+  auto wide_footer_snapshot = idle_two_row_snapshot;
+  wide_footer_snapshot.width = 160;
+  wide_footer_snapshot.height = 14;
+  expect_direct_footer_matches_frame(wide_footer_snapshot, "left-aligned canvas");
+  auto rail_footer_snapshot = wide_footer_snapshot;
   rail_footer_snapshot.width = 176;
   rail_footer_snapshot.height = 16;
   rail_footer_snapshot.sidebar = ava::tui::SidebarSnapshot{
@@ -2026,14 +2144,14 @@ void run_tui_composer_rendering_tests_part_1()
   expect(wide_image_frame.graphics.size() == 1 && wide_image_frame.graphics.front().columns <= 12 && narrow_viewport_frame.graphics.size() == 1 &&
              narrow_viewport_frame.graphics.front().columns <= 16,
          "configured image width is honored and clamped again to the available viewport");
-  auto centered_attachment_preview_snapshot = attachment_preview_snapshot;
-  centered_attachment_preview_snapshot.width = 160;
-  auto const centered_attachment_preview_frame = ava::tui::render_composer_frame(centered_attachment_preview_snapshot);
-  expect(centered_attachment_preview_frame.graphics.size() == 1 &&
-             centered_attachment_preview_frame.graphics.front().column == attachment_preview_frame.graphics.front().column + 20 &&
-             centered_attachment_preview_frame.graphics.front().row == attachment_preview_frame.graphics.front().row &&
-             std::ranges::all_of(centered_attachment_preview_frame.lines, [](std::string const& line) { return visible_columns(line) == 160; }),
-         "tui centered canvas shifts each terminal graphic overlay by the physical inset exactly once");
+  auto wide_attachment_preview_snapshot = attachment_preview_snapshot;
+  wide_attachment_preview_snapshot.width = 160;
+  auto const wide_attachment_preview_frame = ava::tui::render_composer_frame(wide_attachment_preview_snapshot);
+  expect(wide_attachment_preview_frame.graphics.size() == 1 &&
+             wide_attachment_preview_frame.graphics.front().column == attachment_preview_frame.graphics.front().column &&
+             wide_attachment_preview_frame.graphics.front().row == attachment_preview_frame.graphics.front().row &&
+             std::ranges::all_of(wide_attachment_preview_frame.lines, [](std::string const& line) { return visible_columns(line) == 160; }),
+         "tui wide canvas keeps terminal graphic overlays aligned with the left-anchored composer");
   {
     ScopedEnvVar no_color_preview_guard("NO_COLOR", "1");
     auto const plain_attachment_preview_frame = ava::tui::render_composer_frame(attachment_preview_snapshot);
@@ -2058,10 +2176,10 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(reasoning_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos &&
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") != std::string::npos &&
                                       visible.find("OpenAI") == std::string::npos && visible.find("low") == std::string::npos;
                              }),
-         "tui keeps mode, provider, and reasoning level out of the composer footer");
+         "tui keeps mode visible beside the model without redundant provider or reasoning labels");
 
   auto const default_reasoning_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                             .provider = "openai",
@@ -2075,10 +2193,10 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(default_reasoning_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos &&
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") != std::string::npos &&
                                       visible.find("OpenAI") == std::string::npos && visible.find("default") == std::string::npos;
                              }),
-         "tui renders only the model when context metadata is unavailable");
+         "tui renders mode and model when context metadata is unavailable");
   expect(
       std::ranges::none_of(default_reasoning_lines, [](std::string const& line) { return strip_sgr(line).find("session session_test") != std::string::npos; }),
       "tui keeps the session id out of the composer footer");
@@ -2095,14 +2213,14 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::any_of(default_reasoning_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
-                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") == std::string::npos;
+                               return visible.find("GPT-5.5") != std::string::npos && visible.find("Build") != std::string::npos;
                              }) &&
              std::ranges::any_of(plan_mode_lines,
                                  [](std::string const& line) {
                                    auto const visible = strip_sgr(line);
-                                   return visible.find("GPT-5.5") != std::string::npos && visible.find("Plan") == std::string::npos;
+                                   return visible.find("GPT-5.5") != std::string::npos && visible.find("Plan") != std::string::npos;
                                  }),
-         "tui keeps build and plan mode badges out of the composer footer");
+         "tui shows the current Build or Plan mode even without a sidebar");
 
   auto const token_margin_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                        .provider = "openai",
@@ -2141,11 +2259,11 @@ void run_tui_composer_rendering_tests_part_1()
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
                                return visible.find("GPT-5.5 · ctx 870 (3.2%)") != std::string::npos && visible.find("ctx 2") == std::string::npos &&
-                                      visible.find("Build") == std::string::npos && visible.find("OpenAI") == std::string::npos &&
+                                      visible.find("Build") != std::string::npos && visible.find("OpenAI") == std::string::npos &&
                                       visible.find("cwd") == std::string::npos && visible.find("git") == std::string::npos &&
                                       visible.find("entries") == std::string::npos && visible.find("1.3k (0.7%)") == std::string::npos;
                              }),
-         "tui compact footer shows only the model name and active context usage");
+         "tui compact footer shows mode, model, and active context usage");
 
   auto const refreshed_context_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                             .provider = "openai",
@@ -2297,7 +2415,8 @@ void run_tui_composer_rendering_tests_part_2()
              strip_sgr(prioritized_status_alert[4]).find("! invalid_argument: first alert line") != std::string::npos &&
              strip_sgr(prioritized_status_alert[5]).find("second alert line") != std::string::npos &&
              strip_sgr(prioritized_status_alert[6]).find("third alert line ...") != std::string::npos &&
-             strip_sgr(prioritized_status_alert[7]).starts_with("│  Type a message...") && strip_sgr(prioritized_status_alert[8]).starts_with("│  GPT-5.5"),
+             strip_sgr(prioritized_status_alert[7]).starts_with("│  Type a message...") &&
+             strip_sgr(prioritized_status_alert[8]).starts_with("│  Build · GPT-5.5"),
          "tui reserves a three-line status alert before queue and attachment budgets and renders it immediately above the two-row composer");
 
   auto const minimum_width = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -2459,16 +2578,15 @@ void run_tui_composer_rendering_tests_part_3()
              !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 1, cursor_base) &&
              !ava::tui::composer_input_cursor_for_screen_position(click_cursor_snapshot, 8, cursor_base),
          "tui composer hit-tests visible input rows to draft cursor byte offsets and ignores non-input rows");
-  auto centered_click_snapshot = click_cursor_snapshot;
-  centered_click_snapshot.width = 160;
-  auto const centered_clicked_after_alpha =
-      ava::tui::composer_input_cursor_for_screen_position(centered_click_snapshot, 7, 20 + cursor_base + std::string("alpha ").size());
-  expect(centered_clicked_after_alpha && *centered_clicked_after_alpha == std::string("alpha ").size() &&
-             !ava::tui::composer_input_cursor_for_screen_position(centered_click_snapshot, 7, 20) &&
-             ava::tui::composer_input_cursor_for_screen_position(centered_click_snapshot, 7, 21).has_value() &&
-             ava::tui::composer_input_cursor_for_screen_position(centered_click_snapshot, 7, 140).has_value() &&
-             !ava::tui::composer_input_cursor_for_screen_position(centered_click_snapshot, 7, 141),
-         "tui centered composer click maps physical columns locally, accepts both canvas edges, and rejects both exact gutters");
+  auto wide_click_snapshot = click_cursor_snapshot;
+  wide_click_snapshot.width = 160;
+  auto const wide_clicked_after_alpha = ava::tui::composer_input_cursor_for_screen_position(wide_click_snapshot, 7, cursor_base + std::string("alpha ").size());
+  expect(wide_clicked_after_alpha && *wide_clicked_after_alpha == std::string("alpha ").size() &&
+             !ava::tui::composer_input_cursor_for_screen_position(wide_click_snapshot, 7, 0) &&
+             ava::tui::composer_input_cursor_for_screen_position(wide_click_snapshot, 7, 1).has_value() &&
+             ava::tui::composer_input_cursor_for_screen_position(wide_click_snapshot, 7, 120).has_value() &&
+             !ava::tui::composer_input_cursor_for_screen_position(wide_click_snapshot, 7, 121),
+         "tui wide composer click maps physical columns locally, accepts both canvas edges, and rejects out-of-canvas columns");
   auto const multiline_click_snapshot = ava::tui::ComposerSnapshot{.mode = "build",
                                                                    .provider = "openai",
                                                                    .model = "gpt-5.5",
@@ -2760,7 +2878,7 @@ void run_tui_composer_rendering_tests_part_4()
              curated_idle_text.find("no file changes") == std::string::npos && curated_idle_text.find("unknown") == std::string::npos &&
              curated_idle_text.find("raw-session-id") == std::string::npos && curated_idle_text.find("/raw/session/path") == std::string::npos &&
              curated_idle_text.find("/raw/workspace") == std::string::npos && curated_idle_text.find("999") == std::string::npos &&
-             curated_idle_text.find("9.9.9") == std::string::npos && curated_idle_footer == "│  GPT-5.5" &&
+             curated_idle_text.find("9.9.9") == std::string::npos && curated_idle_footer == "│  Build · GPT-5.5" &&
              std::ranges::all_of(curated_idle_sidebar,
                                  [](std::string const& line) {
                                    auto const visible = strip_sgr(line);
@@ -2882,7 +3000,7 @@ void run_tui_composer_rendering_tests_part_4()
                                                     .provider = "openai",
                                                     .model = "gpt-5.5",
                                                     .session_id = "session_canvas",
-                                                    .input = "centered draft",
+                                                    .input = "left-aligned draft",
                                                     .status = "ready",
                                                     .transcript = {},
                                                     .width = 119,
@@ -2894,15 +3012,15 @@ void run_tui_composer_rendering_tests_part_4()
   auto canvas_121 = ava::tui::composer_canvas_layout(canvas_snapshot);
   canvas_snapshot.width = 160;
   auto canvas_160 = ava::tui::composer_canvas_layout(canvas_snapshot);
-  auto const centered_frame = ava::tui::render_composer(canvas_snapshot);
-  auto const centered_input =
-      std::ranges::find_if(centered_frame, [](std::string const& line) { return strip_sgr(line).find("centered draft") != std::string::npos; });
+  auto const wide_canvas_frame = ava::tui::render_composer(canvas_snapshot);
+  auto const wide_input =
+      std::ranges::find_if(wide_canvas_frame, [](std::string const& line) { return strip_sgr(line).find("left-aligned draft") != std::string::npos; });
   expect(canvas_119.content_width == 119 && canvas_119.left == 0 && !canvas_119.rail_visible && canvas_120.content_width == 120 && canvas_120.left == 0 &&
              !canvas_120.rail_visible && canvas_121.content_width == 120 && canvas_121.left == 0 && !canvas_121.rail_visible &&
-             canvas_160.content_width == 120 && canvas_160.left == 20 && !canvas_160.rail_visible && centered_input != centered_frame.end() &&
-             strip_sgr(*centered_input).find("│  centered draft") == 20 &&
-             std::ranges::all_of(centered_frame, [](std::string const& line) { return visible_columns(line) == 160; }),
-         "tui ordinary canvas stays full width through 120 columns and becomes one exact centered 120-column frame above it");
+             canvas_160.content_width == 120 && canvas_160.left == 0 && !canvas_160.rail_visible && wide_input != wide_canvas_frame.end() &&
+             strip_sgr(*wide_input).find("│  left-aligned draft") == 0 &&
+             std::ranges::all_of(wide_canvas_frame, [](std::string const& line) { return visible_columns(line) == 160; }),
+         "tui ordinary canvas stays full width through 120 columns and becomes one left-aligned 120-column frame above it");
 
   auto boundary_snapshot = ava::tui::ComposerSnapshot{
       .mode = "build",
@@ -2917,17 +3035,17 @@ void run_tui_composer_rendering_tests_part_4()
       .sidebar = ava::tui::SidebarSnapshot{
           .activity = {ava::tui::SidebarActivityItem{.id = "boundary", .label = "boundary-activity", .status = ava::tui::ToolTimelineStatus::Running}}}};
   auto boundary_frame = ava::tui::render_composer(boundary_snapshot);
-  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 11 &&
+  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 0 &&
              !ava::tui::composer_canvas_layout(boundary_snapshot).rail_visible &&
              std::ranges::none_of(boundary_frame, [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }),
-         "tui actionable automatic sidebar stays hidden and centers the canvas at 143x16");
+         "tui actionable automatic sidebar stays hidden and left-aligns the canvas at 143x16");
   boundary_snapshot.width = 144;
   boundary_snapshot.height = 15;
   boundary_frame = ava::tui::render_composer(boundary_snapshot);
-  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 12 &&
+  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 0 &&
              !ava::tui::composer_canvas_layout(boundary_snapshot).rail_visible &&
              std::ranges::none_of(boundary_frame, [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }),
-         "tui actionable automatic sidebar stays hidden and centers the canvas at 144x15");
+         "tui actionable automatic sidebar stays hidden and left-aligns the canvas at 144x15");
   boundary_snapshot.height = 16;
   boundary_frame = ava::tui::render_composer(boundary_snapshot);
   expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 105 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 0 &&
@@ -2948,10 +3066,10 @@ void run_tui_composer_rendering_tests_part_4()
   auto modified_boundary_frame = ava::tui::render_composer(modified_boundary_snapshot);
   expect(
       ava::tui::composer_canvas_layout(modified_boundary_snapshot).content_width == 120 &&
-          ava::tui::composer_canvas_layout(modified_boundary_snapshot).left == 11 &&
+          ava::tui::composer_canvas_layout(modified_boundary_snapshot).left == 0 &&
           !ava::tui::composer_canvas_layout(modified_boundary_snapshot).rail_visible &&
           std::ranges::none_of(modified_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("boundary-file.cpp") != std::string::npos; }),
-      "tui automatic sidebar stays hidden and centers modified-file work at 143x16");
+      "tui automatic sidebar stays hidden and left-aligns modified-file work at 143x16");
   modified_boundary_snapshot.width = 144;
   modified_boundary_frame = ava::tui::render_composer(modified_boundary_snapshot);
   expect(
@@ -2966,10 +3084,10 @@ void run_tui_composer_rendering_tests_part_4()
   idle_boundary_snapshot.sidebar->model = "gpt-5.5";
   idle_boundary_snapshot.width = 175;
   auto idle_boundary_frame = ava::tui::render_composer(idle_boundary_snapshot);
-  expect(ava::tui::composer_canvas_layout(idle_boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(idle_boundary_snapshot).left == 27 &&
+  expect(ava::tui::composer_canvas_layout(idle_boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(idle_boundary_snapshot).left == 0 &&
              !ava::tui::composer_canvas_layout(idle_boundary_snapshot).rail_visible &&
              std::ranges::none_of(idle_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("Session") != std::string::npos; }),
-         "tui idle automatic sidebar stays hidden and centers the canvas at 175x16");
+         "tui idle automatic sidebar stays hidden and left-aligns the canvas at 175x16");
   idle_boundary_snapshot.width = 176;
   idle_boundary_frame = ava::tui::render_composer(idle_boundary_snapshot);
   expect(ava::tui::composer_canvas_layout(idle_boundary_snapshot).content_width == 137 && ava::tui::composer_canvas_layout(idle_boundary_snapshot).left == 0 &&
@@ -2982,9 +3100,9 @@ void run_tui_composer_rendering_tests_part_4()
   reasoning_feedback_snapshot.reasoning_feedback = "reasoning low";
   auto const reasoning_feedback_frame = ava::tui::render_composer(reasoning_feedback_snapshot);
   expect(ava::tui::composer_canvas_layout(reasoning_feedback_snapshot).content_width == 120 &&
-             ava::tui::composer_canvas_layout(reasoning_feedback_snapshot).left == 20 &&
+             ava::tui::composer_canvas_layout(reasoning_feedback_snapshot).left == 0 &&
              std::ranges::any_of(reasoning_feedback_frame, [](std::string const& line) { return strip_sgr(line).find("reasoning low") != std::string::npos; }),
-         "tui renders subtle one-action reasoning feedback in the centered canvas when the automatic sidebar is hidden");
+         "tui renders subtle one-action reasoning feedback in the left-aligned canvas when the automatic sidebar is hidden");
 
   auto permission_boundary_snapshot = boundary_snapshot;
   permission_boundary_snapshot.width = 176;
@@ -3011,27 +3129,27 @@ void run_tui_composer_rendering_tests_part_4()
   auto const select_boundary_frame = ava::tui::render_composer(select_boundary_snapshot);
   expect(
       ava::tui::composer_canvas_layout(permission_boundary_snapshot).content_width == 120 &&
-          ava::tui::composer_canvas_layout(permission_boundary_snapshot).left == 28 &&
+          ava::tui::composer_canvas_layout(permission_boundary_snapshot).left == 0 &&
           ava::tui::composer_canvas_layout(question_boundary_snapshot).content_width == 120 &&
-          ava::tui::composer_canvas_layout(question_boundary_snapshot).left == 28 &&
+          ava::tui::composer_canvas_layout(question_boundary_snapshot).left == 0 &&
           ava::tui::composer_canvas_layout(select_boundary_snapshot).content_width == 120 &&
-          ava::tui::composer_canvas_layout(select_boundary_snapshot).left == 28 &&
-          std::ranges::any_of(permission_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("! Permission required") == 30; }) &&
-          std::ranges::any_of(question_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("? Boundary question") == 30; }) &&
+          ava::tui::composer_canvas_layout(select_boundary_snapshot).left == 0 &&
+          std::ranges::any_of(permission_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("! Permission required") == 2; }) &&
+          std::ranges::any_of(question_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("? Boundary question") == 2; }) &&
           std::ranges::none_of(permission_boundary_frame,
                                [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }) &&
           std::ranges::none_of(question_boundary_frame,
                                [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }) &&
           std::ranges::none_of(select_boundary_frame, [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }),
-      "tui permission, question, and select authority suppress the automatic sidebar and share centered canvas geometry");
+      "tui permission, question, and select authority suppress the automatic sidebar and share left-aligned canvas geometry");
 
   boundary_snapshot.width = 160;
   boundary_snapshot.height = 12;
   boundary_frame = ava::tui::render_composer(boundary_snapshot);
-  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 20 &&
+  expect(ava::tui::composer_canvas_layout(boundary_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(boundary_snapshot).left == 0 &&
              !ava::tui::composer_canvas_layout(boundary_snapshot).rail_visible &&
              std::ranges::none_of(boundary_frame, [](std::string const& line) { return strip_sgr(line).find("boundary-activity") != std::string::npos; }),
-         "tui automatic sidebar stays hidden and centers the canvas on a short 160x12 terminal");
+         "tui automatic sidebar stays hidden and left-aligns the canvas on a short 160x12 terminal");
 
   auto drawer_snapshot =
       ava::tui::ComposerSnapshot{
@@ -3088,7 +3206,7 @@ void run_tui_composer_rendering_tests_part_4()
              std::ranges::any_of(drawer_frame, [](std::string const& line) { return strip_sgr(line).find("[x] failed-activity") != std::string::npos; }) &&
              std::ranges::none_of(drawer_frame, [](std::string const& line) { return strip_sgr(line).find("DRAWER MUST HIDE") != std::string::npos; }) &&
              std::ranges::none_of(drawer_frame, [](std::string const& line) { return strip_sgr(line).find("live session") != std::string::npos; }) &&
-             strip_sgr(drawer_frame[22]).starts_with("│  Type a message...") && strip_sgr(drawer_frame[23]).starts_with("│  GPT-5.5") &&
+             strip_sgr(drawer_frame[22]).starts_with("│  Type a message...") && strip_sgr(drawer_frame[23]).starts_with("│  Build · GPT-5.5") &&
              std::ranges::all_of(drawer_frame, [](std::string const& line) { return visible_columns(line) <= 80; }),
          "tui narrow sidebar drawer replaces the transcript, wraps semantic data, stays bounded, and retains the full-width quiet composer");
   drawer_snapshot.sidebar_drawer_scroll_offset = drawer_max;
@@ -3105,7 +3223,7 @@ void run_tui_composer_rendering_tests_part_4()
   drawer_snapshot.sidebar_drawer_scroll_offset = ava::tui::sidebar_drawer_max_scroll_offset(drawer_snapshot);
   auto const short_drawer_frame = ava::tui::render_composer(drawer_snapshot);
   expect(short_drawer_frame.size() == 12 && ava::tui::composer_main_width(drawer_snapshot) == 100 &&
-             strip_sgr(short_drawer_frame[10]).starts_with("│  Type a message...") && strip_sgr(short_drawer_frame[11]).starts_with("│  GPT-5.5") &&
+             strip_sgr(short_drawer_frame[10]).starts_with("│  Type a message...") && strip_sgr(short_drawer_frame[11]).starts_with("│  Build · GPT-5.5") &&
              std::ranges::any_of(short_drawer_frame, [](std::string const& line) { return strip_sgr(line).find("context sources 7") != std::string::npos; }) &&
              std::ranges::all_of(short_drawer_frame, [](std::string const& line) { return visible_columns(line) <= 100; }),
          "tui short sidebar drawer remains scrollable and retains the bottom composer rows");
@@ -3215,7 +3333,7 @@ void run_tui_composer_rendering_tests_part_4()
                                                                                      .width = 20,
                                                                                      .height = 8});
   expect(std::ranges::all_of(exact_width_utf8, [](std::string const& line) { return visible_columns(line) <= 20; }) &&
-             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("│  GPT-5.5") != std::string::npos; }),
+             std::ranges::any_of(exact_width_utf8, [](std::string const& line) { return strip_sgr(line).find("│  Build · GPT-5.5") != std::string::npos; }),
          "tui width fitting preserves the AVA composer surface at minimum width");
 
   auto const utf8 = ava::tui::render_composer(

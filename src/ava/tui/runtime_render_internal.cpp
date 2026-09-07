@@ -7,10 +7,38 @@
 #include <algorithm>
 #include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <string>
 #include <curses.h>
 
 namespace ava::tui {
+
+auto attention_sequence(AttentionEvent event) -> std::string_view
+{
+  switch (event)
+  {
+    case AttentionEvent::Approval:
+      return "\033]9;AVA needs approval\033\\";
+    case AttentionEvent::Question:
+      return "\033]9;AVA needs your answer\033\\";
+    case AttentionEvent::Finished:
+      return "\033]9;AVA finished\033\\";
+    case AttentionEvent::Failed:
+      return "\033]9;AVA run failed\033\\";
+  }
+  return {};
+}
+
+void request_attention(ComposerSnapshot const& snapshot, AttentionEvent event)
+{
+  if (!snapshot.attention_enabled)
+  {
+    return;
+  }
+  auto const sequence = attention_sequence(event);
+  static_cast<void>(std::fwrite(sequence.data(), 1, sequence.size(), stdout));
+  static_cast<void>(std::fflush(stdout));
+}
 
 SignalBlockGuard::SignalBlockGuard()
 {

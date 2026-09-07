@@ -593,12 +593,22 @@ int run_tui(ShellState state)
         SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
         return ava::session::import_image_attachment(session_w->store, source);
       },
-      .on_paste_clipboard_image = [&unlocked_session]() -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
+      .on_paste_clipboard_image =
+          [&unlocked_session](ava::tui::TuiClipboardPasteContext context) -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
         auto const [store, session_process_scope] = [&unlocked_session] {
           SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
           return std::pair{session_r->store, session_r->session_process_scope()};
         }();
-        return ava::app::import_clipboard_image_attachment(store, session_process_scope);
+        auto imported = ava::app::import_clipboard_image_attachment(store, session_process_scope);
+        if (!imported)
+          return std::unexpected(std::move(imported.error()));
+        if (!*imported || context.cancel_requested())
+          return std::optional<ava::session::ImageAttachmentRef>{};
+        SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
+        if (context.cancel_requested() || session_w->store.session_id() != context.session_id ||
+            session_w->store.session_path().string() != context.session_path)
+          return std::optional<ava::session::ImageAttachmentRef>{};
+        return std::optional<ava::session::ImageAttachmentRef>{std::move(**imported)};
       },
       .on_external_editor = [](std::string_view initial_text) -> ava::core::Result<std::optional<std::string>> {
         return edit_text_with_external_editor(initial_text);

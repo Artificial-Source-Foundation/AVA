@@ -2,6 +2,7 @@
 #include "tests/support/test_harness.h"
 #include "ava/agent/mode.h"
 #include "ava/tools/bash_tool.h"
+#include "ava/tools/edit_history.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/secure_workspace.h"
@@ -173,6 +174,120 @@ void test_mutation_queue_cleans_drained_path_entries()
     expect(queue.tracked_path_count() == 2, "mutation queue deduplicates normalized aliases while locked");
   }
   expect(queue.tracked_path_count() == 0, "mutation queue removes deduped multi-path entries after queued work drains");
+}
+
+void test_edit_history_restores_only_captured_turn()
+{
+  auto root = create_empty_root("edit_history_restore");
+  auto history = std::make_shared<ava::tools::EditHistory>();
+  ava::tools::ToolContext context{.workspace_dir = root, .mode = ava::agent::Mode::Build, .edit_history = history, .edit_turn_id = "turn-one"};
+  auto existing = root / "existing.txt";
+  auto added = root / "added.txt";
+  std::ofstream(existing) << "user's uncommitted work\n";
+  std::filesystem::permissions(existing, std::filesystem::perms::owner_all);
+  expect(ava::tools::write_file(context, existing, "first edit\n").has_value(), "history records first edit");
+  expect(ava::tools::write_file(context, existing, "second edit\n").has_value(), "history groups same-turn edits");
+  expect(ava::tools::write_file(context, added, "new file\n").has_value(), "history records newly created file");
+  expect(!history->undo(context), "undo requires preview before confirmation");
+  auto preview = history->preview(context);
+  expect(preview && preview->contains("user's uncommitted work") && preview->contains("/dev/null"),
+         "undo preview shows original dirty content and new file removal");
+  expect(history->undo(context).has_value() && read_text_file_for_test(existing) == "user's uncommitted work\n" && !std::filesystem::exists(added),
+         "undo restores pre-existing edits and removes captured new file");
+  expect((std::filesystem::status(existing).permissions() & std::filesystem::perms::owner_exec) != std::filesystem::perms::none,
+         "undo preserves executable mode of regular text files");
+  expect(!history->undo(context) && !history->preview(context), "undo confirmation is consumed and restored history is cleared");
+  context.edit_turn_id = "turn-two";
+  expect(ava::tools::write_file(context, existing, "turn two\n").has_value(), "second turn records");
+  context.edit_turn_id = "turn-three";
+  expect(ava::tools::write_file(context, existing, "turn three\n").has_value(), "third turn replaces undo scope");
+  expect(history->preview(context) && history->undo(context) && read_text_file_for_test(existing) == "turn two\n", "undo restores only latest editing turn");
+}
+
+void test_edit_history_refuses_conflicts_and_denials()
+{
+  auto root = create_empty_root("edit_history_conflict");
+  auto history = std::make_shared<ava::tools::EditHistory>();
+  ava::tools::ToolContext context{.workspace_dir = root, .mode = ava::agent::Mode::Build, .edit_history = history, .edit_turn_id = "conflict"};
+  auto first = root / "first.txt";
+  auto second = root / "second.txt";
+  std::ofstream(first) << "original one";
+  std::ofstream(second) << "original two";
+  expect(ava::tools::write_file(context, first, "edited one") && ava::tools::write_file(context, second, "edited two") && history->preview(context),
+         "prepare multi-file undo preview");
+  std::ofstream(second) << "later user edit";
+  auto conflict = history->undo(context);
+  expect(!conflict && read_text_file_for_test(first) == "edited one" && read_text_file_for_test(second) == "later user edit",
+         "preflight conflict refuses whole restore and preserves external changes");
+  context.edit_turn_id = "identity";
+  expect(ava::tools::write_file(context, first, "same bytes") && history->preview(context), "prepare identity replacement test");
+  std::ofstream(root / "replacement") << "same bytes";
+  std::filesystem::rename(root / "replacement", first);
+  expect(!history->undo(context) && read_text_file_for_test(first) == "same bytes", "identical-byte inode replacement refuses undo");
+  context.edit_turn_id = "permissions";
+  expect(ava::tools::write_file(context, first, "latest") && history->preview(context), "prepare permission-revalidation test");
+  auto denied = context;
+  denied.auto_allow_deny_preflight = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolutionDecision{ava::permissions::PermissionResolution::Deny, "synthetic current deny"};
+  };
+  expect(!history->undo(denied) && read_text_file_for_test(first) == "latest", "current deny still blocks undo");
+  expect(!history->preview(denied), "current read denial also prevents undo preview");
+  expect(!history->undo(context), "denied confirmation requires fresh preview");
+  auto plan = context;
+  plan.mode = ava::agent::Mode::Plan;
+  expect(history->preview(plan) && !history->undo(plan) && read_text_file_for_test(first) == "latest", "Plan mode cannot undo file edits");
+  expect(history->preview(context).has_value(), "permission denial did not destroy history");
+  expect(ava::tools::write_file(context, first, "another edit").has_value() && !history->undo(context), "new edit invalidates an old preview");
+}
+
+void test_edit_history_bounds_and_link_safety()
+{
+  auto root = create_empty_root("edit_history_bounds");
+  auto history = std::make_shared<ava::tools::EditHistory>();
+  ava::tools::ToolContext context{.workspace_dir = root, .mode = ava::agent::Mode::Build, .edit_history = history, .edit_turn_id = "binary"};
+  auto file = root / "file.txt";
+  std::ofstream(file, std::ios::binary).write("a\0b", 3);
+  expect(ava::tools::write_file(context, file, "text") && !history->preview(context), "uncapturable binary edit disables whole-turn undo");
+  context.edit_turn_id = "links";
+  std::filesystem::create_symlink(file, root / "link.txt");
+  expect(!ava::tools::EditHistory::capture(context, root / "link.txt"), "undo refuses symbolic-link snapshots");
+  std::filesystem::create_hard_link(file, root / "hard.txt");
+  expect(!ava::tools::EditHistory::capture(context, file), "undo refuses multiply linked file snapshots");
+  expect(!ava::tools::EditHistory::capture(context, root.parent_path() / "outside.txt"), "undo snapshot cannot leave its workspace");
+  std::filesystem::remove(root / "hard.txt");
+  context.edit_turn_id = "many";
+  bool writes_ok = true;
+  for (int index = 0; index < 33; ++index)
+  {
+    writes_ok = ava::tools::write_file(context, root / (std::to_string(index) + ".txt"), "bounded").has_value() && writes_ok;
+  }
+  expect(writes_ok && !history->preview(context), "file-count budget disables undo without blocking normal edits");
+  context.edit_turn_id = "large";
+  expect(ava::tools::write_file(context, file, std::string((1024 * 1024) + 1, 'x')) && !history->preview(context), "file-size budget fails undo closed");
+}
+
+void test_edit_history_retains_workspace_authority()
+{
+  auto root = create_empty_root("edit_history_anchor");
+  auto workspace = root / "workspace";
+  std::filesystem::create_directory(workspace);
+  auto anchors = ava::core::AnchorSet::open({workspace});
+  expect(anchors.has_value(), "open synthetic undo workspace anchor");
+  if (!anchors)
+  {
+    return;
+  }
+  auto history = std::make_shared<ava::tools::EditHistory>();
+  ava::tools::ToolContext context{
+      .workspace_dir = workspace, .mode = ava::agent::Mode::Build, .anchor_set = *anchors, .edit_history = history, .edit_turn_id = "anchor"};
+  std::ofstream(workspace / "file.txt") << "original";
+  expect(ava::tools::write_file(context, workspace / "file.txt", "edited") && history->preview(context), "capture anchored undo preview");
+  std::filesystem::rename(workspace, root / "moved");
+  std::filesystem::create_directory(workspace);
+  std::ofstream(workspace / "file.txt") << "replacement workspace";
+  expect(!history->undo(context) && read_text_file_for_test(workspace / "file.txt") == "replacement workspace" &&
+             read_text_file_for_test(root / "moved/file.txt") == "edited",
+         "changed workspace pathname refuses undo through original anchor");
 }
 
 void test_file_tools()
@@ -833,10 +948,18 @@ void test_permission_audit_persistence()
   }
 
   auto const exported = ava::session::format_session_markdown(audits);
-  expect(exported.find("## Permission Decision") != std::string::npos && exported.find("\"operation\":\"read\"") != std::string::npos &&
-             exported.find("\"risk\":\"high\"") != std::string::npos && exported.find("\"resolution_source\":\"resolver\"") != std::string::npos &&
-             exported.find("\"resolution_reason\":\"manual resolver denial\"") != std::string::npos,
-         "session export includes permission decision audit data");
+  expect(exported.find("## Permission Decision") == std::string::npos && exported.find("manual resolver denial") == std::string::npos,
+         "human-readable session export omits low-level permission audit data by default");
+  auto const exported_html = ava::session::format_session_html(audits);
+  expect(exported_html.find("## Permission Decision") == std::string::npos && exported_html.find("manual resolver denial") == std::string::npos,
+         "HTML session export omits low-level permission audit data by default");
+  auto const exported_with_permission_details = ava::session::format_session_markdown(audits, ava::session::ExportOptions{.include_permission_details = true});
+  expect(exported_with_permission_details.find("## Permission Decision") != std::string::npos &&
+             exported_with_permission_details.find("\"operation\":\"read\"") != std::string::npos &&
+             exported_with_permission_details.find("\"risk\":\"high\"") != std::string::npos &&
+             exported_with_permission_details.find("\"resolution_source\":\"resolver\"") != std::string::npos &&
+             exported_with_permission_details.find("\"resolution_reason\":\"manual resolver denial\"") != std::string::npos,
+         "explicit permission-detail export includes the full permission audit record");
 }
 
 void test_secure_workspace_staged_write_contracts()
@@ -1979,6 +2102,10 @@ void test_permission_user_guidance_propagation()
 void run_tools_file_tests()
 {
   test_mutation_queue_cleans_drained_path_entries();
+  test_edit_history_restores_only_captured_turn();
+  test_edit_history_refuses_conflicts_and_denials();
+  test_edit_history_bounds_and_link_safety();
+  test_edit_history_retains_workspace_authority();
   test_file_tools();
   test_permission_audit_persistence();
   test_secure_workspace_staged_write_contracts();

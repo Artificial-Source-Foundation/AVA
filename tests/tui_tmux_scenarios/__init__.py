@@ -23,9 +23,11 @@ from .main_question_flow import scenario_main_question_flow
 from .main_session_mgmt import scenario_main_session_mgmt
 from .main_paste_scrollback_attach import scenario_main_paste_scrollback_attach
 from .plugin_ui import scenario_plugin_ui
+from .lean_features import scenario_lean_features
 
 
 SCENARIOS = (
+    "lean_features",
     "suspend_resume",
     "keybind_conflict",
     "theme_env",
@@ -52,6 +54,7 @@ SCENARIOS = (
 )
 
 SCENARIO_HANDLERS = {
+    "lean_features": scenario_lean_features,
     "suspend_resume": scenario_suspend_resume,
     "keybind_conflict": scenario_keybind_conflict,
     "theme_env": scenario_theme_env,

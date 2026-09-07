@@ -32,7 +32,7 @@ void run_tui_transcript_tests_part_1()
                                                                                     .height = 8,
                                                                                     .tool_presentation = ava::tui::ToolPresentation::Compact});
   expect(multiline_input.size() == 8 && strip_sgr(multiline_input[5]).starts_with("│  first") && strip_sgr(multiline_input[6]).starts_with("│  second") &&
-             strip_sgr(multiline_input[7]).starts_with("│  GPT-5.5") && multiline_input[4].find("\x1b[48;2;26;31;46m") == std::string::npos &&
+             strip_sgr(multiline_input[7]).starts_with("│  Build · GPT-5.5") && multiline_input[4].find("\x1b[48;2;26;31;46m") == std::string::npos &&
              std::ranges::none_of(multiline_input, [](std::string const& line) { return strip_sgr(line).find("❯") != std::string::npos; }),
          "tui renders multiline input plus one footer with the same three-column prefix and no surface padding");
   auto const empty_composer_height = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
@@ -131,16 +131,17 @@ void run_tui_transcript_tests_part_1()
   auto const parity_160_max = ava::tui::composer_max_transcript_scroll_offset(parity_160_snapshot, parity_160_snapshot.width, parity_160_snapshot.height);
   auto const parity_120_frame = ava::tui::render_composer(parity_120_snapshot);
   auto const parity_160_frame = ava::tui::render_composer(parity_160_snapshot);
-  auto centered_frame_matches = parity_120_frame.size() == parity_160_frame.size();
-  for (std::size_t index = 0; centered_frame_matches && index < parity_120_frame.size(); ++index)
+  auto wide_frame_matches = parity_120_frame.size() == parity_160_frame.size();
+  for (std::size_t index = 0; wide_frame_matches && index < parity_120_frame.size(); ++index)
   {
     auto ordinary = strip_sgr(parity_120_frame[index]);
     ordinary.append(120 - std::min<std::size_t>(120, visible_columns(ordinary)), ' ');
     auto const wide = strip_sgr(parity_160_frame[index]);
-    centered_frame_matches = visible_columns(wide) == 160 && wide.size() >= 40 && wide.substr(20, wide.size() - 40) == ordinary;
+    wide_frame_matches =
+        visible_columns(wide) == 160 && wide.size() >= 40 && wide.substr(0, wide.size() - 40) == ordinary && wide.ends_with(std::string(40, ' '));
   }
-  expect(parity_160_max == parity_120_max && centered_frame_matches,
-         "tui 160-column centered transcript preserves exact 120-column wrapping, viewport, and max-scroll geometry");
+  expect(parity_160_max == parity_120_max && wide_frame_matches,
+         "tui 160-column left-aligned transcript preserves exact 120-column wrapping, viewport, and max-scroll geometry");
 
   auto const scrolled_up = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                 .provider = "openai",

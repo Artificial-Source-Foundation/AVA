@@ -12,6 +12,7 @@
 #include "ava/session/session_store.h"
 #include "ava/session/stats.h"
 #include "ava/session/validation.h"
+#include "ava/core/json.h"
 
 #include <algorithm>
 #include <filesystem>
@@ -41,10 +42,25 @@ void app_command_dispatcher_session_part(ava::app::runtime::session_ts& unlocked
   auto load_entries = [&] { return ava::app::runtime::session_ts::rat(unlocked_session)->store.load(); };
   auto append_owned = [&](ava::session::SessionEntry entry) { return ava::app::runtime::session_ts::wat(unlocked_session)->append_owned(std::move(entry)); };
 
+  std::string const markdown_transcript_message =
+      "# Command export heading\n\nReadable **prose**.\n\n```json\n{\"unchanged\":true,\"value\":\"**literal**\"}\n```";
+  auto seeded_markdown_message =
+      append_owned(ava::session::SessionEntry{.id = "entry_command_export_markdown",
+                                              .parent_id = "",
+                                              .type = ava::session::EntryType::UserMessage,
+                                              .timestamp = "2026-07-20T00:00:00Z",
+                                              .data_json = "{\"text\":\"" + ava::core::json::escape(markdown_transcript_message) + "\"}"});
+  expect(seeded_markdown_message.has_value(), "command dispatcher export test seeds Markdown message content");
+
   auto exported = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export"});
   expect(exported && exported->handled && !exported->output.empty() && exported->output[0].find("# AVA Session Export") != std::string::npos &&
-             exported->output[0].find("## Compaction") != std::string::npos,
+             exported->output[0].find("## Compaction") != std::string::npos &&
+             exported->output[0].find("Message:\n\n" + markdown_transcript_message + "\n\n") != std::string::npos,
          "command dispatcher /export returns markdown for loaded session entries");
+  auto clipboard_markdown = ava::app::read_session_markdown(unlocked_session);
+  expect(clipboard_markdown && exported && !exported->output.empty() && *clipboard_markdown == exported->output.front() &&
+             clipboard_markdown->find("## Permission Decision") == std::string::npos,
+         "clipboard Markdown uses the same authorized, sanitized session projection as file exports");
   auto exported_html = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export html"});
   expect(exported_html && exported_html->handled && !exported_html->output.empty() && exported_html->output[0].find("<!doctype html>") != std::string::npos &&
              exported_html->output[0].find("<title>AVA Session Export</title>") != std::string::npos &&
@@ -59,8 +75,10 @@ void app_command_dispatcher_session_part(ava::app::runtime::session_ts& unlocked
              exported_html_file->output[0].find("format: html") != std::string::npos && exported_html_file->tool_timeline.size() == 2 &&
              exported_html_file->tool_timeline[1].status == ava::agent::ToolTimelineStatus::Success &&
              exported_html_file->tool_timeline[1].structured_result_json.find("\"tool\":\"export\"") != std::string::npos &&
-             exported_html_file_text.str().find("<!doctype html>") != std::string::npos &&
-             exported_html_file_text.str().find("# AVA Session Export") != std::string::npos,
+             exported_html_file_text.str() == exported_html->output[0] && exported_html_file_text.str().find("<!doctype html>") != std::string::npos &&
+             exported_html_file_text.str().find("# AVA Session Export") != std::string::npos &&
+             exported_html_file_text.str().find("# Command export heading") != std::string::npos &&
+             exported_html_file_text.str().find("&quot;unchanged&quot;:true") != std::string::npos,
          "command dispatcher /export <file.html> writes Pi-style HTML through command-side tool metadata");
   auto exported_markdown_file = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export markdown session-export.md"});
   auto const exported_markdown_path = workspace / "session-export.md";
@@ -68,8 +86,12 @@ void app_command_dispatcher_session_part(ava::app::runtime::session_ts& unlocked
   std::ostringstream exported_markdown_file_text;
   exported_markdown_file_text << exported_markdown_input.rdbuf();
   expect(exported_markdown_file && exported_markdown_file->handled && !exported_markdown_file->output.empty() &&
-             exported_markdown_file->output[0].find("format: markdown") != std::string::npos &&
+             exported_markdown_file->output[0].find("format: markdown") != std::string::npos && exported_markdown_file_text.str() == exported->output[0] &&
              exported_markdown_file_text.str().find("# AVA Session Export") != std::string::npos &&
+             exported_markdown_file_text.str().find("Message:\n\n" + markdown_transcript_message + "\n\n") != std::string::npos &&
+             exported_markdown_file_text.str().find("```text\n# Command export heading") == std::string::npos &&
+             exported_markdown_file_text.str().find("\\# Command export heading") == std::string::npos &&
+             exported_markdown_file_text.str().find("## Permission Decision") == std::string::npos &&
              exported_markdown_file_text.str().find("<!doctype html>") == std::string::npos,
          "command dispatcher /export markdown <path> keeps explicit Markdown file export available");
   auto exported_jsonl_file = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = "/export jsonl session-export.jsonl"});
@@ -77,10 +99,29 @@ void app_command_dispatcher_session_part(ava::app::runtime::session_ts& unlocked
   std::ifstream exported_jsonl_input(exported_jsonl_path, std::ios::binary);
   std::ostringstream exported_jsonl_file_text;
   exported_jsonl_file_text << exported_jsonl_input.rdbuf();
+  bool markdown_jsonl_roundtrip = false;
+  bool permission_jsonl_retained = false;
+  std::istringstream exported_jsonl_lines(exported_jsonl_file_text.str());
+  for (std::string line; std::getline(exported_jsonl_lines, line);)
+  {
+    auto parsed = ava::session::parse_session_entry_line(line, exported_jsonl_path.string());
+    if (parsed && parsed->id == "entry_command_export_markdown")
+      markdown_jsonl_roundtrip = ava::core::json::string_field(parsed->data_json, "text") == markdown_transcript_message;
+    if (parsed && parsed->type == ava::session::EntryType::PermissionDecision &&
+        ava::core::json::string_field(parsed->data_json, "permission_request_id") == "permreq_runtime_deny")
+    {
+      permission_jsonl_retained = ava::core::json::string_field(parsed->data_json, "operation") == "bash" &&
+                                  ava::core::json::string_field(parsed->data_json, "action") == "deny" &&
+                                  ava::core::json::string_field(parsed->data_json, "resolution") == "deny" &&
+                                  ava::core::json::string_field(parsed->data_json, "resolution_source") == "policy";
+    }
+  }
   expect(exported_jsonl_file && exported_jsonl_file->handled && !exported_jsonl_file->output.empty() &&
              exported_jsonl_file->output[0].find("format: jsonl") != std::string::npos &&
-             exported_jsonl_file_text.str().find("\"type\":\"session_start\"") != std::string::npos,
-         "command dispatcher /export jsonl <path> writes a raw AVA session JSONL archive");
+             exported_jsonl_file_text.str().find("\"type\":\"session_start\"") != std::string::npos &&
+             exported_jsonl_file_text.str().find("\"type\":\"permission_decision\"") != std::string::npos && markdown_jsonl_roundtrip &&
+             permission_jsonl_retained,
+         "command dispatcher /export jsonl <path> retains audit entries and losslessly round-trips Markdown message text");
 
   auto const pre_failed_import_session_id = session_id();
   auto const empty_import_path = workspace / "empty-import.jsonl";

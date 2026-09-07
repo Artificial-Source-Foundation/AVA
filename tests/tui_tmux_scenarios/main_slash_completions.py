@@ -40,7 +40,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         return min(width, 120)
 
     def f3_canvas_left(width: int, height: int) -> int:
-        return 0 if width >= 176 and height >= 16 else (width - f3_main_width(width, height)) // 2
+        return 0
 
     def assert_f3_frame(
         screen: str, width: int, height: int, label: str, *, palette_visible: bool, cursor_column: str
@@ -62,7 +62,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
         footer = lines[height - 1][canvas_left : canvas_left + main_width]
         if not input_line.startswith("│  /") or not footer.startswith("│  "):
             raise RuntimeError(f"{label} did not place the slash input/footer on rows {height - 1}/{height}\nscreen:\n{screen}")
-        if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer[3:].strip()):
+        if not re.fullmatch(rf"Build · GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer[3:].strip()):
             raise RuntimeError(f"{label} footer exposed text beyond model/context\nscreen:\n{screen}")
         candidate_lines = [
             line[canvas_left : canvas_left + main_width]
@@ -76,7 +76,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
             raise RuntimeError(f"{label} retained slash palette candidates after dismissal\nscreen:\n{screen}")
         expected_cursor_column = str(int(cursor_column) + canvas_left)
         if pane_cursor_position(tmux_exe, session).split(",", 1)[0] != expected_cursor_column:
-            raise RuntimeError(f"{label} did not preserve the centered composer cursor column\nscreen:\n{screen}")
+            raise RuntimeError(f"{label} did not preserve the left-aligned composer cursor column\nscreen:\n{screen}")
 
     def wait_for_f3_composer_reflow(width: int, height: int, label: str, *, palette_visible: bool) -> str:
         """Wait for AVA's compositor, not tmux's immediate stale resize reflow."""
@@ -94,7 +94,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
             footer_ready = (
                 len(lines) == height
                 and lines[height - 1][canvas_left : canvas_left + main_width].startswith("│  ")
-                and re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", lines[height - 1][canvas_left : canvas_left + main_width][3:].strip()) is not None
+                and re.fullmatch(rf"Build · GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", lines[height - 1][canvas_left : canvas_left + main_width][3:].strip()) is not None
             )
             palette_ready = any(
                 re.match(r"│  [› ]+ /", line[canvas_left : canvas_left + main_width])
@@ -133,11 +133,11 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     palette = wait_for_f3_composer_reflow(120, 36, "F3 ordinary slash palette reopened", palette_visible=True)
     assert_f3_frame(palette, 120, 36, "F3 ordinary slash palette reopened", palette_visible=True, cursor_column=cursor_column_before_resize)
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "160", "-y", "36")
-    wide_palette = wait_for_f3_composer_reflow(160, 36, "F3 centered wide slash palette", palette_visible=True)
-    assert_f3_frame(wide_palette, 160, 36, "F3 centered wide slash palette", palette_visible=True, cursor_column=cursor_column_before_resize)
+    wide_palette = wait_for_f3_composer_reflow(160, 36, "F3 left-aligned wide slash palette", palette_visible=True)
+    assert_f3_frame(wide_palette, 160, 36, "F3 left-aligned wide slash palette", palette_visible=True, cursor_column=cursor_column_before_resize)
     wide_lines = wide_palette.splitlines()
-    if not wide_lines[34].startswith(" " * 20 + "│  /") or not wide_lines[35].startswith(" " * 20 + "│  "):
-        raise RuntimeError(f"wide slash palette did not retain the exact 20-column canvas inset\nscreen:\n{wide_palette}")
+    if not wide_lines[34].startswith("│  /") or not wide_lines[35].startswith("│  "):
+        raise RuntimeError(f"wide slash palette did not retain the left-aligned composer and mode row\nscreen:\n{wide_palette}")
     help_target = next(
         ((index + 1, line.index("/help") + 1) for index, line in enumerate(wide_lines) if "/help" in line),
         None,
@@ -149,7 +149,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     clicked_help = wait_for(tmux_exe, session, r"│  /help(?:\s|$)", "derived wide SGR slash palette mouse click")
     if "/help" not in clicked_help:
         raise RuntimeError(f"derived wide SGR mouse click did not select the slash palette row\nscreen:\n{clicked_help}")
-    save_evidence(root, "frontend-f3-slash-centered-160x36", wide_palette)
+    save_evidence(root, "frontend-f3-slash-left-aligned-160x36", wide_palette)
 
     send_keys(tmux_exe, session, "C-u")
     send_literal(tmux_exe, session, "/")

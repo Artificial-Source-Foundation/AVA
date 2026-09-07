@@ -10,6 +10,7 @@
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
+#include "ava/core/thread.h"
 
 #include <cerrno>
 #include <chrono>
@@ -102,6 +103,14 @@ RuntimeActionController::RuntimeActionController(TuiRuntimeOptions& options, Run
 {
 }
 
+RuntimeActionController::~RuntimeActionController()
+{
+  cancel_clipboard_image();
+  // Never detach callbacks that capture the application session or this controller.
+  if (clipboard_image_future_.valid())
+    clipboard_image_future_.wait();
+}
+
 DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_settings()
 {
   if (!options_.on_maybe_reload_display_settings)
@@ -147,6 +156,7 @@ DisplaySettingsReloadPollOutcome RuntimeActionController::maybe_reload_display_s
 
 bool RuntimeActionController::clear_draft_for_interrupt()
 {
+  cancel_clipboard_image();
   draft_state_.pending_escape_clear = false;
   draft_state_.jump_mode = ComposerJumpMode::None;
   draft_state_.history_index.reset();
@@ -264,6 +274,14 @@ bool RuntimeActionController::suspend_to_background()
 
 bool RuntimeActionController::queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status)
 {
+  auto const capabilities = active_terminal_image_capabilities();
+  auto preview = attachment_preview(imported, capabilities, presentation_state_.snapshot.show_images, options_.on_load_image_attachment);
+  return append_pending_image_attachment(imported, std::move(label), std::move(status), std::move(preview));
+}
+
+bool RuntimeActionController::append_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
+                                                              std::optional<PendingAttachmentItem::Preview> preview)
+{
   if (label.empty())
     label = imported.id;
   auto& snapshot = presentation_state_.snapshot;
@@ -271,9 +289,10 @@ bool RuntimeActionController::queue_pending_image_attachment(ava::session::Image
   auto detail = attachment_detail(imported, image_capabilities);
   if (!snapshot.show_images)
     detail += " (hidden)";
-  auto const preview = attachment_preview(imported, image_capabilities, snapshot.show_images, options_.on_load_image_attachment);
+  if (!snapshot.show_images || (preview && preview->protocol != image_capabilities.images))
+    preview.reset();
   presentation_state_.pending_image_attachments.push_back(imported);
-  snapshot.pending_attachments.push_back(PendingAttachmentItem{.label = label, .detail = detail, .preview = preview});
+  snapshot.pending_attachments.push_back(PendingAttachmentItem{.label = label, .detail = detail, .preview = std::move(preview)});
   settle_local_command_status(snapshot, std::move(status));
   return renderer_.render();
 }
@@ -281,6 +300,11 @@ bool RuntimeActionController::queue_pending_image_attachment(ava::session::Image
 bool RuntimeActionController::paste_clipboard_image()
 {
   auto& snapshot = presentation_state_.snapshot;
+  if (clipboard_image_future_.valid())
+  {
+    snapshot.status = "clipboard image paste already in progress";
+    return renderer_.request_render();
+  }
   draft_state_.pending_escape_clear = false;
   draft_state_.jump_mode = ComposerJumpMode::None;
   draft_state_.history_index.reset();
@@ -300,7 +324,73 @@ bool RuntimeActionController::paste_clipboard_image()
   if (!renderer_.render())
     return false;
 
-  auto imported = options_.on_paste_clipboard_image();
+  clipboard_session_id_ = snapshot.session_id;
+  clipboard_session_path_ = presentation_state_.sidebar.session_path;
+  clipboard_image_cancelled_.store(false);
+  TuiClipboardPasteContext context{
+      .session_id = clipboard_session_id_, .session_path = clipboard_session_path_, .cancel_requested = [this]() { return clipboard_image_cancelled_.load(); }};
+  auto const capabilities = active_terminal_image_capabilities();
+  auto const show_images = snapshot.show_images;
+  try
+  {
+    clipboard_image_future_ = ava::core::make_async(
+        "clipboard_image",
+        [callback = options_.on_paste_clipboard_image, load_image = options_.on_load_image_attachment, context = std::move(context), capabilities,
+         show_images]() mutable -> ClipboardImageResult {
+          auto imported = callback(context);
+          if (!imported)
+            return std::unexpected(std::move(imported.error()));
+          if (!*imported || context.cancel_requested())
+            return std::optional<PendingClipboardImage>{};
+          auto preview = attachment_preview(**imported, capabilities, show_images, load_image);
+          return std::optional<PendingClipboardImage>{PendingClipboardImage{.attachment = std::move(**imported), .preview = std::move(preview)}};
+        });
+  }
+  catch (...)
+  {
+    snapshot.status = "could not start clipboard image paste";
+    static_cast<void>(beep());
+    return renderer_.request_render();
+  }
+  return true;
+}
+
+bool RuntimeActionController::clipboard_image_pending() const
+{
+  return clipboard_image_future_.valid();
+}
+
+bool RuntimeActionController::clipboard_image_blocks_submit() const
+{
+  auto const& snapshot = presentation_state_.snapshot;
+  return clipboard_image_future_.valid() && !clipboard_image_cancelled_.load() && snapshot.session_id == clipboard_session_id_ &&
+         presentation_state_.sidebar.session_path == clipboard_session_path_;
+}
+
+void RuntimeActionController::cancel_clipboard_image()
+{
+  clipboard_image_cancelled_.store(true);
+}
+
+bool RuntimeActionController::poll_clipboard_image()
+{
+  if (!clipboard_image_future_.valid())
+    return true;
+  auto& snapshot = presentation_state_.snapshot;
+  if (snapshot.session_id != clipboard_session_id_ || presentation_state_.sidebar.session_path != clipboard_session_path_)
+    cancel_clipboard_image();
+  if (clipboard_image_future_.wait_for(std::chrono::milliseconds::zero()) != std::future_status::ready)
+    return true;
+  ClipboardImageResult imported = std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "clipboard image paste failed"));
+  try
+  {
+    imported = clipboard_image_future_.get();
+  }
+  catch (...)
+  {
+  }
+  if (clipboard_image_cancelled_.load())
+    return true;
   if (!imported)
   {
     snapshot.status = imported.error().format();
@@ -313,7 +403,7 @@ bool RuntimeActionController::paste_clipboard_image()
     static_cast<void>(beep());
     return renderer_.render();
   }
-  return queue_pending_image_attachment(**imported, "clipboard image", "pasted clipboard image for next prompt");
+  return append_pending_image_attachment((**imported).attachment, "clipboard image", "pasted clipboard image for next prompt", std::move((**imported).preview));
 }
 
 bool RuntimeActionController::copy_latest_assistant_message()

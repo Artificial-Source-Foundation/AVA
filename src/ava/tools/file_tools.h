@@ -31,6 +31,11 @@ namespace ava::tools {
 
 class MutationQueue;
 class SecureWorkspace;
+class EditHistory;
+
+// Non-interactive read-policy check for optional edit snapshots. Never acquires
+// read authority merely because a write was approved.
+[[nodiscard]] auto can_read_file_for_edit_snapshot(struct ToolContext const& context, std::filesystem::path const& path) -> ava::core::Result<bool>;
 
 struct PermissionAuditEvent
 {
@@ -142,6 +147,9 @@ struct ToolContext
   // debug printing only emits the pointer identity, never the guidance text.
   std::shared_ptr<PermissionDenialGuidanceCapture> permission_denial_guidance_capture = nullptr;
   std::shared_ptr<MutationQueue> mutation_queue = nullptr;
+  // Session journal is shared only by workers in the same native editing turn.
+  std::shared_ptr<EditHistory> edit_history = nullptr;
+  std::string edit_turn_id;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::filesystem::path plugin_global_plugins_dir = {};
   std::filesystem::path plugin_project_plugins_dir = {};

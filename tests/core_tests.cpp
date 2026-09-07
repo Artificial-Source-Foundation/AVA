@@ -21,6 +21,7 @@
 #include "debug.h"
 
 void run_core_mode_tests();
+void run_native_clipboard_tests();
 void run_test_harness_tests();
 void run_diagnostics_tests();
 void run_acp_tests();
@@ -103,6 +104,7 @@ constexpr std::array kTestSuites{
     TestSuite{"macos_command_security", run_macos_command_security_tests},
 #endif
     TestSuite{"core_mode", run_core_mode_tests},
+    TestSuite{"native_clipboard", run_native_clipboard_tests},
     TestSuite{"test_harness", run_test_harness_tests},
     TestSuite{"diagnostics", run_diagnostics_tests},
     TestSuite{"acp", run_acp_tests},
@@ -227,6 +229,8 @@ int main(int argc, char** argv)
   // Keep GlobalObjectManager's transition to main as the first operation.
   GlobalObjectManager::main_entered();
 #endif
+
+  ScopedEnvVar clipboard_backend("AVA_CLIPBOARD_BACKEND", "terminal");
 
 #ifdef __APPLE__
   // macOS advertises a symlinked, per-user TMPDIR whose ctime is shared by all

@@ -44,6 +44,16 @@ std::ptrdiff_t push_fallback_assistant_outputs(ComposerSnapshot& snapshot, std::
 // TMUX value adds exactly one escaped tmux DCS passthrough copy after the raw
 // sequence; the value itself is never included in terminal output.
 [[nodiscard]] std::optional<std::string> try_build_osc52_clipboard_transport(std::string_view text, std::optional<std::string_view> tmux);
+enum class ClipboardCopyResult
+{
+  Copied,
+  RequestSent,
+  Oversize,
+  WriteFailure,
+};
+[[nodiscard]] ClipboardCopyResult copy_text_to_clipboard_result(std::string_view text);
+// Compatibility writer for existing copy actions: native on local macOS,
+// OSC52 elsewhere. The detailed result distinguishes confirmed native copies.
 [[nodiscard]] bool copy_text_to_terminal_clipboard(std::string_view text);
 [[nodiscard]] std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer);
 [[nodiscard]] std::optional<std::string> latest_ava_message_copy_text(std::vector<TranscriptItem> const& transcript);

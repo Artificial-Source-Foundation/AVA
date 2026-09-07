@@ -88,7 +88,7 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   expect(tool_item != nullptr && tool_item->hint == "[query]" && has_alias(*tool_item, "/tools") &&
              tool_item->description.find("latest or matching tool details") != std::string::npos,
          "slash catalog exposes /tool for visible TUI tool-card inspection");
-  expect(diff_item != nullptr && diff_item->hint == "[query]" && diff_item->description.find("latest or matching tool diff") != std::string::npos,
+  expect(diff_item != nullptr && diff_item->hint == "[all|query]" && diff_item->description.contains("recorded file changes"),
          "slash catalog exposes /diff for visible TUI tool-diff inspection");
   expect(copy_item != nullptr && copy_item->hint.empty() && copy_item->description.find("latest AVA message") != std::string::npos &&
              copy_item->description.find("user turn") != std::string::npos && copy_item->description.find("tool") != std::string::npos &&

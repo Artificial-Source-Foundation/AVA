@@ -21,6 +21,8 @@ struct CommandOutputInputResult
 {
   CommandOutputInputAction action = CommandOutputInputAction::None;
   std::size_t scroll_offset = 0;
+  std::optional<std::size_t> review_index = std::nullopt;
+  bool toggle_reviewed = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -71,6 +73,8 @@ void remove_literal_command_invocation(std::vector<TranscriptItem>& items, std::
                                                          std::vector<ToolTimelineItem> const& tools = {});
 void open_command_output(ComposerSnapshot& snapshot, std::string_view submitted, std::vector<std::string> output, std::vector<ToolTimelineItem> tools = {});
 void open_command_error(ComposerSnapshot& snapshot, std::string_view submitted, std::string error);
+void open_change_review(ComposerSnapshot& snapshot);
+void apply_command_output_input(CommandOutputView& view, CommandOutputInputResult const& input);
 void settle_local_command_status(ComposerSnapshot& snapshot, std::string status);
 void settle_local_command_completion(ComposerSnapshot& snapshot, std::string_view submitted, std::vector<std::string> output,
                                      std::vector<ToolTimelineItem> tools = {}, bool record_tools = true);

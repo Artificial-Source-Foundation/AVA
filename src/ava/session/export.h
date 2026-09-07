@@ -13,6 +13,11 @@ struct ExportOptions
   bool include_tool_details = false;
   bool include_metadata = false;
   bool include_compactions = true;
+  // Human-readable exports omit provider reasoning and permission audit data
+  // unless explicitly requested. Portable JSONL is unaffected by these
+  // presentation options and retains its sanitized audit/replay records.
+  bool include_reasoning_content = false;
+  bool include_permission_details = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

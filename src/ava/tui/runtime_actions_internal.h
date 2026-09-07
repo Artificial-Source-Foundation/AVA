@@ -3,8 +3,10 @@
 #include "ava/tui/runtime.h"
 #include "ava/tui/runtime_state_internal.h"
 
+#include <atomic>
 #include <chrono>
 #include <functional>
+#include <future>
 #include <optional>
 #include <string>
 #include "debug.h"
@@ -24,6 +26,7 @@ class RuntimeActionController final
  public:
   RuntimeActionController(TuiRuntimeOptions& options, RuntimePresentationState& presentation_state, RuntimeDraftState& draft_state, RuntimeRenderer& renderer,
                           ActiveSelectList& active_select_list, std::optional<PendingSessionArchiveAction>& session_archive_confirmation);
+  ~RuntimeActionController();
   RuntimeActionController(RuntimeActionController const&) = delete;
   RuntimeActionController& operator=(RuntimeActionController const&) = delete;
 
@@ -36,6 +39,10 @@ class RuntimeActionController final
   [[nodiscard]] bool suspend_to_background();
   [[nodiscard]] bool queue_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status);
   [[nodiscard]] bool paste_clipboard_image();
+  [[nodiscard]] bool poll_clipboard_image();
+  [[nodiscard]] bool clipboard_image_pending() const;
+  [[nodiscard]] bool clipboard_image_blocks_submit() const;
+  void cancel_clipboard_image();
   [[nodiscard]] bool copy_latest_assistant_message();
   void cycle_reasoning();
   void toggle_thinking_visibility();
@@ -63,6 +70,19 @@ class RuntimeActionController final
   std::optional<PendingSessionArchiveAction>& session_archive_confirmation_;
   std::chrono::steady_clock::time_point next_display_reload_check_;
   std::optional<std::string> last_display_reload_error_;
+  struct PendingClipboardImage
+  {
+    ava::session::ImageAttachmentRef attachment;
+    std::optional<PendingAttachmentItem::Preview> preview;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  };
+  using ClipboardImageResult = ava::core::Result<std::optional<PendingClipboardImage>>;
+  std::future<ClipboardImageResult> clipboard_image_future_;
+  std::atomic<bool> clipboard_image_cancelled_{false};
+  std::string clipboard_session_id_;
+  std::string clipboard_session_path_;
+  [[nodiscard]] bool append_pending_image_attachment(ava::session::ImageAttachmentRef const& imported, std::string label, std::string status,
+                                                     std::optional<PendingAttachmentItem::Preview> preview);
 };
 
 }  // namespace ava::tui

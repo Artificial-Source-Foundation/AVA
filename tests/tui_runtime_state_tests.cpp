@@ -1627,7 +1627,7 @@ void test_tui_active_nonblocking_command_lane()
     ++callback_calls;
     return std::vector<std::string>{"promoted without modal"};
   };
-  queues.queue_follow_up = [&queue_calls](std::string) -> ava::core::VoidResult {
+  queues.queue_follow_up = [&queue_calls](std::string, std::vector<ava::session::ImageAttachmentRef>) -> ava::core::VoidResult {
     ++queue_calls;
     return {};
   };

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/debug/print_members_on.h"
 #include "ava/event/events.h"
 #include "ava/agent/question.h"
 #include "ava/agent/subagent_launch.h"
@@ -25,16 +26,18 @@ struct TuiQueuedFollowUp
 {
   std::string request_id;
   std::string message;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiRestoredQueuedMessage
 {
   std::string message;
   bool steering = false;
+  std::vector<ava::session::ImageAttachmentRef> image_attachments = {};
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct TuiRememberedPermissionRule
@@ -88,12 +91,15 @@ struct TuiActiveRunQueues
 {
   std::string active_request_id;
   std::function<ava::core::VoidResult(std::string)> queue_steering;
-  std::function<ava::core::VoidResult(std::string)> queue_follow_up;
+  std::function<ava::core::VoidResult(std::string, std::vector<ava::session::ImageAttachmentRef>)> queue_follow_up;
   std::function<ava::core::Result<std::vector<std::string>>()> take_steering_messages;
   std::function<ava::core::VoidResult(std::string_view)> skip_active_steering;
   std::function<std::optional<TuiQueuedFollowUp>()> take_next_follow_up;
   std::function<ava::core::VoidResult(TuiQueuedFollowUp const&)> mark_follow_up_started;
   std::function<ava::core::Result<TuiRestoredQueuedMessage>()> restore_latest;
+  std::function<SelectListView()> pending_selector;
+  std::function<ava::core::Result<TuiRestoredQueuedMessage>(std::string_view)> restore_pending;
+  std::function<ava::core::VoidResult(std::string_view)> remove_pending;
   // Bound to the exact active session before its submit worker starts. A
   // disengaged result leaves ordinary active-run queue behavior unchanged.
   std::function<std::optional<std::vector<std::string>>(std::string const&)> run_nonblocking_command;
@@ -157,6 +163,9 @@ struct TuiSubmitResult
   // RuntimeEvents transcript authority. Missing ids always fail closed.
   std::vector<std::string> ordinary_turn_request_ids;
   std::optional<TuiLocalCommandResult> local_command_result = std::nullopt;
+  // Explicit local export only; never inferred from provider or tool output.
+  // Prepared off the render thread, consumed once by terminal presentation.
+  std::optional<std::string> clipboard_markdown = std::nullopt;
   std::vector<std::string> conversation_output;
   std::vector<ToolTimelineItem> conversation_tool_timeline;
   std::optional<std::size_t> context_source_count = std::nullopt;
@@ -293,6 +302,15 @@ struct TuiBranchSummarySnapshot
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
+struct TuiClipboardPasteContext
+{
+  std::string session_id;
+  std::string session_path;
+  std::function<bool()> cancel_requested;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 struct TuiRuntimeOptions
 {
   std::string mode;
@@ -326,7 +344,9 @@ struct TuiRuntimeOptions
   std::function<TuiActiveRunQueues(ava::event::EventEnvelopeSink)> create_active_run_queues;
   std::function<TuiSubmitResult(std::string const&, TuiSubmitContext)> on_submit;
   std::function<ava::core::Result<ava::session::ImageAttachmentRef>(std::string const&)> on_attach_image;
-  std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>()> on_paste_clipboard_image;
+  // Runs on a joined worker. Recheck the bound session and cancellation before
+  // persisting clipboard bytes; it may complete after a session transition.
+  std::function<ava::core::Result<std::optional<ava::session::ImageAttachmentRef>>(TuiClipboardPasteContext)> on_paste_clipboard_image;
   std::function<ava::core::Result<std::optional<std::string>>(std::string_view)> on_external_editor;
   std::function<ava::core::Result<ava::session::LoadedImageAttachment>(ava::session::ImageAttachmentRef const&)> on_load_image_attachment;
   std::function<ava::core::Result<std::string>()> on_toggle_mode;

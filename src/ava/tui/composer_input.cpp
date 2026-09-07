@@ -181,7 +181,28 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
     auto const bar_columns = terminal_text_columns(line);
     if (budget <= bar_columns)
       return fit_line_preserving_sgr(std::move(line), budget);
-    auto const content_budget = budget - bar_columns;
+    auto content_budget = budget - bar_columns;
+    auto mode = sanitize_terminal_text(snapshot.mode);
+    if (snapshot.mode == "plan")
+    {
+      mode = "Plan";
+    }
+    else if (snapshot.mode == "build")
+    {
+      mode = "Build";
+    }
+    if (!mode.empty())
+    {
+      auto const mode_style = snapshot.mode == "plan" ? kSgrWarning : kSgrAccent;
+      line += fit_line_preserving_sgr(std::string(kSgrBold) + std::string(mode_style) + mode + std::string(kSgrReset), content_budget);
+      line += std::string(kSgrScreenBg);
+      auto const used = std::min(content_budget, terminal_text_columns(mode));
+      content_budget -= used;
+      if (content_budget < 4)
+        return fit_line_preserving_sgr(std::move(line), budget);
+      line += " " + std::string(kSgrMuted) + "·" + std::string(kSgrReset) + std::string(kSgrScreenBg) + " ";
+      content_budget -= 3;
+    }
 
     auto append_fitted_model = [&](std::size_t model_budget) {
       if (model.empty() || model_budget == 0)

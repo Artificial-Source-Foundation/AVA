@@ -415,9 +415,18 @@ std::string queue_event_reason_text(std::string_view name, std::string_view reas
   return std::string(reason);
 }
 
+std::string queue_event_message(ava::event::EventEnvelope const& envelope)
+{
+  auto message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
+  auto const count = size_field(envelope.payload_json, "image_count");
+  if (count > 0)
+    message += " [" + std::to_string(count) + (count == 1 ? " image]" : " images]");
+  return message;
+}
+
 std::string queue_event_detail(ava::event::EventEnvelope const& envelope)
 {
-  auto const message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
+  auto const message = queue_event_message(envelope);
   auto const reason = ava::core::json::string_field(envelope.payload_json, "reason").value_or("");
   auto detail = queue_event_label(envelope.name);
   if (!reason.empty())
@@ -443,7 +452,7 @@ std::string queue_event_id(ava::event::EventEnvelope const& envelope)
 void upsert_queued_message(TuiEventState& state, ava::event::EventEnvelope const& envelope)
 {
   auto const id = queue_event_id(envelope);
-  auto const message = ava::core::json::string_field(envelope.payload_json, "message").value_or("");
+  auto const message = queue_event_message(envelope);
   if (id.empty() || message.empty())
     return;
   auto const kind = envelope.name.starts_with("steer") ? std::string("steer") : std::string("follow-up");

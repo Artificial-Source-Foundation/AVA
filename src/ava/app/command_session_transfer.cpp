@@ -560,6 +560,14 @@ ava::core::Result<CommandResult> run_recover_persistence_command(runtime::sessio
   return result;
 }
 
+ava::core::Result<std::string> read_session_markdown(runtime::session_ts const& unlocked_session)
+{
+  auto entries = load_runtime_entries(unlocked_session);
+  if (!entries)
+    return std::unexpected(std::move(entries.error()));
+  return ava::session::format_session_markdown_checked(*entries);
+}
+
 ava::core::Result<CommandResult> run_export_command(runtime::session_ts& unlocked_session, CommandRequest const& request)
 {
   CommandResult result;

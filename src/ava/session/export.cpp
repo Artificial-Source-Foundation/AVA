@@ -73,7 +73,7 @@ std::string fence_for(std::string_view text)
   return std::string(std::max<std::size_t>(3, longest_backtick_run(text) + 1), '`');
 }
 
-std::string sanitize_fenced_content(std::string_view content)
+std::string sanitize_export_content(std::string_view content)
 {
   std::string sanitized;
   sanitized.reserve(content.size());
@@ -95,6 +95,51 @@ std::string sanitize_fenced_content(std::string_view content)
   return sanitized;
 }
 
+std::optional<std::string> unclosed_markdown_fence(std::string_view content)
+{
+  std::optional<std::pair<char, std::size_t>> open_fence;
+  for (std::size_t line_start = 0; line_start < content.size();)
+  {
+    auto const newline = content.find('\n', line_start);
+    auto const line_end = newline == std::string_view::npos ? content.size() : newline;
+    auto const line = content.substr(line_start, line_end - line_start);
+
+    std::size_t marker_start = 0;
+    while (marker_start < line.size() && marker_start < 4 && line[marker_start] == ' ')
+      ++marker_start;
+    if (marker_start < 4 && marker_start < line.size() && (line[marker_start] == '`' || line[marker_start] == '~'))
+    {
+      char const marker = line[marker_start];
+      std::size_t marker_end = marker_start;
+      while (marker_end < line.size() && line[marker_end] == marker)
+        ++marker_end;
+      auto const marker_count = marker_end - marker_start;
+      if (marker_count >= 3)
+      {
+        auto const remainder = line.substr(marker_end);
+        if (open_fence)
+        {
+          bool const trailing_whitespace_only = std::ranges::all_of(remainder, [](char ch) { return ch == ' ' || ch == '\t'; });
+          if (marker == open_fence->first && marker_count >= open_fence->second && trailing_whitespace_only)
+            open_fence.reset();
+        }
+        else if (marker != '`' || remainder.find('`') == std::string_view::npos)
+        {
+          open_fence = std::pair{marker, marker_count};
+        }
+      }
+    }
+
+    if (newline == std::string_view::npos)
+      break;
+    line_start = newline + 1;
+  }
+
+  if (!open_fence)
+    return std::nullopt;
+  return std::string(open_fence->second, open_fence->first);
+}
+
 void append_heading(std::string& out, std::string_view heading)
 {
   out += "## ";
@@ -106,7 +151,7 @@ void append_fenced_block(std::string& out, std::string_view label, std::string_v
 {
   out += label;
   out += ":\n\n";
-  auto const sanitized_content = sanitize_fenced_content(content);
+  auto const sanitized_content = sanitize_export_content(content);
   auto const fence = fence_for(sanitized_content);
   out += fence;
   if (!language.empty())
@@ -117,6 +162,22 @@ void append_fenced_block(std::string& out, std::string_view label, std::string_v
     out += '\n';
   out += fence;
   out += "\n\n";
+}
+
+void append_markdown_prose(std::string& out, std::string_view label, std::string_view content)
+{
+  out += label;
+  out += ":\n\n";
+  auto const sanitized_content = sanitize_export_content(content);
+  out += sanitized_content;
+  if (!sanitized_content.empty() && sanitized_content.back() != '\n')
+    out += '\n';
+  if (auto const closing_fence = unclosed_markdown_fence(sanitized_content))
+  {
+    out += *closing_fence;
+    out += '\n';
+  }
+  out += '\n';
 }
 
 void append_optional_fenced_block(std::string& out, std::string_view label, std::optional<std::string> const& content, std::string_view language = "text")
@@ -197,7 +258,7 @@ void append_user_message(std::string& out, SessionEntry const& entry, ExportOpti
   append_heading(out, "User");
   append_metadata(out, entry, options);
   auto const sanitized = sanitized_message_data_json(entry.data_json);
-  append_fenced_block(out, "Message", ava::core::json::string_field(sanitized, "text").value_or(""));
+  append_markdown_prose(out, "Message", ava::core::json::string_field(sanitized, "text").value_or(""));
   auto const attachments = image_attachment_export_text(sanitized);
   append_optional_fenced_block(out, "Attachments", attachments.empty() ? std::nullopt : std::optional<std::string>(attachments));
 }
@@ -206,7 +267,7 @@ void append_assistant_message(std::string& out, SessionEntry const& entry, Expor
 {
   append_heading(out, "Assistant");
   append_metadata(out, entry, options);
-  append_fenced_block(out, "Message", string_field(entry, "text").value_or(""));
+  append_markdown_prose(out, "Message", string_field(entry, "text").value_or(""));
   append_optional_fenced_block(out, "Usage", object_field(entry, "usage"), "json");
 }
 
@@ -385,7 +446,8 @@ std::string format_projected_session_markdown(std::vector<SessionEntry> const& e
           append_tool_result(out, entry, options);
         break;
       case EntryType::PermissionDecision:
-        append_permission_decision(out, entry, options);
+        if (options.include_permission_details)
+          append_permission_decision(out, entry, options);
         break;
       case EntryType::ModeChange:
         append_mode_change(out, entry, options);
@@ -394,7 +456,8 @@ std::string format_projected_session_markdown(std::vector<SessionEntry> const& e
         append_model_change(out, entry, options);
         break;
       case EntryType::ReasoningBlock:
-        append_reasoning_block(out, entry, options);
+        if (options.include_reasoning_content)
+          append_reasoning_block(out, entry, options);
         break;
       case EntryType::ReasoningChange:
         append_reasoning_change(out, entry, options);

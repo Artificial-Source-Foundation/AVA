@@ -4,6 +4,8 @@
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
 
+#include <algorithm>
+#include <span>
 #include <string_view>
 #include <utility>
 
@@ -61,10 +63,27 @@ std::string_view utf8_prefix_within(std::string_view value, std::size_t max_byte
   return value.substr(0, end);
 }
 
+std::size_t attachment_reference_bytes(std::span<ava::session::ImageAttachmentRef const> attachments)
+{
+  std::size_t bytes = 0;
+  for (auto const& attachment : attachments)
+    bytes += attachment.id.size() + attachment.mime_type.size() + attachment.storage_path.size() + attachment.sha256.size();
+  return bytes;
+}
+
+std::size_t queued_image_count(std::deque<InteractiveQueuedMessage> const& messages)
+{
+  std::size_t count = 0;
+  for (auto const& message : messages)
+    count += message.image_attachments.size();
+  return count;
+}
+
 std::size_t queued_message_bytes(std::deque<InteractiveQueuedMessage> const& messages)
 {
   std::size_t bytes = 0;
-  for (auto const& message : messages) bytes += message.message.size();
+  for (auto const& message : messages)
+    bytes += message.message.size() + attachment_reference_bytes(message.image_attachments);
   return bytes;
 }
 
@@ -73,13 +92,15 @@ std::string json_string_field(std::string_view key, std::string_view value)
   return "\"" + std::string(key) + "\":\"" + ava::session::json_escape(value) + "\"";
 }
 
-std::string queue_payload_json(std::string_view message, std::string_view reason)
+std::string queue_payload_json(std::string_view message, std::string_view reason, std::size_t image_count)
 {
   bool const truncated = message.size() > kMaxInteractiveQueueEventMessageBytes;
   auto const event_message = truncated ? utf8_prefix_within(message, kMaxInteractiveQueueEventMessageBytes) : message;
 
   std::string json = "{";
   json += json_string_field("message", event_message);
+  if (image_count != 0)
+    json += ",\"image_count\":" + std::to_string(image_count);
   if (truncated)
   {
     json += ",\"message_truncated\":true,\"message_bytes\":" + std::to_string(message.size());
@@ -108,6 +129,7 @@ ava::core::Error queue_limit_error()
   auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "interactive queued message limit exceeded");
   error.with_context("max_entries", std::to_string(kMaxInteractiveQueuedMessages));
   error.with_context("max_message_bytes", std::to_string(kMaxInteractiveQueuedMessageBytes));
+  error.with_context("max_images", std::to_string(kMaxInteractiveQueuedImages));
   return error;
 }
 
@@ -134,10 +156,10 @@ ava::core::VoidResult InteractiveRunQueue::queue_steering(std::string message)
   return queue_message_locked(steering_messages_, std::move(message), "steer_queued");
 }
 
-ava::core::VoidResult InteractiveRunQueue::queue_follow_up(std::string message)
+ava::core::VoidResult InteractiveRunQueue::queue_follow_up(std::string message, std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {
   std::lock_guard lock(mutex_);
-  return queue_message_locked(follow_up_messages_, std::move(message), "follow_up_queued");
+  return queue_message_locked(follow_up_messages_, std::move(message), "follow_up_queued", std::move(image_attachments));
 }
 
 ava::core::Result<std::vector<std::string>> InteractiveRunQueue::take_steering_messages()
@@ -221,15 +243,79 @@ ava::core::Result<InteractiveRestoredMessage> InteractiveRunQueue::restore_lates
   if (queue.empty())
     return std::unexpected(no_queued_messages_error());
 
-  auto const& restored = queue.back();
+  auto& restored = queue.back();
   auto const event_name = restore_from_steering ? std::string_view("steer_skipped") : std::string_view("follow_up_skipped");
   if (auto emitted = emit_event(event_name, restored, "restored_to_composer"); !emitted)
   {
     return std::unexpected(std::move(emitted.error()));
   }
-  auto result = InteractiveRestoredMessage{.request_id = restored.request_id, .message = restored.message, .steering = restore_from_steering};
+  auto result = InteractiveRestoredMessage{.request_id = restored.request_id,
+                                           .message = std::move(restored.message),
+                                           .steering = restore_from_steering,
+                                           .image_attachments = std::move(restored.image_attachments)};
   queue.pop_back();
   return result;
+}
+
+auto InteractiveRunQueue::pending_messages() const -> std::vector<InteractiveRestoredMessage>
+{
+  std::scoped_lock lock(mutex_);
+  std::vector<InteractiveRestoredMessage> result;
+  if (!active_)
+  {
+    return result;
+  }
+  for (auto const& item : steering_messages_)
+  {
+    result.push_back({.request_id = item.request_id, .message = item.message, .steering = true, .image_attachments = item.image_attachments});
+  }
+  for (auto const& item : follow_up_messages_)
+  {
+    result.push_back({.request_id = item.request_id, .message = item.message, .image_attachments = item.image_attachments});
+  }
+  return result;
+}
+
+auto InteractiveRunQueue::take_pending(std::string_view request_id, bool restore) -> ava::core::Result<InteractiveRestoredMessage>
+{
+  std::scoped_lock lock(mutex_);
+  if (!active_)
+  {
+    return std::unexpected(inactive_error());
+  }
+  for (auto* queue : {&steering_messages_, &follow_up_messages_})
+  {
+    auto item = std::ranges::find(*queue, request_id, &InteractiveQueuedMessage::request_id);
+    if (item == queue->end())
+    {
+      continue;
+    }
+    bool const steering = queue == &steering_messages_;
+    if (auto emitted = emit_event(steering ? "steer_skipped" : "follow_up_skipped", *item, restore ? "restored_to_composer" : "removed_by_user"); !emitted)
+    {
+      return std::unexpected(std::move(emitted.error()));
+    }
+    auto result = InteractiveRestoredMessage{
+        .request_id = item->request_id, .message = std::move(item->message), .steering = steering, .image_attachments = std::move(item->image_attachments)};
+    queue->erase(item);
+    return result;
+  }
+  return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "queued message already started or no longer pending"));
+}
+
+auto InteractiveRunQueue::restore_pending(std::string_view request_id) -> ava::core::Result<InteractiveRestoredMessage>
+{
+  return take_pending(request_id, true);
+}
+
+auto InteractiveRunQueue::remove_pending(std::string_view request_id) -> ava::core::VoidResult
+{
+  auto removed = take_pending(request_id, false);
+  if (!removed)
+  {
+    return std::unexpected(std::move(removed.error()));
+  }
+  return {};
 }
 
 ava::core::VoidResult InteractiveRunQueue::finish(bool canceled)
@@ -255,22 +341,29 @@ ava::core::VoidResult InteractiveRunQueue::finish(bool canceled)
   return {};
 }
 
-ava::core::VoidResult InteractiveRunQueue::queue_message_locked(std::deque<InteractiveQueuedMessage>& queue, std::string message, std::string_view event_name)
+ava::core::VoidResult InteractiveRunQueue::queue_message_locked(std::deque<InteractiveQueuedMessage>& queue, std::string message, std::string_view event_name,
+                                                                std::vector<ava::session::ImageAttachmentRef> image_attachments)
 {
   if (message.empty())
     return std::unexpected(empty_message_error());
   if (!active_)
     return std::unexpected(inactive_error());
-  if (queue.size() >= kMaxInteractiveQueuedMessages || message.size() > kMaxInteractiveQueuedMessageBytes ||
-      queued_message_bytes(queue) + message.size() > kMaxInteractiveQueuedMessageBytes)
+  // Keep references only; image bytes remain in verified session storage.
+  auto const message_bytes = message.size() + attachment_reference_bytes(image_attachments);
+  if (queue.size() >= kMaxInteractiveQueuedMessages || image_attachments.size() > kMaxInteractiveQueuedImages ||
+      queued_image_count(queue) + image_attachments.size() > kMaxInteractiveQueuedImages || message_bytes > kMaxInteractiveQueuedMessageBytes ||
+      queued_message_bytes(queue) + message_bytes > kMaxInteractiveQueuedMessageBytes)
   {
     return std::unexpected(queue_limit_error());
   }
 
-  InteractiveQueuedMessage queued{
-      .request_id = ava::core::make_id("request"), .correlation_id = active_request_id_, .message = std::move(message), .sequence = next_sequence_++};
-  queue.push_back(queued);
-  if (auto emitted = emit_event(event_name, queued); !emitted)
+  InteractiveQueuedMessage queued{.request_id = ava::core::make_id("request"),
+                                  .correlation_id = active_request_id_,
+                                  .message = std::move(message),
+                                  .sequence = next_sequence_++,
+                                  .image_attachments = std::move(image_attachments)};
+  queue.push_back(std::move(queued));
+  if (auto emitted = emit_event(event_name, queue.back()); !emitted)
   {
     queue.pop_back();
     return emitted;
@@ -291,7 +384,7 @@ ava::core::VoidResult InteractiveRunQueue::emit_event(std::string_view name, Int
   envelope.request_id = message.request_id;
   envelope.correlation_id = message.correlation_id;
   envelope.name = std::string(name);
-  envelope.payload_json = queue_payload_json(message.message, reason);
+  envelope.payload_json = queue_payload_json(message.message, reason, message.image_attachments.size());
   return event_sink_(envelope);
 }
 

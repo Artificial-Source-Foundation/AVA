@@ -420,17 +420,17 @@ void run_tui_modal_tests_part_3()
       single_click_frame.begin());
   auto const single_click = ava::tui::question_option_for_screen_position(single_click_snapshot, single_beta_row + 1, 4);
   expect(single_click && *single_click == 1, "question dock hit testing maps a visible single-select option at 80x24");
-  auto centered_dock_click_snapshot = single_click_snapshot;
-  centered_dock_click_snapshot.width = 160;
-  auto const centered_dock_click_frame = ava::tui::render_composer(centered_dock_click_snapshot);
-  auto const centered_dock_beta_row = static_cast<std::size_t>(
-      std::ranges::find_if(centered_dock_click_frame, [](std::string const& line) { return strip_sgr(line).find("2. Beta") != std::string::npos; }) -
-      centered_dock_click_frame.begin());
-  expect(ava::tui::question_option_for_screen_position(centered_dock_click_snapshot, centered_dock_beta_row + 1, 21) == 1 &&
-             ava::tui::question_option_for_screen_position(centered_dock_click_snapshot, centered_dock_beta_row + 1, 140) == 1 &&
-             !ava::tui::question_option_for_screen_position(centered_dock_click_snapshot, centered_dock_beta_row + 1, 20) &&
-             !ava::tui::question_option_for_screen_position(centered_dock_click_snapshot, centered_dock_beta_row + 1, 141),
-         "question dock uses centered content geometry and rejects both exact gutters");
+  auto wide_dock_click_snapshot = single_click_snapshot;
+  wide_dock_click_snapshot.width = 160;
+  auto const wide_dock_click_frame = ava::tui::render_composer(wide_dock_click_snapshot);
+  auto const wide_dock_beta_row = static_cast<std::size_t>(
+      std::ranges::find_if(wide_dock_click_frame, [](std::string const& line) { return strip_sgr(line).find("2. Beta") != std::string::npos; }) -
+      wide_dock_click_frame.begin());
+  expect(ava::tui::question_option_for_screen_position(wide_dock_click_snapshot, wide_dock_beta_row + 1, 1) == 1 &&
+             ava::tui::question_option_for_screen_position(wide_dock_click_snapshot, wide_dock_beta_row + 1, 120) == 1 &&
+             !ava::tui::question_option_for_screen_position(wide_dock_click_snapshot, wide_dock_beta_row + 1, 0) &&
+             !ava::tui::question_option_for_screen_position(wide_dock_click_snapshot, wide_dock_beta_row + 1, 121),
+         "question dock uses left-aligned content geometry and rejects out-of-canvas columns");
   auto clicked_single_prompt = *single_click_snapshot.question_prompt;
   clicked_single_prompt.options[0].selected = true;
   clicked_single_prompt.custom_text = "typed custom answer";
@@ -688,15 +688,15 @@ void run_tui_modal_tests_part_3()
       rail_modal_frame.begin());
   auto modal_without_rail = rail_modal_click;
   modal_without_rail.sidebar = std::nullopt;
-  expect(ava::tui::composer_canvas_layout(rail_modal_click).content_width == 120 && ava::tui::composer_canvas_layout(rail_modal_click).left == 28 &&
+  expect(ava::tui::composer_canvas_layout(rail_modal_click).content_width == 120 && ava::tui::composer_canvas_layout(rail_modal_click).left == 0 &&
              rail_modal_frame == ava::tui::render_composer(modal_without_rail) &&
-             ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 53) == 1 &&
-             ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 124) == 1 &&
-             ava::tui::question_option_for_screen_position(modal_without_rail, rail_modal_beta_row + 1, 60) == 1 &&
-             !ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 28) &&
-             !ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 149) &&
+             ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 25) == 1 &&
+             ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 96) == 1 &&
+             ava::tui::question_option_for_screen_position(modal_without_rail, rail_modal_beta_row + 1, 32) == 1 &&
+             !ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 0) &&
+             !ava::tui::question_option_for_screen_position(rail_modal_click, rail_modal_beta_row + 1, 121) &&
              std::ranges::none_of(rail_modal_frame, [](std::string const& line) { return strip_sgr(line).find("rail-must-not-render") != std::string::npos; }),
-         "question modal suppresses the rail, centers inside the shared canvas, and maps physical mouse columns exactly once");
+         "question modal suppresses the rail, centers inside the left-aligned canvas, and maps physical mouse columns exactly once");
 
   auto depth_modal_snapshot = rail_modal_click;
   depth_modal_snapshot.transcript = {
@@ -852,9 +852,9 @@ void run_tui_modal_tests_part_3()
           .version = "0.32",
           .context_source_count = 1}};
   auto const sidebar_modal_frame = ava::tui::render_composer(sidebar_modal_snapshot);
-  expect(ava::tui::composer_canvas_layout(sidebar_modal_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(sidebar_modal_snapshot).left == 28 &&
-             std::ranges::any_of(sidebar_modal_frame, [](std::string const& line) { return strip_sgr(line).find("? Connect OpenAI") == 56; }),
-         "tui modal centers inside the width-limited canvas when an automatic rail snapshot exists");
+  expect(ava::tui::composer_canvas_layout(sidebar_modal_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(sidebar_modal_snapshot).left == 0 &&
+             std::ranges::any_of(sidebar_modal_frame, [](std::string const& line) { return strip_sgr(line).find("? Connect OpenAI") == 28; }),
+         "tui modal centers inside the left-aligned width-limited canvas when an automatic rail snapshot exists");
   auto const wide_question_modal = ava::tui::detail::render_question_modal(*sidebar_modal_snapshot.question_prompt, 80, 14);
   auto const narrow_question_modal = ava::tui::detail::render_question_modal(*sidebar_modal_snapshot.question_prompt, 55, 12);
   auto const wide_question_title = strip_sgr(wide_question_modal[1]);
@@ -1363,16 +1363,16 @@ void run_tui_modal_tests_part_3()
       rail_selector_frame.begin() + 1;
   auto selector_without_rail = rail_selector_snapshot;
   selector_without_rail.sidebar = std::nullopt;
-  expect(ava::tui::composer_canvas_layout(rail_selector_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(rail_selector_snapshot).left == 28 &&
+  expect(ava::tui::composer_canvas_layout(rail_selector_snapshot).content_width == 120 && ava::tui::composer_canvas_layout(rail_selector_snapshot).left == 0 &&
              rail_selector_frame == ava::tui::render_composer(selector_without_rail) &&
-             ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 53) == 1 &&
-             ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 124) == 1 &&
-             ava::tui::select_list_selection_for_screen_position(selector_without_rail, rail_selector_row, 60) == 1 &&
-             !ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 28) &&
-             !ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 149) &&
+             ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 25) == 1 &&
+             ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 96) == 1 &&
+             ava::tui::select_list_selection_for_screen_position(selector_without_rail, rail_selector_row, 32) == 1 &&
+             !ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 0) &&
+             !ava::tui::select_list_selection_for_screen_position(rail_selector_snapshot, rail_selector_row, 121) &&
              std::ranges::none_of(rail_selector_frame,
                                   [](std::string const& line) { return strip_sgr(line).find("rail-must-not-render.cpp") != std::string::npos; }),
-         "select-list modal suppresses an actionable rail and maps centered physical mouse geometry exactly once");
+         "select-list modal suppresses an actionable rail and maps left-aligned canvas mouse geometry exactly once");
   auto const outside_selector = ava::tui::select_list_selection_for_screen_position(ava::tui::ComposerSnapshot{.mode = "build",
                                                                                                                .provider = "openai",
                                                                                                                .model = "gpt-5.5",

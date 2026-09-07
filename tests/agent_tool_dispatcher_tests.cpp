@@ -21,6 +21,7 @@
 #include "ava/agent/tool_summaries.h"
 #include "ava/agent/tool_timeline.h"
 #include "ava/tools/bash_tool.h"
+#include "ava/tools/edit_history.h"
 #include "ava/tools/file_tools.h"
 #include "ava/tools/mutation_queue.h"
 #include "ava/tools/search_tools.h"
@@ -515,6 +516,20 @@ void test_tool_dispatcher()
   auto patched_read =
       dispatcher.dispatch(ava::agent::ProviderToolCall{.id = "call_patched_read", .name = "read_file", .arguments_json = "{\"path\":\"note.txt\"}"});
   expect(patched_read && patched_read->result_text.find("hello patch") != std::string::npos, "apply_patch updates file content through file tools");
+
+  {
+    auto history = std::make_shared<ava::tools::EditHistory>();
+    ava::tools::ToolContext context{.workspace_dir = workspace, .mode = ava::agent::Mode::Build, .edit_history = history, .edit_turn_id = "patch-undo"};
+    ava::agent::ToolDispatcher const journal_dispatcher(context);
+    auto edited = journal_dispatcher.dispatch(ava::agent::ProviderToolCall{
+        .id = "patch-undo", .name = "apply_patch", .arguments_json = R"({"edits":[{"path":"note.txt","old_text":"patch","new_text":"temporary"}]})"});
+    auto preview = history->preview(context);
+    expect(edited && edited->success && preview && preview->contains("1 files") && !preview->contains(".ava-write-"),
+           "patch undo captures final target only, never staging files");
+    auto restored = history->undo(context);
+    auto read = ava::tools::read_file(context, workspace / "note.txt");
+    expect(restored && read && read->content == "hello patch", "apply_patch journal restores original content");
+  }
 
   auto remote_workspace = ava::tools::SecureWorkspace::open(ava::core::normalized_absolute_path(workspace));
   auto remote_files = std::make_shared<DispatcherExactFileAccess>();

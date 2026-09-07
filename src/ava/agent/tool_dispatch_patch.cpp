@@ -2,6 +2,7 @@
 #include "ava/agent/tool_dispatch_common.h"
 #include "ava/agent/tool_dispatch_patch.h"
 #include "ava/tools/diff_utils.h"
+#include "ava/tools/edit_history.h"
 #include "ava/tools/edit_match.h"
 #include "ava/tools/file_io.h"
 #include "ava/tools/mutation_queue.h"
@@ -10,6 +11,7 @@
 #include "ava/core/json.h"
 
 #include <algorithm>
+#include <exception>
 #include <map>
 #include <utility>
 #include <vector>
@@ -18,6 +20,65 @@ namespace ava::agent {
 namespace {
 
 constexpr std::size_t kMaxMutationDiffBytes = 32 * 1024;
+
+class PatchHistoryCapture
+{
+ public:
+  PatchHistoryCapture(ava::tools::ToolContext const& context, std::vector<std::filesystem::path> const& paths) : context_(&context), paths_(&paths)
+  {
+    if (!context_->edit_history)
+    {
+      return;
+    }
+    if (paths_->size() > 32)
+    {
+      context_->edit_history->invalidate(context_->edit_turn_id, "Undo unavailable: patch exceeds 32 files.");
+      return;
+    }
+    for (auto const& path : *paths_)
+    {
+      before_.push_back(ava::tools::EditHistory::capture(*context_, path));
+    }
+  }
+  PatchHistoryCapture(PatchHistoryCapture const&) = delete;
+  auto operator=(PatchHistoryCapture const&) -> PatchHistoryCapture& = delete;
+  PatchHistoryCapture(PatchHistoryCapture&&) = delete;
+  auto operator=(PatchHistoryCapture&&) -> PatchHistoryCapture& = delete;
+  ~PatchHistoryCapture() noexcept
+  {
+    try
+    {
+      if (context_->edit_history && !completed_)
+      {
+        context_->edit_history->invalidate(context_->edit_turn_id, "Undo unavailable after an incomplete patch.");
+      }
+    }
+    catch (...)
+    {
+      // Losing the journal's fail-closed marker must never leave undo usable.
+      std::terminate();
+    }
+  }
+  void complete(std::map<std::filesystem::path, std::string> const& contents)
+  {
+    completed_ = true;
+    if (!context_->edit_history || before_.size() != paths_->size())
+    {
+      return;
+    }
+    for (std::size_t index = 0; index < paths_->size(); ++index)
+    {
+      context_->edit_history->record(*context_, paths_->at(index), std::move(before_.at(index)), contents.at(paths_->at(index)));
+    }
+  }
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+ private:
+  // This stack guard is destroyed before its enclosing patch call's inputs.
+  ava::tools::ToolContext const* context_;
+  std::vector<std::filesystem::path> const* paths_;
+  std::vector<ava::core::Result<ava::tools::EditFileState>> before_;
+  bool completed_ = false;
+};
 
 std::filesystem::path unique_patch_temp_path(std::filesystem::path const& target)
 {
@@ -93,7 +154,9 @@ ava::core::Result<std::vector<StagedPatchWrite>> stage_patch_writes(ava::tools::
       return std::unexpected(std::move(error));
     }
 
-    auto written = ava::tools::write_file(context, temp, content->second, ava::tools::WriteOptions{.permission_already_checked = true});
+    auto staging_context = context;
+    staging_context.edit_history.reset();
+    auto written = ava::tools::write_file(staging_context, temp, content->second, ava::tools::WriteOptions{.permission_already_checked = true});
     if (!written)
     {
       ava::tools::remove_staged_file_best_effort(temp);
@@ -397,6 +460,7 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
   }
   if (auto started = ava::tools::announce_tool_execution_start(context); !started)
     return tool_dispatch::tool_error_result(call, started.error());
+  PatchHistoryCapture history(context, applied_paths);
   std::vector<StagedPatchWrite> completed_writes;
   completed_writes.reserve(applied_paths.size());
   if (context.exact_file_access && context.exact_file_access->supports_read_text_file() && context.exact_file_access->supports_write_text_file())
@@ -436,6 +500,7 @@ ToolDispatchResult apply_patch_result(ava::tools::ToolContext const& context, Pr
     completed_writes = std::move(*staged);
   }
 
+  history.complete(final_contents);
   std::string text = "{\"tool\":\"apply_patch\",\"ok\":true,\"edits\":[";
   for (std::size_t index = 0; index < completed_writes.size(); ++index)
   {

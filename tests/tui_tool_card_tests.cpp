@@ -1438,15 +1438,15 @@ void test_tui_f5_progressive_tool_details()
   auto const detail_row = detail_line == hit_frame.end() ? 0 : static_cast<std::size_t>(detail_line - hit_frame.begin()) + 1;
   auto const heading_row = heading_line == hit_frame.end() ? 0 : static_cast<std::size_t>(heading_line - hit_frame.begin()) + 1;
   auto const hit_canvas = ava::tui::composer_canvas_layout(hit_snapshot);
-  expect(hit_canvas.content_width == 120 && hit_canvas.left == 20 &&
-             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 23) == 1 &&
-             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 138) == 2 &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, intro_row, 24) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, heading_row, 24) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 22) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 139) &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, hit_snapshot.height, 24),
-         "tui F5 tool header hit testing uses centered transcript geometry and rejects headings, both two-cell card margins, and composer rows");
+  expect(hit_canvas.content_width == 120 && hit_canvas.left == 0 &&
+             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 3) == 1 &&
+             ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 118) == 2 &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, intro_row, 4) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, heading_row, 4) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 2) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, detail_row, 119) &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, hit_snapshot.height, 4),
+         "tui F5 tool header hit testing uses left-aligned transcript geometry and rejects headings, both two-cell card margins, and composer rows");
 
   hit_snapshot.transcript[2].tool->details_visible = true;
   auto expanded_hit_frame = plain_lines(ava::tui::render_composer(hit_snapshot));
@@ -1454,11 +1454,11 @@ void test_tui_f5_progressive_tool_details()
       std::ranges::find_if(expanded_hit_frame, [](std::string const& line) { return line.find("x edit_file") != std::string::npos; });
   auto const expanded_detail_row =
       expanded_detail_line == expanded_hit_frame.end() ? 0 : static_cast<std::size_t>(expanded_detail_line - expanded_hit_frame.begin()) + 1;
-  expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row, 28) == 2 &&
-             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row + 1, 28),
+  expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row, 8) == 2 &&
+             !ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, expanded_detail_row + 1, 8),
          "tui F5 per-card expansion hit testing toggles only the original header and rejects payload rows");
   hit_snapshot.tool_presentation = ava::tui::ToolPresentation::Expanded;
-  expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 28) == 1,
+  expect(ava::tui::detail::transcript_tool_card_header_for_screen_position(hit_snapshot, glob_row, 8) == 1,
          "tui F5 header hit testing shares global expansion geometry");
 
   auto short_clipped = hit_snapshot;

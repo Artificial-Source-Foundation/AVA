@@ -27,7 +27,7 @@ _SGR_SEQUENCE = re.compile(r"\x1b\[[0-9;]*m")
 _DELETED_SCROLLBACK_TEXT = ("scrollback detached", "updates below", "jump_to_bottom")
 # Role-specific final chrome: footer uses the catalog display name; assistant turn meta may render
 # either the display name or the bare model id depending on the meta assembly path.
-_FOOTER_MODEL_LINE = re.compile(r"^│\s+AVA TUI Fake\b.*\bctx\b")
+_FOOTER_MODEL_LINE = re.compile(r"^│\s+Build · AVA TUI Fake\b.*\bctx\b")
 _ASSISTANT_META_LINE = re.compile(r"\*\s+Build · (?:AVA TUI Fake|ava-tui-fake)\b")
 
 
@@ -264,15 +264,20 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     live_stream_screen = completed_detached
     for step in range(32):
         previous_numbers = [int(value) for value in _NUMBERED_LINE.findall(live_stream_screen)]
-        wheel_sent_at = time.monotonic()
+        first_change_observed_at: float | None = None
 
         def reverse_step_synchronized(screen: str) -> bool:
+            nonlocal first_change_observed_at
             changed = "STREAM COMPLETE" in screen or [int(value) for value in _NUMBERED_LINE.findall(screen)] != previous_numbers
             # AVA intentionally drops repeated same-direction wheel events
-            # within 40 ms. Synchronize on both the rendered step and expiry of
-            # that documented governor interval before sending the next step;
-            # relying on two poll captures became too short at a 20 ms cadence.
-            return changed and time.monotonic() >= wheel_sent_at + 0.045
+            # within 40 ms. Start the interval when the rendered step is first
+            # observed: sending the event does not prove AVA has consumed it.
+            # Under load, a send-based timer could expire before consumption.
+            if not changed:
+                return False
+            if first_change_observed_at is None:
+                first_change_observed_at = time.monotonic()
+            return time.monotonic() >= first_change_observed_at + 0.045
 
         send_literal(tmux_exe, session, wheel_down)
         live_stream_screen = wait_for_screen_state(
@@ -328,7 +333,20 @@ def scenario_streaming_scroll(ctx: SmokeContext) -> None:
     # Leave live-tail chrome so ordinary Up/Down can be measured as the keyboard scroll step
     # (3 transcript rows) without colliding with live-tail chrome or the oldest boundary.
     keyboard_scroll_rows = 3
-    send_keys(tmux_exe, session, *(["Up"] * 4))
+    # Observe each setup key before taking the measurement baseline. A burst
+    # can satisfy the detached predicate while later Up keys are still queued.
+    detached_numbered = ctrl_end_live
+    for step in range(4):
+        previous_numbers = _numbered_window(detached_numbered, "keyboard detach setup")
+        send_keys(tmux_exe, session, "Up")
+        detached_numbered = wait_for_screen_state(
+            tmux_exe,
+            session,
+            lambda screen: complete_draft in screen
+            and bool(numbers := [int(value) for value in _NUMBERED_LINE.findall(screen)])
+            and numbers != previous_numbers,
+            f"streaming-scroll consumed keyboard detach step {step + 1}",
+        )
     detached_numbered = wait_for_screen_state(
         tmux_exe,
         session,

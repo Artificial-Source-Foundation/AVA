@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/tools/diff_utils.h"
+#include "ava/tools/edit_history.h"
 #include "ava/tools/edit_match.h"
 #include "ava/tools/file_io.h"
 #include "ava/tools/file_tools.h"
@@ -33,7 +34,6 @@ using detail::check_canceled;
 using detail::is_canceled_error;
 using detail::read_all_text;
 using detail::read_head_text;
-using detail::write_file_unlocked;
 
 std::string effective_tool_name(ToolContext const& context, ava::permissions::Operation operation, std::string_view tool_name)
 {
@@ -382,6 +382,11 @@ ava::core::VoidResult announce_execution_start_impl(ToolContext const& context)
 ava::core::VoidResult announce_tool_execution_start(ToolContext const& context)
 {
   return announce_execution_start_impl(context);
+}
+
+auto can_read_file_for_edit_snapshot(ToolContext const& context, std::filesystem::path const& path) -> ava::core::Result<bool>
+{
+  return write_permission_diff_preview_read_allowed(context, path);
 }
 
 namespace {
@@ -770,9 +775,9 @@ ava::core::Result<FileMutationResult> write_file(ToolContext const& context, std
   };
 
   if (options.mutation_already_locked)
-    return attach_preview(write_file_unlocked(context, path, content));
+    return attach_preview(write_file_recorded(context, path, content));
   [[maybe_unused]] auto mutation_lock = effective_mutation_queue(context)->lock_path(path);
-  return attach_preview(write_file_unlocked(context, path, content));
+  return attach_preview(write_file_recorded(context, path, content));
 }
 
 ava::core::Result<FileMutationResult> edit_file(ToolContext const& context, std::filesystem::path const& path, std::string_view old_text,

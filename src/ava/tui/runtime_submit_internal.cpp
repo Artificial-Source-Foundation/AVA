@@ -79,6 +79,12 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   auto& detached_new_output_count = renderer_.detached_new_output_count;
   auto& detached_sidebar_snapshot = renderer_.detached_sidebar_snapshot;
   pending_escape_clear = false;
+  if (!forced_submission && !draft.text.starts_with('/') && action_controller_.clipboard_image_blocks_submit())
+  {
+    snapshot.status = "image paste in progress; press Enter when ready";
+    auto const rendered = renderer_.request_render();
+    return {.disposition = rendered ? RuntimeSubmitDisposition::ContinueLoop : RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = !rendered};
+  }
   std::optional<std::string> immediate_slash_submission;
   if (forced_submission)
   {
@@ -88,7 +94,8 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
            (exact_command(draft.text, "/scoped-models") && options_.scoped_model_selector_view) ||
            ((exact_command(draft.text, "/sessions") || exact_command(draft.text, "/tree") || exact_command(draft.text, "/resume")) &&
             options_.session_selector_view) ||
-           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview") || exact_command(draft.text, "/stash"))
+           exact_command(draft.text, "/jobs") || exact_command(draft.text, "/overview") || exact_command(draft.text, "/stash") ||
+           exact_command(draft.text, "/export") || exact_command(draft.text, "/export markdown"))
   {
     immediate_slash_submission = expanded_composer_draft_text(draft);
   }
@@ -323,6 +330,31 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
       }
       return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
     }
+    if (runtime_commands::exact_command(submitted, "/queue"))
+    {
+      snapshot.local_command_feedback = "No active run. Queue a follow-up while AVA is responding, then use /queue.";
+      if (!renderer_.request_render())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
+    if (runtime_commands::exact_command(submitted, "/notify") || runtime_commands::exact_command(submitted, "/notify on") ||
+        runtime_commands::exact_command(submitted, "/notify off"))
+    {
+      if (!runtime_commands::exact_command(submitted, "/notify"))
+      {
+        snapshot.attention_enabled = runtime_commands::exact_command(submitted, "/notify on");
+      }
+      snapshot.local_command_feedback = snapshot.attention_enabled
+                                            ? "Terminal notifications on: approval, questions, completion, and failure (terminal support required)"
+                                            : "Terminal notifications off";
+      if (!renderer_.request_render())
+      {
+        return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+      }
+      return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+    }
     if (submitted == "/hotkeys" || submitted == "/keybindings")
     {
       push_history(input_history, submitted);
@@ -449,6 +481,15 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
     if (auto diff_query = diff_command_argument(submitted))
     {
       push_history(input_history, submitted);
+      if (*diff_query == "all")
+      {
+        open_change_review(snapshot);
+        if (!renderer_.render())
+        {
+          return {.disposition = RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = true};
+        }
+        return {.disposition = RuntimeSubmitDisposition::ContinueLoop};
+      }
       auto diff_text = latest_indexed_tool_diff_copy_text(snapshot, *diff_query);
       if (diff_text)
       {

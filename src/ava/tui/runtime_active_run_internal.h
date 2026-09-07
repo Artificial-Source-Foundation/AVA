@@ -150,7 +150,8 @@ class RuntimeActiveRunController final
   [[nodiscard]] static InputHandling to_input_handling(bool render_result);
 
   [[nodiscard]] ComposerSnapshot const& completion_snapshot();
-  [[nodiscard]] bool restore_latest_queued_message(RuntimeActiveRunState& state);
+  [[nodiscard]] auto restore_latest_queued_message(RuntimeActiveRunState& state, std::string_view request_id = {}) -> bool;
+  [[nodiscard]] auto handle_queue_picker(RuntimeActiveRunState& state, InputEvent const& event) -> std::optional<bool>;
   [[nodiscard]] std::optional<bool> run_active_command(RuntimeActiveRunState& state);
   [[nodiscard]] std::optional<bool> reject_disabled_visible_completion();
   [[nodiscard]] bool queue_active_draft(RuntimeActiveRunState& state, bool follow_up_only);

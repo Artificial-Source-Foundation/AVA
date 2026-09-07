@@ -191,6 +191,8 @@ void test_session_compaction_entry_round_trip()
 
 void test_session_markdown_export()
 {
+  std::string const markdown_message = "# Export heading\n\nReadable **prose** with `inline code`.\n\n```json\n{\"answer\":42,\"markup\":\"**literal**\"}\n```";
+  std::string const unclosed_fence_message = "Opening fence follows\n```json\n{\"x\":1}";
   std::vector<ava::session::SessionEntry> const entries = {
       ava::session::SessionEntry{.id = "start_1",
                                  .parent_id = "",
@@ -201,7 +203,7 @@ void test_session_markdown_export()
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
                                  .timestamp = "2026-04-29T00:00:01Z",
-                                 .data_json = "{\"text\":\"Hello AVA\"}"},
+                                 .data_json = "{\"text\":\"" + ava::core::json::escape(markdown_message) + "\"}"},
       ava::session::SessionEntry{.id = "user_1_replay",
                                  .parent_id = "",
                                  .type = ava::session::EntryType::UserMessage,
@@ -279,6 +281,16 @@ void test_session_markdown_export()
                                  .type = ava::session::EntryType::UserMessage,
                                  .timestamp = "2026-04-29T00:00:09Z",
                                  .data_json = R"json({"text":"first\nsecond\tindent\u0000\u001B\u007F\r"})json"},
+      ava::session::SessionEntry{.id = "unclosed_fence_1",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::UserMessage,
+                                 .timestamp = "2026-04-29T00:00:10Z",
+                                 .data_json = "{\"text\":\"" + ava::core::json::escape(unclosed_fence_message) + "\"}"},
+      ava::session::SessionEntry{.id = "after_unclosed_fence_1",
+                                 .parent_id = "",
+                                 .type = ava::session::EntryType::AssistantMessage,
+                                 .timestamp = "2026-04-29T00:00:11Z",
+                                 .data_json = R"json({"text":"AFTER_FENCE_ASSISTANT_SENTINEL"})json"},
   };
 
   auto const basic = ava::session::format_session_markdown(entries);
@@ -287,14 +299,17 @@ void test_session_markdown_export()
              physical_error->data_json.find("SESSION_PROVIDER_DETAILS_CANARY") != std::string::npos,
          "public session projections leave the local physical error record unchanged");
   expect(basic.find("# AVA Session Export") != std::string::npos, "markdown export has deterministic title");
-  expect(basic.find("## User") != std::string::npos && basic.find("Hello AVA") != std::string::npos, "markdown export renders user messages");
+  std::string const expected_markdown_message = "## User\n\nMessage:\n\n" + markdown_message + "\n\n";
+  expect(basic.find(expected_markdown_message) != std::string::npos && basic.find("```text\n# Export heading") == std::string::npos &&
+             basic.find("\\# Export heading") == std::string::npos &&
+             basic.find("```json\n{\"answer\":42,\"markup\":\"**literal**\"}\n```") != std::string::npos,
+         "markdown export preserves prose, heading syntax, fences, and literal code-block JSON bytes without exporter escaping");
   expect(basic.find("internal_replay") == std::string::npos && basic.find("replay_of") == std::string::npos,
          "markdown export hides internal replay user messages");
   expect(basic.find("## Assistant") != std::string::npos && basic.find("Hello human") != std::string::npos, "markdown export renders assistant messages");
-  expect(basic.find("## Reasoning") != std::string::npos && basic.find("visible reasoning summary") != std::string::npos &&
-             basic.find("Signature present") != std::string::npos && basic.find("super-secret-signature") == std::string::npos &&
-             basic.find("export-private-cipher") == std::string::npos,
-         "markdown export renders reasoning blocks without leaking provider-private replay metadata");
+  expect(basic.find("## Reasoning\n") == std::string::npos && basic.find("visible reasoning summary") == std::string::npos &&
+             basic.find("super-secret-signature") == std::string::npos && basic.find("export-private-cipher") == std::string::npos,
+         "human-readable exports omit provider reasoning content by default");
   expect(basic.find("## Reasoning Change") != std::string::npos && basic.find("Budget tokens") != std::string::npos && basic.find("4096") != std::string::npos,
          "markdown export renders reasoning-change budget tokens when present");
   expect(basic.find("Usage:") != std::string::npos && basic.find("input_tokens") != std::string::npos, "markdown export renders assistant usage when present");
@@ -307,17 +322,26 @@ void test_session_markdown_export()
              basic.find("SESSION_PROVIDER_DETAILS_CANARY") == std::string::npos,
          "markdown export renders only a fixed omission for historical provider error diagnostics");
   expect(basic.find("Metadata:") == std::string::npos && basic.find("\"id\":\"user_1\"") == std::string::npos, "markdown export omits metadata by default");
-  expect(basic.find("`````text\nbefore ``` after ```` done\n`````") != std::string::npos, "markdown export expands fences around backtick content");
+  expect(basic.find("Message:\n\nbefore ``` after ```` done\n\n") != std::string::npos,
+         "markdown export leaves message backticks in readable prose instead of adding an outer fence");
   std::string const escaped_control_markdown = std::string("first\nsecond\tindent") + "\\u0000\\u001B\\u007F\\u000D";
-  expect(basic.find(escaped_control_markdown) != std::string::npos, "markdown export escapes decoded fenced control bytes while preserving newlines and tabs");
+  expect(basic.find(escaped_control_markdown) != std::string::npos, "markdown export escapes decoded control bytes while preserving newlines and tabs");
   expect(basic.find('\0') == std::string::npos && basic.find('\x1B') == std::string::npos && basic.find('\x7F') == std::string::npos &&
              basic.find('\r') == std::string::npos,
          "markdown export does not emit raw NUL, escape, DEL, or carriage return bytes");
+  expect(basic.find("Message:\n\n" + unclosed_fence_message + "\n```\n\n## Assistant\n\nMessage:\n\nAFTER_FENCE_ASSISTANT_SENTINEL\n\n") != std::string::npos,
+         "markdown export closes an unterminated message fence before subsequent transcript headings");
 
   auto const with_tools = ava::session::format_session_markdown(entries, ava::session::ExportOptions{.include_tool_details = true, .include_metadata = false});
   expect(with_tools.find("## Tool Call") != std::string::npos && with_tools.find("README.md") != std::string::npos &&
              with_tools.find("## Tool Result") != std::string::npos && with_tools.find("tool output") != std::string::npos,
          "markdown export includes tool calls and results when requested");
+
+  auto const with_reasoning = ava::session::format_session_markdown(entries, ava::session::ExportOptions{.include_reasoning_content = true});
+  expect(with_reasoning.find("## Reasoning\n") != std::string::npos && with_reasoning.find("visible reasoning summary") != std::string::npos &&
+             with_reasoning.find("Signature present") != std::string::npos && with_reasoning.find("super-secret-signature") == std::string::npos &&
+             with_reasoning.find("export-private-cipher") == std::string::npos,
+         "explicit reasoning export includes public reasoning text without provider-private replay metadata");
 
   auto const without_compactions = ava::session::format_session_markdown(
       entries, ava::session::ExportOptions{.include_tool_details = false, .include_metadata = false, .include_compactions = false});
@@ -334,6 +358,9 @@ void test_session_markdown_export()
   expect(html.find("<!doctype html>") != std::string::npos && html.find("<title>AVA Session Export</title>") != std::string::npos &&
              html.find("<pre>") != std::string::npos && html.find("# AVA Session Export") != std::string::npos,
          "html export wraps the session markdown in a self-contained document");
+  expect(html.find("# Export heading") != std::string::npos && html.find("Readable **prose** with `inline code`.") != std::string::npos &&
+             html.find("```json") != std::string::npos && html.find("&quot;answer&quot;:42") != std::string::npos,
+         "html export preserves readable Markdown source while escaping it for HTML");
   expect(html.find("&lt;script&gt;alert(&#39;x&#39;)&lt;/script&gt; &amp; raw") != std::string::npos && html.find("<script>alert") == std::string::npos,
          "html export escapes user and model text instead of emitting executable markup");
 }

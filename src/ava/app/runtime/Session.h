@@ -13,6 +13,7 @@
 #include "ava/app/session_run_controller.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/subagent_config.h"
+#include "ava/tools/edit_history.h"
 #include "ava/mcp/config.h"
 #include "ava/config/model_config.h"
 #include "ava/config/xdg_paths.h"
@@ -205,8 +206,12 @@ class Session : protected Session_aggregate_base
  public:
   using Session_aggregate_base::created;
   using Session_aggregate_base::store;
+  [[nodiscard]] auto edit_history() const -> std::shared_ptr<ava::tools::EditHistory> { return edit_history_; }
 
  private:
+  // Each session owns a separate bounded, process-local undo journal. Tool
+  // workers retain it through shared ownership until their turn has joined.
+  std::shared_ptr<ava::tools::EditHistory> edit_history_ = std::make_shared<ava::tools::EditHistory>();
   template <typename, typename>
   friend class threadsafe::Unlocked;
 

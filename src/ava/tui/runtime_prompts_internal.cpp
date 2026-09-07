@@ -139,6 +139,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     // Competing prompt authority closes process-local selectors so they cannot hide under the prompt and reappear.
     close_competing_select_list_for_prompt(snapshot, active_select_list_);
     snapshot.permission_prompt = permission_prompt_view(prompt);
+    request_attention(snapshot, AttentionEvent::Approval);
     snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
     snapshot.permission_prompt->allow_session_available = allow_session_available;
     snapshot.permission_prompt->allow_remember_available = allow_remember_available;
@@ -430,6 +431,7 @@ ava::core::Result<ava::agent::QuestionAnswer> RuntimePromptCoordinator::resolve_
     // Competing prompt authority closes process-local selectors so they cannot hide under the prompt and reappear.
     close_competing_select_list_for_prompt(snapshot, active_select_list_);
     snapshot.question_prompt = question_prompt_view(prompt);
+    request_attention(snapshot, AttentionEvent::Question);
     snapshot.status =
         prompt.multiple ? "question required: Space toggles, Enter sends, Esc cancels" : "question required: Enter sends, numbers choose, Esc cancels";
   }

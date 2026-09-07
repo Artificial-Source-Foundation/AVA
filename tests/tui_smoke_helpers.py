@@ -65,6 +65,7 @@ def _compatibility_environment(*, home: pathlib.Path, tmpdir: pathlib.Path) -> d
         # initialization cannot write to the pane streams this harness inspects.
         "LIBCWD_NO_STARTUP_MSGS": "1",
         "AVA_NO_DEBUG_OUTPUT": "1",
+        "AVA_CLIPBOARD_BACKEND": "terminal",
     }
     for name in ("LANG", "LC_ALL", "LC_CTYPE"):
         value = os.environ.get(name)

@@ -74,6 +74,7 @@ def allowlisted_environment() -> dict[str, str]:
     # initialization from writing to the streams this smoke inspects.
     env["LIBCWD_NO_STARTUP_MSGS"] = "1"
     env["AVA_NO_DEBUG_OUTPUT"] = "1"
+    env["AVA_CLIPBOARD_BACKEND"] = "terminal"
     return env
 
 
@@ -183,6 +184,7 @@ def main() -> int:
     parser.add_argument("--ava", required=True)
     parser.add_argument("--fake-provider", required=True)
     parser.add_argument("--root", required=True)
+    parser.add_argument("--term", default="xterm-256color")
     args = parser.parse_args()
 
     if not enabled(os.environ.get("AVA_TUI_OSC8_SMOKE")):
@@ -243,7 +245,7 @@ def main() -> int:
                 "XDG_DATA_HOME": str(data),
                 "XDG_CACHE_HOME": str(cache),
                 "XDG_RUNTIME_DIR": str(runtime),
-                "TERM": "xterm-256color",
+                "TERM": args.term,
                 "TERM_PROGRAM": "vscode",
                 "COLORTERM": "truecolor",
                 "MOONSHOT_API_KEY": "test-key",
@@ -352,8 +354,35 @@ def main() -> int:
                     "OSC 52 emission did not retain visible request-sent status; "
                     f"captured={copied_visible.decode(errors='replace')}"
                 )
+            for export_command in (b"/export", b"/export markdown", b"/export ", b"/export markdown "):
+                os.write(master_fd, b"\x1b[200~" + export_command + b"\x1b[201~")
+                read_until(master_fd, process, lambda data: export_command in strip_control_sequences(data), "Markdown export draft")
+                os.write(master_fd, b"\r")
+                exported = read_until(
+                    master_fd, process,
+                    lambda data: re.search(rb"\x1b\]52;c;[A-Za-z0-9+/]*={0,2}\x1b\\", data) is not None
+                    and b"Markdown copy request sent" in strip_control_sequences(data),
+                    "conversation Markdown copied without a report modal",
+                )
+                exported_match = re.search(rb"\x1b\]52;c;([A-Za-z0-9+/]*={0,2})\x1b\\", exported)
+                exported_markdown = base64.b64decode(exported_match.group(1), validate=True)
+                if b"# AVA Session Export" not in exported_markdown or assistant_response not in exported_markdown:
+                    raise RuntimeError("Markdown export did not copy the persisted conversation")
+                if b"Command /export" in strip_control_sequences(exported):
+                    raise RuntimeError("successful Markdown copy opened a report modal")
+
+            # Drain the PTY during exit so terminal restoration cannot block
+            # on an unread output queue.
             os.write(master_fd, b"\x04")
-            process.wait(timeout=5)
+            exit_deadline = time.monotonic() + 5.0
+            while process.poll() is None and time.monotonic() < exit_deadline:
+                ready, _, _ = select.select([master_fd], [], [], 0.1)
+                if ready:
+                    try:
+                        os.read(master_fd, 8192)
+                    except OSError:
+                        break
+            process.wait(timeout=max(0.1, exit_deadline - time.monotonic()))
             if process.returncode != 0:
                 raise RuntimeError(f"AVA clean exit returned {process.returncode}")
             wait_for_no_process_group(process.pid)

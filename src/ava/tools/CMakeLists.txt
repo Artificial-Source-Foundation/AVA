@@ -2,6 +2,7 @@ add_library(ava_tools
   "bash_tool.cpp"
   "diff_utils.cpp"
   "edit_match.cpp"
+  "edit_history.cpp"
   "file_io.cpp"
   "file_tools.cpp"
   "ignore_rules.cpp"

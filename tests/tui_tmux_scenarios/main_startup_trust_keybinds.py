@@ -31,7 +31,7 @@ def _assert_drawer_frame(screen: str, width: int, height: int, label: str) -> li
         raise RuntimeError(f"{label} did not show the session overview title\nscreen:\n{screen}")
     if "live session" in screen or screen.count("Activity") > 1:
         raise RuntimeError(f"{label} duplicated the automatic side rail\nscreen:\n{screen}")
-    if not lines[height - 2].startswith("│  Type a message...") or not lines[height - 1].startswith("│  GPT-5.5 · ctx "):
+    if not lines[height - 2].startswith("│  Type a message...") or not lines[height - 1].startswith("│  Build · GPT-5.5 · ctx "):
         raise RuntimeError(f"{label} did not retain the full-width quiet composer on rows {height - 2}/{height - 1}\nscreen:\n{screen}")
     if any(len(line) > width for line in lines):
         raise RuntimeError(f"{label} exceeded the {width}-column capture bound\nscreen:\n{screen}")
@@ -104,11 +104,11 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         raise RuntimeError(f"fresh TUI startup created an onboarding marker: {onboarding_marker}")
     footer_lines = [line for line in initial.splitlines() if "GPT-5.5" in line and "ctx " in line]
     footer_text = footer_lines[-1].removeprefix("│  ").strip() if footer_lines else ""
-    if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer_text) or any(
-        marker in footer_text for marker in ("Build", "OpenAI", "cwd ", "git ", "entries ")
+    if not re.fullmatch(rf"Build · GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", footer_text) or any(
+        marker in footer_text for marker in ("OpenAI", "cwd ", "git ", "entries ")
     ):
         raise RuntimeError(
-            "composer footer did not contain only the model name and active context usage\n"
+            "composer footer did not contain mode, model name, and active context usage\n"
             f"screen:\n{initial}"
         )
     save_evidence(root, "startup-ready-composer", initial)
@@ -116,15 +116,21 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
     if "\x1b[" in styled_initial:
         raise RuntimeError(f"NO_COLOR=1 TUI frame still captured ANSI style escapes\nscreen:\n{styled_initial}")
 
+    send_keys(tmux_exe, session, "Tab")
+    plan_screen = wait_for(tmux_exe, session, r"│  Plan · GPT-5\.5", "Plan mode visible beside the composer")
+    save_evidence(root, "composer-plan-mode", plan_screen)
+    send_keys(tmux_exe, session, "Tab")
+    wait_for(tmux_exe, session, r"│  Build · GPT-5\.5", "Build mode restored beside the composer")
+
     def wait_for_idle_composer_reflow(width: int, height: int, label: str, *, sidebar_expected: bool = False) -> tuple[str, list[str]]:
         input_row = height - 2
         footer_row = height - 1
-        canvas_left = 0 if sidebar_expected or width <= 120 else (width - 120) // 2
+        canvas_left = 0
         inset = " " * canvas_left
         settled = wait_for(
             tmux_exe,
             session,
-            rf"(?m)\A(?:[^\n]*\n){{{input_row}}}{inset}│  Type a message\.\.\.[^\n]*\n{inset}│  GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}[^\n]*(?:\n|\Z)",
+            rf"(?m)\A(?:[^\n]*\n){{{input_row}}}{inset}│  Type a message\.\.\.[^\n]*\n{inset}│  Build · GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}[^\n]*(?:\n|\Z)",
             f"{label} target composer/footer rows {input_row}/{footer_row}",
         )
         settled_lines = settled.splitlines()
@@ -171,13 +177,13 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         settled, settled_lines = wait_for_idle_composer_reflow(width, height, name, sidebar_expected=sidebar_expected)
         if re.search(r"traceback|assert(?:ion)?|failure", settled, re.IGNORECASE):
             raise RuntimeError(f"{name} idle frame shows failure text\nscreen:\n{settled}")
-        canvas_left = 0 if sidebar_expected or width <= 120 else (width - 120) // 2
+        canvas_left = 0
         canvas_width = width - 39 if sidebar_expected else min(width, 120)
         settled_footer = settled_lines[height - 1][canvas_left + 3 : canvas_left + canvas_width]
         settled_footer = settled_footer.strip()
-        if not re.fullmatch(rf"GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", settled_footer):
+        if not re.fullmatch(rf"Build · GPT-5\.5 · ctx {ACTIVE_CONTEXT_STATUS_PATTERN}", settled_footer):
             raise RuntimeError(
-                f"{name} footer did not contain only the idle model name and active context usage\nscreen:\n{settled}"
+                f"{name} footer did not contain idle mode, model name, and active context usage\nscreen:\n{settled}"
             )
         if sidebar_expected:
             main_width = width - 39
@@ -211,9 +217,9 @@ def scenario_main_startup_trust_keybinds(ctx: SmokeContext) -> None:
         elif "live session" in settled or "Activity" in settled or "  Session" in settled:
             raise RuntimeError(f"{name} unexpectedly showed the automatic rail\nscreen:\n{settled}")
         if width == 160 and not sidebar_expected:
-            expected_prefix = " " * 20 + "│  "
+            expected_prefix = "│  "
             if not settled_lines[height - 2].startswith(expected_prefix) or not settled_lines[height - 1].startswith(expected_prefix):
-                raise RuntimeError(f"{name} did not retain the exact 20-column centered canvas inset\nscreen:\n{settled}")
+                raise RuntimeError(f"{name} did not retain the left-aligned composer and mode row\nscreen:\n{settled}")
         unexpected_controls = [
             character for character in settled if ord(character) < 32 and character != "\n"
         ]

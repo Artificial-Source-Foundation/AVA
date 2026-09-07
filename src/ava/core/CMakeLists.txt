@@ -10,6 +10,7 @@ target_sources(ava_core
     "ids.cpp"
     "json.cpp"
     "mode.cpp"
+    "native_clipboard.cpp"
     "open_beneath.cpp"
     "path.cpp"
     "process_args.cpp"
@@ -34,6 +35,12 @@ target_link_libraries(ava_core
   PRIVATE
     nlohmann_json::nlohmann_json
 )
+
+if(APPLE)
+  # macOS system SDK APIs for native pasteboard text and ImageIO conversion.
+  find_library(AVA_APPLICATION_SERVICES_FRAMEWORK ApplicationServices REQUIRED)
+  target_link_libraries(ava_core PRIVATE "${AVA_APPLICATION_SERVICES_FRAMEWORK}")
+endif()
 
 ava_apply_debugging(ava_core)
 ava_apply_warnings(ava_core)

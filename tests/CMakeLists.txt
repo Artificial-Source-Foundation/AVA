@@ -231,6 +231,7 @@ set(AVA_TESTS_SOURCES
   "provider_builtin_generic_tests.cpp"
   "command_tests.cpp"
   "core_tests.cpp"
+  "native_clipboard_tests.cpp"
   "core_mode_json_permissions_tests.cpp"
   "curl_transport_process_tests.cpp"
   "clipboard_image_process_tests.cpp"
@@ -338,6 +339,7 @@ ava_apply_sanitizers(ava_tests)
 
 set(AVA_TEST_SUITES
   core_mode
+  native_clipboard
   test_harness
   diagnostics
   acp
@@ -1205,6 +1207,7 @@ if(Python3_Interpreter_FOUND)
   endif()
 
   set(AVA_TUI_TMUX_SMOKE_SCENARIOS
+    lean_features
     suspend_resume
     keybind_conflict
     theme_env

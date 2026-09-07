@@ -51,6 +51,7 @@ struct RuntimeActiveRunState final
   std::vector<RuntimeRequestEventState> request_event_states;
   std::atomic_bool run_cancel_requested{false};
   bool close_after_submit = false;
+  bool queue_picker_open = false;
   std::optional<TuiActiveRunQueues> active_queues;
   std::mutex event_context_mutex;
   ava::event::EventEnvelopeContext current_event_context;

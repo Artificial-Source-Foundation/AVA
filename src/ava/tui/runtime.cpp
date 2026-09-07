@@ -220,6 +220,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
 
   RuntimePresentationState presentation_state(options);
   auto& snapshot = presentation_state.snapshot;
+  snapshot.attention_enabled = optional_environment_view("AVA_TUI_ATTENTION") == "1";
   auto& sidebar = presentation_state.sidebar;
   auto& command_session_grants = presentation_state.command_session_grants;
   RuntimePluginUiCoordinator plugin_ui;
@@ -648,7 +649,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       terminal_write_failed = true;
       break;
     }
-    if (!poll_branch_summary())
+    if (!action_controller.poll_clipboard_image() || !poll_branch_summary())
     {
       terminal_write_failed = true;
       break;
@@ -666,7 +667,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       terminal_write_failed = true;
       break;
     }
-    auto input_poll_delay = kIdleInputPollDelay;
+    auto input_poll_delay = action_controller.clipboard_image_pending() ? std::chrono::milliseconds(16) : kIdleInputPollDelay;
     if (auto workspace_wait = subagent_workspace.time_until_poll(input_poll_started_at))
       input_poll_delay = std::min(input_poll_delay, std::chrono::ceil<std::chrono::milliseconds>(*workspace_wait));
     if (renderer.has_pending_render())
@@ -702,7 +703,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
         }
         continue;
       }
-      if (terminal_signal_number() == SIGINT && !draft.text.empty())
+      if (terminal_signal_number() == SIGINT && (!draft.text.empty() || action_controller.clipboard_image_blocks_submit()))
       {
         clear_terminal_signal();
         static_cast<void>(clear_draft_for_interrupt());
@@ -746,7 +747,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
       }
       if (output_input.action == CommandOutputInputAction::Redraw)
       {
-        snapshot.command_output->scroll_offset = output_input.scroll_offset;
+        apply_command_output_input(*snapshot.command_output, output_input);
         if (!renderer.request_render())
         {
           terminal_write_failed = true;
@@ -1974,6 +1975,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
     }
     else if (is_action(TuiAction::ClearInput) && (!draft.text.empty() || !is_action(TuiAction::Interrupt)))
     {
+      if (is_action(TuiAction::Interrupt))
+        action_controller.cancel_clipboard_image();
       pending_escape_clear = false;
       history_index.reset();
       draft_input.clear();
@@ -1999,7 +2002,9 @@ int run_interactive_composer(TuiRuntimeOptions options)
       pending_escape_clear = false;
       select_path_completion();
     }
-    else if (is_action(TuiAction::AutocompleteAccept) && force_path_completion())
+    // The default Tab binding also toggles mode. On an empty draft, keep
+    // that action reachable instead of forcing an unsolicited path palette.
+    else if (is_action(TuiAction::AutocompleteAccept) && (!is_action(TuiAction::ModeToggle) || !draft.text.empty()) && force_path_completion())
     {
       pending_escape_clear = false;
     }
@@ -2024,7 +2029,7 @@ int run_interactive_composer(TuiRuntimeOptions options)
     else if (is_action(TuiAction::Interrupt))
     {
       path_completion_force_active = false;
-      if (!draft.text.empty())
+      if (!draft.text.empty() || action_controller.clipboard_image_blocks_submit())
       {
         static_cast<void>(clear_draft_for_interrupt());
         snapshot.selected_slash_command_index = selected_slash_command_index;

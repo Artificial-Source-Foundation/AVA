@@ -4,6 +4,7 @@
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/text.h"
 #include "ava/tui/tool_cards.h"
+#include "ava/core/native_clipboard.h"
 
 #include <algorithm>
 #include <cerrno>
@@ -221,14 +222,30 @@ std::optional<std::string> try_build_osc52_clipboard_transport(std::string_view 
   return transport;
 }
 
-bool copy_text_to_terminal_clipboard(std::string_view text)
+ClipboardCopyResult copy_text_to_clipboard_result(std::string_view text)
 {
+  if (text.empty())
+    return ClipboardCopyResult::WriteFailure;
+  if (ava::core::native_clipboard_enabled())
+  {
+    if (text.size() > ava::core::kMaxNativeClipboardTextBytes)
+      return ClipboardCopyResult::Oversize;
+    return ava::core::write_native_clipboard_text(text) ? ClipboardCopyResult::Copied : ClipboardCopyResult::WriteFailure;
+  }
+  if (text.size() > kMaxTerminalClipboardTextBytes)
+    return ClipboardCopyResult::Oversize;
   auto const* tmux_value = std::getenv("TMUX");
   auto const tmux = tmux_value == nullptr ? std::nullopt : std::optional<std::string_view>(tmux_value);
   auto sequence = try_build_osc52_clipboard_transport(text, tmux);
   if (!sequence.has_value())
-    return false;
-  return write_all_to_stdout(*sequence);
+    return ClipboardCopyResult::WriteFailure;
+  return write_all_to_stdout(*sequence) ? ClipboardCopyResult::RequestSent : ClipboardCopyResult::WriteFailure;
+}
+
+bool copy_text_to_terminal_clipboard(std::string_view text)
+{
+  auto const result = copy_text_to_clipboard_result(text);
+  return result == ClipboardCopyResult::Copied || result == ClipboardCopyResult::RequestSent;
 }
 
 std::optional<std::string_view> copy_text_from_answer(ava::agent::QuestionAnswer const& answer)

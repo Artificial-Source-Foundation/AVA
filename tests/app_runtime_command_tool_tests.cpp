@@ -32,6 +32,24 @@ using namespace ava::tests;
 // unlocked_session must be unlocked on entry and supplies session state; workspace identifies the fixture project.
 void app_command_dispatcher_tool_part(ava::app::runtime::session_ts& unlocked_session, std::filesystem::path const& workspace)
 {
+  {
+    auto write_undo = ava::app::run_command(unlocked_session, {.command = "/write undo-command.txt recorded edit"});
+    auto preview = ava::app::run_command(unlocked_session, {.command = "/undo "});
+    expect(write_undo && preview && !preview->output.empty() && preview->output.front().contains("Undo preview") &&
+               std::filesystem::exists(workspace / "undo-command.txt"),
+           "local undo previews a native command write without applying it");
+    auto confirmed = ava::app::run_command(unlocked_session, {.command = "/undo --confirm"});
+    expect(confirmed && !confirmed->output.empty() && confirmed->output.front().contains("Restored 1 files") &&
+               !std::filesystem::exists(workspace / "undo-command.txt"),
+           "local undo confirmation restores through session-owned history");
+    auto entries = ava::app::runtime::session_ts::rat(unlocked_session)->store.load();
+    expect(entries && std::ranges::any_of(*entries,
+                                          [](ava::session::SessionEntry const& entry) -> bool {
+                                            return entry.type == ava::session::EntryType::UserMessage && entry.data_json.contains("local_undo") &&
+                                                   entry.data_json.contains("Restored 1 files");
+                                          }),
+           "confirmed local undo records a model-visible user receipt without erasing conversation history");
+  }
   std::vector<ava::event::RuntimeEvent> command_tool_events;
   auto glob = ava::app::run_command(
       unlocked_session, ava::app::CommandRequest{.command = "/glob **/*.cpp", .event_sink = [&command_tool_events](ava::event::RuntimeEvent const& event) {

@@ -61,6 +61,8 @@ struct PreparedCompactionContext
                                                                         ava::provider::Provider const& provider, ava::http::Transport& transport,
                                                                         runtime::RunOptions const& options);
 
+[[nodiscard]] auto bounded_run_receipt(ava::agent::AgentLoopResult const& result) -> std::string;
+
 // Run a prompt using an admission guard already acquired from this session's controller.
 [[nodiscard]] ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::session_ts& unlocked_session, std::string const& user_message,
                                                                                  ava::provider::Provider const& provider, ava::http::Transport& transport,

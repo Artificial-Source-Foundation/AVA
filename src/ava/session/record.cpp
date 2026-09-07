@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/run_stop.h"
 #include "ava/session/record.h"
 #include "ava/core/json.h"
 #include "ava/core/strict_json.h"
@@ -424,6 +425,9 @@ bool is_unsupported_session_version_error(ava::core::Error const& error)
 
 ava::core::Result<std::string> serialize_session_entry_line(SessionEntry const& entry)
 {
+  if (entry.type == EntryType::RunStop)
+    if (auto stop = parse_run_stop(entry); !stop)
+      return std::unexpected(std::move(stop.error()));
   if (auto valid_type_version = validate_entry_type_version(entry.type, entry.version); !valid_type_version)
     return std::unexpected(std::move(valid_type_version.error()));
 
@@ -497,7 +501,7 @@ ava::core::Result<SessionEntry> parse_session_entry_line(std::string_view line, 
     error.with_context("path", path.string());
     return std::unexpected(std::move(error));
   }
-  return SessionEntry{
+  SessionEntry entry{
       .id = id,
       .parent_id = parent_id,
       .type = *type,
@@ -505,6 +509,10 @@ ava::core::Result<SessionEntry> parse_session_entry_line(std::string_view line, 
       .data_json = extract_json_object(line, "data"),
       .version = *version,
   };
+  if (entry.type == EntryType::RunStop)
+    if (auto stop = parse_run_stop(entry); !stop)
+      return std::unexpected(std::move(stop.error()));
+  return entry;
 }
 
 std::string json_escape(std::string_view value)
@@ -591,12 +599,16 @@ std::string to_string(EntryType type)
       return "error";
     case EntryType::Cancel:
       return "cancel";
+    case EntryType::RunStop:
+      return "run_stop";
   }
   return "error";
 }
 
 ava::core::Result<EntryType> parse_entry_type(std::string_view value)
 {
+  if (value == "run_stop")
+    return EntryType::RunStop;
   if (value == "session_start")
     return EntryType::SessionStart;
   if (value == "session_metadata")

@@ -2235,26 +2235,28 @@ void run_tui_composer_rendering_tests_part_1()
   expect(std::ranges::none_of(token_margin_lines, [](std::string const& line) { return strip_sgr(line).find("1.3k (0.7%)") != std::string::npos; }),
          "tui keeps token-status text out of the composer footer");
 
-  auto const compact_footer_lines = ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
-                                                                                         .provider = "openai",
-                                                                                         .model = "gpt-5.5",
-                                                                                         .session_id = "session_test",
-                                                                                         .input = "",
-                                                                                         .status = "ready",
-                                                                                         .token_status = "1.3k (0.7%)",
-                                                                                         .active_context_status = "870 (3.2%)",
-                                                                                         .transcript = {},
-                                                                                         .width = 110,
-                                                                                         .height = 10,
-                                                                                         .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
-                                                                                                                              .mode = "build",
-                                                                                                                              .provider = "openai",
-                                                                                                                              .model = "gpt-5.5",
-                                                                                                                              .workspace = "/workspace/project",
-                                                                                                                              .git_branch = "develop",
-                                                                                                                              .token_status = "1.3k (0.7%)",
-                                                                                                                              .context_source_count = 2,
-                                                                                                                              .session_entry_count = 42}});
+  auto const compact_footer_lines =
+      ava::tui::render_composer(ava::tui::ComposerSnapshot{.mode = "build",
+                                                           .provider = "openai",
+                                                           .model = "gpt-5.5",
+                                                           .session_id = "session_test",
+                                                           .input = "",
+                                                           .status = "ready",
+                                                           .token_status = "1.3k (0.7%)",
+                                                           .active_context_status = "870 (3.2%)",
+                                                           .transcript = {},
+                                                           .width = 110,
+                                                           .height = 10,
+                                                           .sidebar = ava::tui::SidebarSnapshot{.session_id = "session_test",
+                                                                                                .mode = "build",
+                                                                                                .provider = "openai",
+                                                                                                .model = "gpt-5.5",
+                                                                                                .workspace = "/workspace/project",
+                                                                                                .git_branch = "develop",
+                                                                                                .token_status = "1.3k (0.7%)",
+                                                                                                .context_source_count = 2,
+                                                                                                .session_entry_count = 42,
+                                                                                                .active_context_status = "~180k (90.0%)"}});
   expect(std::ranges::any_of(compact_footer_lines,
                              [](std::string const& line) {
                                auto const visible = strip_sgr(line);
@@ -2818,11 +2820,12 @@ void run_tui_composer_rendering_tests_part_4()
                                                                                                 .workspace = "/workspace/project",
                                                                                                 .git_branch = "develop",
                                                                                                 .version = "0.32",
-                                                                                                .token_status = "180k (90.0%)",
+                                                                                                .token_status = "300k",
                                                                                                 .reasoning_status = std::nullopt,
                                                                                                 .context_source_count = 3,
                                                                                                 .session_path = "/tmp/ava/sessions/session_test.jsonl",
-                                                                                                .session_entry_count = 42}});
+                                                                                                .session_entry_count = 42,
+                                                                                                .active_context_status = "~180k (90.0%)"}});
   expect(
       std::ranges::none_of(long_session_sidebar_frame,
                            [](std::string const& line) { return strip_sgr(line).find("path /tmp/ava/sessions") != std::string::npos; }) &&
@@ -2913,11 +2916,12 @@ void run_tui_composer_rendering_tests_part_4()
           .workspace = "/raw/populated/workspace/must/stay/hidden",
           .git_branch = "develop\x1b[31m",
           .version = "8.8.8-must-stay-hidden",
-          .token_status = "180k (90.0%)\x1b[31m",
+          .token_status = "300k\x1b[31m",
           .reasoning_status = "high\x1b[31m",
           .context_source_count = 7,
           .session_path = "/raw/populated/session/path.jsonl",
-          .session_entry_count = 42}});
+          .session_entry_count = 42,
+          .active_context_status = "~180k (90.0%)"}});
   auto const curated_populated_text = tui_test_support::join_visible_lines(curated_populated_sidebar);
   auto const curated_populated_rail_lines = [&]() {
     std::vector<std::string> lines;
@@ -2950,8 +2954,7 @@ void run_tui_composer_rendering_tests_part_4()
              curated_populated_text.find("src/curated-file.cpp") != std::string::npos && curated_populated_text.find("+12") != std::string::npos &&
              curated_populated_text.find("-3") != std::string::npos && curated_populated_text.find("Context") != std::string::npos &&
              curated_populated_text.find("branch develop") != std::string::npos && curated_populated_text.find("reasoning high") != std::string::npos &&
-             curated_populated_text.find("usage 180k (90.0%)") != std::string::npos &&
-             curated_populated_text.find("context pressure critical 90.0%") != std::string::npos &&
+             curated_populated_text.contains("session usage 300k") && curated_populated_text.contains("context pressure critical 90.0%") &&
              curated_populated_text.find("context sources 7") != std::string::npos && curated_populated_text.find("completed-history") == std::string::npos &&
              curated_populated_text.find("raw-populated-session") == std::string::npos && curated_populated_text.find("/raw/populated") == std::string::npos &&
              curated_populated_text.find("entries 42") == std::string::npos && curated_populated_text.find("8.8.8") == std::string::npos &&
@@ -3183,11 +3186,12 @@ void run_tui_composer_rendering_tests_part_4()
                   .workspace = "/workspace/a/very/long/project/path/that/must/wrap/and/remain/reachable/in/the/session/overview",
                   .git_branch = "develop-responsive-sidebar-checkpoint",
                   .version = "1.0.0-responsive-sidebar",
-                  .token_status = "180k (90.0%)",
+                  .token_status = "300k",
                   .reasoning_status = "high",
                   .context_source_count = 7,
                   .session_path = "/tmp/ava/sessions/a/very/long/session/path/session_drawer.jsonl",
-                  .session_entry_count = 42},
+                  .session_entry_count = 42,
+                  .active_context_status = "~180k (90.0%)"},
           .sidebar_drawer_visible = true};
   auto wide_drawer_snapshot = drawer_snapshot;
   wide_drawer_snapshot.width = 160;

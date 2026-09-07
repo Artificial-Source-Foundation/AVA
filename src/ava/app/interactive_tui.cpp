@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/run_stop.h"
 #include "ava/app/clipboard_image.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
@@ -380,6 +381,32 @@ int run_tui(ShellState state)
     return session_selector_view_from_catalog();
   };
   std::vector<ava::tui::TranscriptItem> initial_transcript;
+  {
+    auto authority = runtime::session_ts::crat(unlocked_session)->read_authority_1();
+    if (!authority)
+    {
+      std::cerr << authority.error().format() << '\n';
+      return 1;
+    }
+    auto history = authority->load();
+    if (!history)
+    {
+      std::cerr << history.error().format() << '\n';
+      return 1;
+    }
+    for (auto const& entry : *history)
+    {
+      if (entry.type != ava::session::EntryType::RunStop)
+        continue;
+      auto stop = ava::session::parse_run_stop(entry);
+      if (!stop)
+      {
+        std::cerr << stop.error().format() << '\n';
+        return 1;
+      }
+      initial_transcript.push_back({.label = "run stop", .text = "[max_turn_requests] " + ava::session::run_stop_display(*stop)});
+    }
+  }
   if (auto onboarding = ava::app::first_run_auth_onboarding_message(unlocked_session))
   {
     initial_transcript.push_back(ava::tui::TranscriptItem{.label = "setup", .text = std::move(*onboarding)});

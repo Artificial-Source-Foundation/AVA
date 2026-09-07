@@ -211,6 +211,7 @@ set(AVA_TESTS_SOURCES
   "app_rpc_serialization_tests.cpp"
   "app_rpc_session_tests.cpp"
   "app_runtime_tests.cpp"
+  "run_stop_tests.cpp"
   "app_command_classification_tests.cpp"
   "app_event_serialization_tests.cpp"
   "app_runtime_startup_tests.cpp"
@@ -786,6 +787,9 @@ if(AVA_ENABLE_ACPX_INTEROP AND NOT Python3_Interpreter_FOUND)
   message(FATAL_ERROR "AVA_ENABLE_ACPX_INTEROP requires Python 3 for the bounded launcher")
 endif()
 if(Python3_Interpreter_FOUND)
+  add_test(NAME ava_tests.tui_context_status_matcher
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tui_context_status_matcher_test.py)
+  set_tests_properties(ava_tests.tui_context_status_matcher PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
   if(APPLE)
     add_test(NAME ava_macos.default_command_home
       COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/macos_command_home_test.py --ava $<TARGET_FILE:ava>)
@@ -1207,6 +1211,7 @@ if(Python3_Interpreter_FOUND)
   endif()
 
   set(AVA_TUI_TMUX_SMOKE_SCENARIOS
+    bounded_run
     lean_features
     suspend_resume
     keybind_conflict

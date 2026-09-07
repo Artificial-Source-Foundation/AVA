@@ -26,6 +26,7 @@ struct SessionEntryCounts
   std::size_t branch_summary = 0;
   std::size_t error = 0;
   std::size_t cancel = 0;
+  std::size_t run_stop = 0;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };

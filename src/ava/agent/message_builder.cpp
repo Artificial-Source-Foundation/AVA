@@ -3,6 +3,7 @@
 #include "ava/agent/message_builder.h"
 #include "ava/agent/provider_output_validation.h"
 #include "ava/session/assistant_output.h"
+#include "ava/session/compaction.h"
 #include "ava/session/session_store.h"
 #include "ava/session/validation.h"
 #include "ava/permissions/permission.h"
@@ -1251,6 +1252,86 @@ ava::core::Result<std::vector<ava::provider::ChatMessage>> build_provider_messag
   if (!projection)
     return std::unexpected(std::move(projection.error()));
   return std::move(projection->messages);
+}
+
+auto prepared_context_usage(std::vector<ava::session::SessionEntry> const& entries, std::string_view system_prompt, MessageBuildOptions const& options)
+    -> ava::core::Result<PreparedContextUsage>
+{
+  auto projected = build_provider_messages_from_entries(entries, options);
+  if (!projected)
+  {
+    return std::unexpected(std::move(projected.error()));
+  }
+  auto const add = [](std::size_t left, std::size_t right) -> std::size_t {
+    return left > std::numeric_limits<std::size_t>::max() - right ? std::numeric_limits<std::size_t>::max() : left + right;
+  };
+  auto const estimate = [&add](std::vector<ava::provider::ChatMessage> const& messages) -> std::size_t {
+    std::size_t tokens = 0;
+    for (auto const& message : messages)
+    {
+      std::size_t content_tokens = 0;
+      if (message.content_parts.empty())
+      {
+        content_tokens = ava::session::estimate_tokens(message.content);
+      }
+      else
+      {
+        for (auto const& part : message.content_parts)
+        {
+          auto const text = ava::session::estimate_tokens(part.text);
+          auto const arguments = ava::session::estimate_tokens(part.input_json);
+          auto const opaque = ava::session::estimate_tokens(part.reasoning_native_item_json);
+          // Native reasoning may contain text already represented in part.text.
+          content_tokens = add(content_tokens, add(std::max(text, opaque), arguments));
+          content_tokens = add(content_tokens, ava::session::estimate_tokens(part.tool_name));
+        }
+      }
+      tokens = add(tokens, add(content_tokens, 8));
+    }
+    return tokens;
+  };
+  auto const current = estimate(*projected);
+  PreparedContextUsage result{.tokens = add(current, ava::session::estimate_tokens(system_prompt))};
+  auto const classified = ava::session::classify_assistant_output(entries);
+  if (classified.turns.empty() || !options.target || options.replay_mode != HistoryReplayMode::Automatic)
+  {
+    return result;
+  }
+  auto const& latest = classified.turns.back();
+  auto const& target = *options.target;
+  if (latest.commit.provider != target.provider_id || latest.commit.model != target.model_id ||
+      latest.commit.api_family.value_or(target.api_family) != target.api_family || latest.commit.reasoning_format.value_or("") != target.reasoning_format ||
+      !latest.commit.usage_json)
+  {
+    return result;
+  }
+  // A context boundary invalidates the previous provider's input measurement.
+  for (std::size_t index = latest.commit_index + 1; index < entries.size(); ++index)
+  {
+    auto const type = entries.at(index).type;
+    if (type == ava::session::EntryType::Compaction || type == ava::session::EntryType::ModelChange || type == ava::session::EntryType::ReasoningChange ||
+        type == ava::session::EntryType::ModeChange)
+    {
+      return result;
+    }
+  }
+  auto const usage = latest.commit.usage_json.value_or("");
+  auto const input = ava::core::json::integer_field(usage, "input_tokens");
+  if (!input || *input < 0 || bool_field(usage, "estimated").value_or(false) || ava::core::json::string_field(usage, "source").value_or("") == "estimated")
+  {
+    return result;
+  }
+  std::vector<ava::session::SessionEntry> prefix(entries.begin(), entries.begin() + static_cast<std::ptrdiff_t>(latest.start_index));
+  auto previous = build_provider_messages_from_entries(prefix, options);
+  if (!previous)
+  {
+    return std::unexpected(std::move(previous.error()));
+  }
+  auto const prior = estimate(*previous);
+  auto const measured = static_cast<std::size_t>(*input);
+  result.provider_input_tokens = measured;
+  result.tokens = current >= prior ? add(measured, current - prior) : measured - std::min(measured, prior - current);
+  return result;
 }
 
 }  // namespace ava::agent

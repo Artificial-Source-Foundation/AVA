@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/record.h"
+#include "ava/session/run_stop.h"
 #include "ava/session/session_metadata.h"
 #include "ava/session/validation.h"
 #include "ava/session/validation_fields.h"
@@ -1276,6 +1277,8 @@ std::string_view to_string(SessionReplayIssueKind kind) noexcept
       return "invalid_compaction_entry";
     case SessionReplayIssueKind::InvalidSessionMetadataEntry:
       return "invalid_session_metadata_entry";
+    case SessionReplayIssueKind::InvalidRunStopEntry:
+      return "invalid_run_stop_entry";
     case SessionReplayIssueKind::InvalidBranchSummaryEntry:
       return "invalid_branch_summary_entry";
     case SessionReplayIssueKind::InvalidMessageEntry:
@@ -1473,6 +1476,13 @@ SessionReplayValidation validate_session_replay(std::vector<SessionEntry> const&
     if (entry.type == EntryType::PermissionDecision && options.require_permission_decision_integrity)
     {
       validate_permission_decision(validation, pending_permissions, index, entry);
+      continue;
+    }
+
+    if (entry.type == EntryType::RunStop)
+    {
+      if (auto stop = parse_run_stop(entry); !stop)
+        add_error(validation, SessionReplayIssueKind::InvalidRunStopEntry, index, entry, "", stop.error().message());
       continue;
     }
 

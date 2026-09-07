@@ -24,9 +24,11 @@ from .main_session_mgmt import scenario_main_session_mgmt
 from .main_paste_scrollback_attach import scenario_main_paste_scrollback_attach
 from .plugin_ui import scenario_plugin_ui
 from .lean_features import scenario_lean_features
+from .bounded_run import scenario_bounded_run
 
 
 SCENARIOS = (
+    "bounded_run",
     "lean_features",
     "suspend_resume",
     "keybind_conflict",
@@ -54,6 +56,7 @@ SCENARIOS = (
 )
 
 SCENARIO_HANDLERS = {
+    "bounded_run": scenario_bounded_run,
     "lean_features": scenario_lean_features,
     "suspend_resume": scenario_suspend_resume,
     "keybind_conflict": scenario_keybind_conflict,

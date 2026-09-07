@@ -899,8 +899,11 @@ std::vector<std::string> render_sidebar_drawer_body(SidebarSnapshot const& sideb
   push_sidebar_drawer_value(lines, "workspace", sanitize_terminal_text(sidebar.workspace), width);
   push_sidebar_drawer_value(lines, "branch", sanitize_terminal_text(sidebar.git_branch), width);
   push_sidebar_drawer_value(lines, "reasoning", sidebar.reasoning_status ? sanitize_terminal_text(*sidebar.reasoning_status) : std::string("unknown"), width);
-  push_sidebar_drawer_value(lines, "usage", sidebar.token_status ? sanitize_terminal_text(*sidebar.token_status) : std::string("tokens unknown"), width);
-  if (auto const percent = percent_text_from_token_status(sidebar.token_status))
+  push_sidebar_drawer_value(lines, "session usage", sidebar.token_status ? sanitize_terminal_text(*sidebar.token_status) : std::string("tokens unknown"),
+                            width);
+  push_sidebar_drawer_value(lines, "context", sidebar.active_context_status ? sanitize_terminal_text(*sidebar.active_context_status) : std::string("unknown"),
+                            width);
+  if (auto const percent = percent_text_from_token_status(sidebar.active_context_status))
   {
     push_sidebar_drawer_value(lines, "context pressure", context_pressure_level(*percent) + " " + sanitize_terminal_text(*percent) + "%", width);
   }
@@ -1070,7 +1073,7 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
   auto const known_branch = known_value(sidebar.git_branch);
   auto const known_reasoning = sidebar.reasoning_status && known_value(*sidebar.reasoning_status);
   auto const known_token_status = sidebar.token_status && known_token_value(*sidebar.token_status);
-  auto const has_context = known_branch || known_reasoning || known_token_status || sidebar.context_source_count.has_value();
+  auto const has_context = known_branch || known_reasoning || known_token_status || sidebar.active_context_status || sidebar.context_source_count.has_value();
   if (has_context && lines.size() < height)
   {
     begin_group("Context");
@@ -1080,9 +1083,15 @@ std::vector<std::string> render_sidebar(SidebarSnapshot const& sidebar, std::siz
       push_sidebar_line(lines, "reasoning " + sanitize_terminal_text(*sidebar.reasoning_status), width);
     if (known_token_status)
     {
-      push_sidebar_line(lines, "usage " + sanitize_terminal_text(*sidebar.token_status), width);
-      if (auto const percent = percent_text_from_token_status(sidebar.token_status))
+      push_sidebar_line(lines, "session usage " + sanitize_terminal_text(*sidebar.token_status), width);
+    }
+    if (sidebar.active_context_status)
+    {
+      push_sidebar_line(lines, "context " + sanitize_terminal_text(*sidebar.active_context_status), width);
+      if (auto const percent = percent_text_from_token_status(sidebar.active_context_status))
+      {
         push_sidebar_line(lines, context_pressure_line(*percent), width);
+      }
     }
     if (sidebar.context_source_count.has_value())
       push_sidebar_line(lines, "context sources " + std::to_string(*sidebar.context_source_count), width);

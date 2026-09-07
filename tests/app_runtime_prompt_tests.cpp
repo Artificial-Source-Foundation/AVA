@@ -9,6 +9,7 @@
 #include "ava/app/clipboard_image.h"
 #include "ava/app/commands.h"
 #include "ava/app/interactive_run_queue.h"
+#include "ava/app/line_shell_internal.h"
 #include "ava/app/onboarding.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/rpc/serialization.h"
@@ -16,6 +17,7 @@
 #include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_compaction.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/mode.h"
@@ -27,7 +29,10 @@
 #include "ava/config/auth.h"
 #include "ava/session/attachments.h"
 #include "ava/session/record.h"
+#include "ava/session/run_stop.h"
+#include "ava/session/validation.h"
 #include "ava/session/session_store.h"
+#include "ava/session/stats.h"
 #include "ava/permissions/permission.h"
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
@@ -1328,6 +1333,64 @@ void test_app_run_prompt_emits_events()
   expect(entries && entries->size() == 4 && (*entries)[1].type == ava::session::EntryType::UserMessage &&
              (*entries)[2].type == ava::session::EntryType::AssistantOutputItem && (*entries)[3].type == ava::session::EntryType::AssistantTurnCommit,
          "runtime run_prompt persists one committed v4 assistant turn in the runtime session");
+
+  std::vector<ava::http::HttpResponse> rounds;
+  for (int round = 0; round < 10; ++round)
+  {
+    auto const call_id = "bounded_glob_" + std::to_string(round);
+    std::string body = R"(data: {"type":"response.function_call.added","call_id":")" + call_id + R"(","name":"glob"})";
+    body += "\n\n";
+    body += R"(data: {"type":"response.function_call_arguments.delta","call_id":")";
+    body += call_id;
+    body += R"(","delta":"{\"pattern\":\"*.md\"}"})";
+    body += "\n\n";
+    body += R"(data: {"type":"response.function_call.done","call_id":")";
+    body += call_id;
+    body += R"("})";
+    body += "\n\n";
+    body += R"(data: {"type":"response.completed","response":{"usage":{"input_tokens":1000,"output_tokens":100,"total_tokens":1100}}})";
+    body += "\n\ndata: [DONE]\n\n";
+    rounds.push_back(ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = std::move(body)});
+  }
+  rounds.push_back(
+      ava::http::HttpResponse{.status_code = 200,
+                              .headers = {},
+                              .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"resumed from completed results\"}\n\ndata: [DONE]\n\n"});
+  ava::tests::FakeTransport bounded_transport(std::move(rounds));
+  events.clear();
+  auto paused = ava::app::run_prompt(*unlocked_session_result, "run ten tool rounds", provider, bounded_transport, run_options);
+  auto const* pause_event = events.empty() ? nullptr : ava::tests::runtime_event_as<ava::event::CompletionEvent>(events.back());
+  std::string const receipt = "Paused after 10 tool rounds. Work is incomplete. Continue to resume.";
+  expect(paused && paused->outcome == ava::core::RuntimeTerminalOutcome::MaxTurnRequests && bounded_transport.requests().size() == 10 &&
+             (pause_event != nullptr) && pause_event->payload.stop_reason == "max_turn_requests" && pause_event->payload.status == "paused" &&
+             pause_event->payload.reason == receipt,
+         "ten tool rounds emit an explicit incomplete pause receipt without an extra provider request");
+  auto paused_entries = ava::app::runtime::session_ts::rat(*unlocked_session_result)->store.load();
+  expect(paused_entries && std::ranges::any_of(*paused_entries,
+                                               [&receipt](auto const& entry) -> auto {
+                                                 return entry.type == ava::session::EntryType::RunStop &&
+                                                        entry.data_json.find("max_turn_requests") != std::string::npos && ava::session::parse_run_stop(entry) &&
+                                                        ava::session::run_stop_display(*ava::session::parse_run_stop(entry)) == receipt;
+                                               }),
+         "bounded run persists its typed stop reason and continuation receipt");
+  expect(paused_entries && ava::session::validate_session_replay(*paused_entries).ok(), "bounded run history passes full replay validation");
+  auto usage_status = ava::app::line_shell_internal::token_status_for_session(*unlocked_session_result);
+  expect(usage_status && !usage_status->contains('%'), "cumulative multi-request usage is never divided by one context window");
+  auto context = [&]() -> ava::core::Result<ava::agent::PreparedContextUsage> {
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
+    return ava::app::runtime::context_usage(*paused_entries, session_r->system_prompt(), session_r->model());
+  }();
+  auto cumulative = ava::session::compute_session_stats(*paused_entries);
+  expect(context && context->provider_input_tokens == 1000 && context->estimated && context->tokens >= 1000 && context->tokens < 2000 && cumulative &&
+             cumulative->total_tokens.value_or(0) > 10'000,
+         "ten sequential provider inputs exceed a 2000-token window cumulatively while the prepared next context remains below it");
+  auto resumed = ava::app::run_prompt(*unlocked_session_result, "Continue", provider, bounded_transport, run_options);
+  auto resumed_entries = ava::app::runtime::session_ts::rat(*unlocked_session_result)->store.load();
+  expect(resumed && resumed->final_text == "resumed from completed results" && resumed->tool_calls == 0 && bounded_transport.requests().size() == 11 &&
+             resumed_entries &&
+             std::ranges::count_if(*resumed_entries, [](auto const& entry) -> auto { return entry.type == ava::session::EntryType::ToolResult; }) == 10 &&
+             bounded_transport.requests().back().body.contains("bounded_glob_9"),
+         "Continue starts another bounded run with prior results and does not replay completed tools");
 }
 
 void test_app_run_prompt_expands_file_references()

@@ -33,10 +33,9 @@ SKIP = 77
 # still bounds tmux subprocess churn while remaining well below AVA's 100 ms
 # bare-Escape disambiguation delay.
 POLL_INTERVAL = 0.02
-# Footer value emitted by AVA's active-context meter: a known model-window
-# percentage, a sub-0.1% sentinel, or an estimated compact token count when
-# the model has no context-window metadata.
-ACTIVE_CONTEXT_STATUS_PATTERN = r"(?:~\d+(?:\.\d+)?[km]?|\d+(?:\.\d+)?[km]? \((?:<0\.1%|\d+(?:\.\d+)?%)\))"
+# The amount may be estimated independently of whether model-window metadata
+# supplies a percentage (including the sub-0.1% sentinel).
+ACTIVE_CONTEXT_STATUS_PATTERN = r"~?\d+(?:\.\d+)?[km]?(?: \((?:<0\.1%|\d+(?:\.\d+)?%)\))?"
 
 
 def enabled(value: str | None) -> bool:

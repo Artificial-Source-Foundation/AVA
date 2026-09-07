@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/run_stop.h"
 #include "ava/session/export.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/record.h"
@@ -425,6 +426,16 @@ std::string format_projected_session_markdown(std::vector<SessionEntry> const& e
       continue;
     switch (entry.type)
     {
+      case EntryType::RunStop: {
+        auto stop = parse_run_stop(entry);
+        if (stop)
+        {
+          append_heading(out, "Run Stop (max_turn_requests)");
+          append_metadata(out, entry, options);
+          append_fenced_block(out, "Paused", run_stop_display(*stop));
+        }
+        break;
+      }
       case EntryType::SessionStart:
         append_session_start(out, entry, options);
         break;

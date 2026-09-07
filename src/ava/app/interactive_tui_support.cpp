@@ -3,6 +3,7 @@
 #include "ava/app/line_shell.h"
 #include "ava/app/line_shell_internal.h"
 #include "ava/app/project_trust.h"
+#include "ava/app/runtime_compaction.h"
 #include "ava/agent/todo.h"
 #include "ava/tui/composer.h"
 #include "ava/tui/keybindings.h"
@@ -268,7 +269,7 @@ std::string format_active_context_status_value(long long tokens, std::optional<l
   return "~" + count;
 }
 
-std::optional<std::string> compact_token_status(ava::session::SessionStats const& stats, std::optional<long long> context_window_tokens)
+auto compact_token_status(ava::session::SessionStats const& stats) -> std::optional<std::string>
 {
   auto const tokens = compact_token_total(stats);
   if (!tokens)
@@ -276,10 +277,6 @@ std::optional<std::string> compact_token_status(ava::session::SessionStats const
 
   std::ostringstream output;
   output << format_compact_token_count(*tokens);
-  if (auto const percent = format_context_window_percent(*tokens, context_window_tokens))
-  {
-    output << " (" << *percent << ')';
-  }
   return output.str();
 }
 
@@ -287,9 +284,9 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::session_t
 {
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
-    return std::pair{session_r->read_authority_1(), session_r->model().context_window_tokens};
+    return session_r->read_authority_1();
   }();
-  auto& [read_authority, context_window_tokens] = snapshot;
+  auto& read_authority = snapshot;
   if (!read_authority)
     return std::nullopt;
   auto entries = read_authority->load();
@@ -298,7 +295,7 @@ std::optional<std::string> token_status_for_session(ava::app::runtime::session_t
   auto stats = ava::session::compute_session_stats(*entries);
   if (!stats)
     return std::nullopt;
-  return compact_token_status(*stats, context_window_tokens);
+  return compact_token_status(*stats);
 }
 
 ava::tui::TodoStatus to_tui_todo_status(ava::agent::TodoStatus status)
@@ -339,24 +336,27 @@ ava::core::Result<std::string> formatted_active_context_status(ava::app::runtime
 {
   auto snapshot = [&] {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
-    return std::tuple{session_r->read_authority_1(), session_r->system_prompt(), session_r->model().context_window_tokens};
+    return std::tuple{session_r->read_authority_1(), session_r->system_prompt(), session_r->model()};
   }();
-  auto& [read_authority, system_prompt, context_window_tokens] = snapshot;
+  auto& [read_authority, system_prompt, model] = snapshot;
   if (!read_authority)
     return std::unexpected(std::move(read_authority.error()));
   auto entries = read_authority->load();
   if (!entries)
     return std::unexpected(std::move(entries.error()));
-  auto active_tokens = ava::session::estimate_active_context_tokens(*entries);
+  auto active_tokens = runtime::context_usage(*entries, system_prompt, model);
   if (!active_tokens)
     return std::unexpected(std::move(active_tokens.error()));
 
-  auto const system_prompt_tokens = ava::session::estimate_tokens(system_prompt);
-  auto const maximum = std::numeric_limits<std::size_t>::max();
-  auto const total_tokens = *active_tokens > maximum - system_prompt_tokens ? maximum : *active_tokens + system_prompt_tokens;
+  auto const total_tokens = active_tokens->tokens;
   auto const display_tokens = total_tokens > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max()
                                                                                                              : static_cast<long long>(total_tokens);
-  return format_active_context_status_value(display_tokens, context_window_tokens);
+  auto status = format_active_context_status_value(display_tokens, model.context_window_tokens);
+  if (active_tokens->estimated && !status.starts_with('~'))
+  {
+    status.insert(status.begin(), '~');
+  }
+  return status;
 }
 
 std::optional<std::string> active_context_status_for_session(ava::app::runtime::session_ts const& unlocked_session)

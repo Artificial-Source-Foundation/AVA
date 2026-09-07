@@ -1127,6 +1127,8 @@ ava::core::Result<std::string> SessionResultSerializer::session_stats_result_jso
   json += number_field_json("error", stats.counts.error);
   json += ',';
   json += number_field_json("cancel", stats.counts.cancel);
+  json += ',';
+  json += number_field_json("run_stop", stats.counts.run_stop);
   json += "}}";
   return json;
 }

@@ -593,6 +593,17 @@ ProviderResponse response_for(std::string_view scenario, int request_index, std:
   {
     return ProviderResponse{.body = request_index == 0 ? read_tool_body(target_path) : text_body("after permission deny")};
   }
+  if (scenario == "bounded-ten-rounds")
+  {
+    if (request_index < 10)
+    {
+      auto body = read_tool_body(target_path, "bounded_read_" + std::to_string(request_index));
+      body.pop_back();
+      body += R"(,"usage":{"prompt_tokens":10000,"completion_tokens":200,"total_tokens":10200}})";
+      return ProviderResponse{.body = std::move(body)};
+    }
+    return ProviderResponse{.body = text_body("Resumed using completed tool results")};
+  }
   if (scenario == "read-tool-twice")
   {
     if (request_index == 0 || request_index == 2)
@@ -786,7 +797,8 @@ int main(int argc, char** argv)
     std::ofstream file(request_log, std::ios::binary | std::ios::trunc);
   }
 
-  for (int request_index = 0; request_index < request_count; ++request_index)
+  int const max_requests = scenario == "bounded-ten-rounds" ? 11 : request_count;
+  for (int request_index = 0; request_index < max_requests; ++request_index)
   {
     Fd client(::accept(server.get(), nullptr, nullptr));
     if (client.get() < 0)

@@ -509,7 +509,11 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                      }
                                      prompt_result.ordinary_turn_committed = true;
                                      prompt_result.tool_timeline = std::move(result->tool_timeline);
-                                     if (!result->final_text.empty())
+                                     if (auto receipt = bounded_run_receipt(*result); !receipt.empty())
+                                     {
+                                       add_output(prompt_result, std::move(receipt));
+                                     }
+                                     else if (!result->final_text.empty())
                                      {
                                        add_output(prompt_result, result->final_text);
                                      }
@@ -550,7 +554,11 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
                                  }
                                  prompt_result.ordinary_turn_committed = true;
                                  prompt_result.tool_timeline = std::move(result->tool_timeline);
-                                 if (!result->final_text.empty())
+                                 if (auto receipt = bounded_run_receipt(*result); !receipt.empty())
+                                 {
+                                   add_output(prompt_result, std::move(receipt));
+                                 }
+                                 else if (!result->final_text.empty())
                                  {
                                    add_output(prompt_result, result->final_text);
                                  }

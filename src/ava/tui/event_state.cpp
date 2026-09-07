@@ -1496,7 +1496,12 @@ void apply_runtime_event(TuiEventState& state, ava::event::RuntimeEvent const& e
           state.stop_reason = payload.stop_reason;
           state.provider_iterations = payload.provider_iterations;
           state.tool_calls = payload.tool_calls;
-          settle_responding_activity(state, ToolTimelineStatus::Success, "assistant responded");
+          bool const paused = payload.stop_reason == "max_turn_requests";
+          if (paused && !payload.reason.empty())
+          {
+            state.transcript.push_back(TranscriptItem{.label = "ava", .text = payload.reason});
+          }
+          settle_responding_activity(state, ToolTimelineStatus::Success, paused ? "paused; work incomplete" : "assistant responded");
           state.run_status = TuiEventRunStatus::Done;
         }
         else

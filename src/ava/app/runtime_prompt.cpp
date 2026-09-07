@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/run_stop.h"
 #ifdef CWDEBUG
 #include "ava/debug/debug_ostream_operators.h"
 #endif
@@ -26,6 +27,7 @@
 #include "ava/lsp/configured_provider.h"
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
+#include "ava/core/json.h"
 
 #include <functional>
 #include <memory>
@@ -41,6 +43,15 @@
 #endif
 
 namespace ava::app {
+
+auto bounded_run_receipt(ava::agent::AgentLoopResult const& result) -> std::string
+{
+  if (result.outcome != ava::core::RuntimeTerminalOutcome::MaxTurnRequests)
+  {
+    return {};
+  }
+  return "Paused after " + std::to_string(result.tool_iterations) + " tool rounds. Work is incomplete. Continue to resume.";
+}
 
 ava::core::Result<runtime::PromptState> select_runtime_prompt_state(runtime::session_ts const& unlocked_session, ava::agent::Mode mode)
 {
@@ -611,6 +622,20 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   {
     ava::event::CompletionPayload completion_payload;
     completion_payload.stop_reason = std::string(ava::core::to_string(result->outcome));
+    completion_payload.reason = bounded_run_receipt(*result);
+    if (!completion_payload.reason.empty())
+    {
+      completion_payload.status = "paused";
+      auto stop = ava::session::make_run_stop_entry(
+          {.reason = "Paused after " + std::to_string(result->tool_iterations) + " tool rounds. Work is incomplete.", .round_count = result->tool_iterations});
+      if (!stop)
+        return fail_run(std::move(stop.error()));
+      auto recorded = append_route(std::move(*stop));
+      if (!recorded)
+      {
+        return fail_run(std::move(recorded.error()));
+      }
+    }
     completion_payload.provider_iterations = result->provider_iterations;
     completion_payload.tool_calls = result->tool_calls;
     if (auto emitted = ava::event::emit_event(

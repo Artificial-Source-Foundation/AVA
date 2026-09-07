@@ -66,6 +66,7 @@ Current AVA entry type strings are:
 | `branch_summary` | Caller-supplied summary of a source session range. |
 | `error` | Runtime/provider/tool error record. |
 | `cancel` | Cooperative cancellation marker. |
+| `run_stop` | Completed bounded agent-run stop; not a cancellation, error, or suspended executor. |
 
 External readers that only need transcript data should prefer RPC `get_messages`, which returns sanitized `user_message`, `assistant_message`, `reasoning_block`, `tool_call`, and `tool_result` entries and hides internal replay messages.
 
@@ -147,6 +148,40 @@ Validation checks that policy `allow`/`deny` entries resolve consistently, that 
 Compaction records a context boundary and summary. Current fields include `trigger`, `status:"recorded"`, `summary_unavailable`, `summary`, `instructions`, `model`, `threshold_tokens`, `estimated_tokens`, `keep_recent_tokens`, `keep_recent_messages`, `max_summary_bytes`, `recent_context`, and `history_projection:"portable-v1"`. Current compaction summaries and retained tails are generated only from forced-portable request messages.
 
 Validation requires a non-empty `summary`, boolean `summary_unavailable` when present, `status:"recorded"` when present, numeric token/retention metadata when present, the exact `portable-v1` value when `history_projection` is present, and no unresolved tool calls or permission prompts at the compaction boundary. Request replay always accepts marked portable compactions. An older unmarked compaction retains its summary/recent replay material only when its complete represented source range and boundary are proven exact-compatible with the request target; otherwise AVA emits a neutral omission notice.
+
+### `run_stop`
+
+`run_stop` uses the normal version-4 envelope (unique entry ID, timestamp and
+optional earlier `parent_id`). Its closed payload has exactly these fields:
+
+- `schema_version`: integer `1`.
+- `classification`: the schema-v1 enum currently contains only `max_turn_requests`.
+- `status`: `paused`.
+- `reason`: nonempty valid UTF-8, at most 1024 bytes, with no ASCII control bytes or DEL.
+- `round_count`: integer from 1 through 9223372036854775807; the default boundary is 10 completed tool rounds/batches.
+
+Missing, unknown, duplicate and escaped field names, wrong types, numeric strings,
+fractional/exponential counts and unsupported values are rejected. Generic
+envelope ancestry/identity rules apply independently of the payload. The entry
+does not need or impersonate display/tree metadata.
+
+RunStop records a **completed bounded stop**. It does not serialize or suspend an
+executor. Continue starts a new bounded executor over retained session history.
+The display derives `Continue to resume.` rather than storing a second guidance field.
+
+Full replay, reopening, forks/clones and portable JSONL retain the typed record.
+Human-history projection retains it; Markdown/HTML exports show a Run Stop notice,
+and TUI startup displays persisted stop notices separately from conversation.
+Conversational RPC `get_messages` and message-only transcripts omit it; RPC session
+statistics expose a separate `run_stop` count. Provider message construction omits
+it: it is never a synthetic user, assistant, system or tool message and contributes
+no active-context tokens by itself. Compaction leaves durable records intact while
+omitting them from the model projection and summary input.
+
+Existing valid sessions need no migration. Readers predating this new type reject
+sessions containing it as an unknown entry type; there is no promise of old-reader
+support for new RunStop sessions. Malformed unreleased experimental stop receipts
+under `session_metadata` remain invalid and are not migrated.
 
 ### `session_metadata`
 

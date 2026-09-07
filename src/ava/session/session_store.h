@@ -47,6 +47,7 @@ enum class EntryType
   BranchSummary,
   Error,
   Cancel,
+  RunStop,
 };
 
 inline constexpr std::string_view kSyntheticSubagentDeliverySource = "synthetic_subagent_delivery";

@@ -33,6 +33,7 @@ enum class SessionReplayIssueKind
   UnresolvedPermissionPrompt,
   InvalidCompactionEntry,
   InvalidSessionMetadataEntry,
+  InvalidRunStopEntry,
   InvalidBranchSummaryEntry,
   InvalidMessageEntry,
   CompactionWithUnresolvedToolCall,

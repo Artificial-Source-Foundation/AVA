@@ -209,6 +209,7 @@ void test_tui_event_state_reduces_runtime_events()
   runtime_state.context_source_count = 3;
   presentation.apply_runtime_state_snapshot(presentation_options, std::move(runtime_state));
   expect(presentation.snapshot.active_context_status == std::optional<std::string>{"600 (2.2%)"} &&
+             presentation.sidebar.active_context_status == presentation.snapshot.active_context_status &&
              presentation.snapshot.context_source_count == std::optional<std::size_t>{3} &&
              presentation.sidebar.context_source_count == std::optional<std::size_t>{3},
          "tui presentation refreshes active context usage on runtime state changes while preserving sidebar source counts");
@@ -1236,6 +1237,16 @@ void test_tui_event_state_reduces_runtime_events()
              done_state.tool_calls == 1 && done_state.pending_assistant_text.empty() && done_state.transcript.size() == 1 &&
              done_state.transcript[0].text == "done text",
          "tui event state records done metadata and commits pending assistant text");
+
+  done_payload.stop_reason = "max_turn_requests";
+  done_payload.status = "paused";
+  done_payload.reason = "Paused after 10 tool rounds. Work is incomplete. Continue to resume.";
+  ava::tui::apply_runtime_event(done_state, completion_event(done_payload));
+  expect(done_state.run_status == ava::tui::TuiEventRunStatus::Done && done_state.stop_reason == "max_turn_requests" &&
+             done_state.transcript.back().text == done_payload.reason &&
+             std::ranges::none_of(done_state.activity,
+                                  [](auto const& item) -> auto { return item.id == "responding" && item.status == ava::tui::ToolTimelineStatus::Running; }),
+         "ten-round pause settles responding and displays the deterministic incomplete-work receipt");
 
   std::vector<ava::event::RuntimeEvent> live_events;
   {

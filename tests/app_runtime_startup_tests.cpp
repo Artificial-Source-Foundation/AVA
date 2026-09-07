@@ -12,6 +12,7 @@
 #include "ava/app/runtime/ExtensionResourcePolicy.h"
 #include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/Session.h"
+#include "ava/app/runtime_compaction.h"
 #include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/agent_loop_session.h"
 #include "ava/agent/message_builder.h"
@@ -303,11 +304,20 @@ void test_app_active_context_status_tracks_compaction_projection()
 
   session_w->model_selection().model.context_window_tokens = 272'000;
   auto expected_status = [&](std::size_t active_tokens) {
-    auto const system_prompt_tokens = ava::session::estimate_tokens(session_w->system_prompt());
-    auto const total = active_tokens + system_prompt_tokens;
+    auto const total = active_tokens;
     auto const display =
         total > static_cast<std::size_t>(std::numeric_limits<long long>::max()) ? std::numeric_limits<long long>::max() : static_cast<long long>(total);
-    return ava::app::line_shell_internal::format_active_context_status_value(display, session_w->model().context_window_tokens);
+    auto status = ava::app::line_shell_internal::format_active_context_status_value(display, session_w->model().context_window_tokens);
+    return status.starts_with('~') ? status : "~" + status;
+  };
+
+  auto measure = [&](auto const& history) -> ava::core::Result<std::size_t> {
+    auto usage = ava::app::runtime::context_usage(history, session_w->system_prompt(), session_w->model());
+    if (!usage)
+    {
+      return std::unexpected(std::move(usage.error()));
+    }
+    return usage->tokens;
   };
 
   CRITICAL_AREA_END_W(session);
@@ -315,20 +325,19 @@ void test_app_active_context_status_tracks_compaction_projection()
   CRITICAL_AREA_CONTINUE_W(session);
   auto authority = session_w->read_authority_1();
   auto entries = authority ? authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(authority.error()));
-  auto const initial_tokens =
-      entries ? ava::session::estimate_active_context_tokens(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
+  auto const initial_tokens = entries ? measure(*entries) : ava::core::Result<std::size_t>(std::unexpected(entries.error()));
   expect(initial_status && initial_tokens && *initial_status == expected_status(*initial_tokens) && initial_status->find('(') != std::string::npos &&
-             initial_status->find('%') != std::string::npos && !initial_status->starts_with('~'),
+             initial_status->contains('%') && initial_status->starts_with('~'),
          "active context status uses compact count plus percent when the model window is known");
 
   session_w->model_selection().model.context_window_tokens = std::nullopt;
   CRITICAL_AREA_END_W(session);
   auto const unknown_status = ava::app::line_shell_internal::active_context_status_for_session(unlocked_session);
   CRITICAL_AREA_CONTINUE_W(session);
-  auto const unknown_expected = initial_tokens
-                                    ? std::optional<std::string>{ava::app::line_shell_internal::format_active_context_status_value(
-                                          static_cast<long long>(*initial_tokens + ava::session::estimate_tokens(session_w->system_prompt())), std::nullopt)}
-                                    : std::nullopt;
+  auto const unknown_expected =
+      initial_tokens
+          ? std::optional<std::string>{ava::app::line_shell_internal::format_active_context_status_value(static_cast<long long>(*initial_tokens), std::nullopt)}
+          : std::nullopt;
   expect(unknown_status && unknown_expected && *unknown_status == *unknown_expected && unknown_status->starts_with('~') &&
              unknown_status->find('%') == std::string::npos,
          "active context status falls back to tilde compact count when the model window is unknown");
@@ -345,8 +354,7 @@ void test_app_active_context_status_tracks_compaction_projection()
   auto grown_authority = session_w->read_authority_1();
   auto grown_entries =
       grown_authority ? grown_authority->load() : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(grown_authority.error()));
-  auto const grown_tokens =
-      grown_entries ? ava::session::estimate_active_context_tokens(*grown_entries) : ava::core::Result<std::size_t>(std::unexpected(grown_entries.error()));
+  auto const grown_tokens = grown_entries ? measure(*grown_entries) : ava::core::Result<std::size_t>(std::unexpected(grown_entries.error()));
 
   ava::session::ManualCompactionRequest compaction_request;
   compaction_request.summary = "condensed history";
@@ -367,8 +375,7 @@ void test_app_active_context_status_tracks_compaction_projection()
   auto compacted_authority = session_w->read_authority_1();
   auto compacted_entries = compacted_authority ? compacted_authority->load()
                                                : ava::core::Result<std::vector<ava::session::SessionEntry>>(std::unexpected(compacted_authority.error()));
-  auto const active_tokens = compacted_entries ? ava::session::estimate_active_context_tokens(*compacted_entries)
-                                               : ava::core::Result<std::size_t>(std::unexpected(compacted_entries.error()));
+  auto const active_tokens = compacted_entries ? measure(*compacted_entries) : ava::core::Result<std::size_t>(std::unexpected(compacted_entries.error()));
   auto const complete_tokens = compacted_entries ? ava::session::estimate_session_tokens(*compacted_entries)
                                                  : ava::core::Result<std::size_t>(std::unexpected(compacted_entries.error()));
   CRITICAL_AREA_END_W(session);

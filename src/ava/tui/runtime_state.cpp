@@ -119,6 +119,7 @@ void RuntimePresentationState::refresh_token_status(TuiRuntimeOptions const& opt
 void RuntimePresentationState::refresh_active_context_status(TuiRuntimeOptions const& options)
 {
   snapshot.active_context_status = options.active_context_status_provider ? options.active_context_status_provider() : std::nullopt;
+  sidebar.active_context_status = snapshot.active_context_status;
 }
 
 void RuntimePresentationState::refresh_reasoning_status(TuiRuntimeOptions const& options)

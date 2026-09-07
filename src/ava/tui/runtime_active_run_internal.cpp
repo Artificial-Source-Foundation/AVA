@@ -346,8 +346,10 @@ void RuntimeActiveRunController::settle_turn_activity(RuntimeActiveRunState& sta
 {
   auto& sidebar = presentation_state_.sidebar;
   auto responding = std::ranges::find_if(sidebar.activity, [](SidebarActivityItem const& activity) { return activity.id == "responding"; });
-  if (responding == sidebar.activity.end() || responding->status != ToolTimelineStatus::Running)
+  if (responding == sidebar.activity.end())
+  {
     return;
+  }
   if (state.run_cancel_requested.load() || state.event_state.run_status == TuiEventRunStatus::Canceled)
   {
     responding->status = ToolTimelineStatus::Canceled;
@@ -361,7 +363,7 @@ void RuntimeActiveRunController::settle_turn_activity(RuntimeActiveRunState& sta
     return;
   }
   responding->status = ToolTimelineStatus::Success;
-  responding->detail = "assistant responded";
+  responding->detail = state.event_state.stop_reason == "max_turn_requests" ? "paused; work incomplete" : "assistant responded";
 }
 
 bool RuntimeActiveRunController::request_stop(RuntimeActiveRunState& state)
@@ -1025,6 +1027,10 @@ RuntimeActiveRunOutcome RuntimeActiveRunController::run(std::string submitted_va
                                          : event_state.run_status == TuiEventRunStatus::Canceled ? "stopped"
                                                                                                  : "done")
                                       : (result.output.empty() ? "ok" : "done");
+    if (events_received && event_state.stop_reason == "max_turn_requests")
+    {
+      snapshot.status = "paused; Continue to resume";
+    }
   }
   if (result.clipboard_markdown && !session_changed && !run_cancel_requested.load() &&
       (runtime_commands::exact_command(submitted, "/export") || runtime_commands::exact_command(submitted, "/export markdown")))

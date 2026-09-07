@@ -1,4 +1,5 @@
 #include "sys.h"
+#include "ava/session/run_stop.h"
 #include "ava/session/assistant_output.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/portable_sanitization.h"
@@ -168,6 +169,10 @@ void clear_omitted_parent_references(std::vector<SessionEntry>& projected)
 
 ava::core::Result<std::vector<SessionEntry>> project_logical_session_history(std::vector<SessionEntry> const& entries)
 {
+  for (auto const& entry : entries)
+    if (entry.type == EntryType::RunStop)
+      if (auto stop = parse_run_stop(entry); !stop)
+        return std::unexpected(std::move(stop.error()));
   try
   {
     auto const assistant_output = classify_assistant_output(entries);
@@ -241,6 +246,10 @@ ava::core::Result<std::vector<SessionEntry>> project_logical_session_history(std
 
 ava::core::Result<std::vector<SessionEntry>> project_ordered_public_session_history(std::vector<SessionEntry> const& entries)
 {
+  for (auto const& entry : entries)
+    if (entry.type == EntryType::RunStop)
+      if (auto stop = parse_run_stop(entry); !stop)
+        return std::unexpected(std::move(stop.error()));
   try
   {
     auto const assistant_output = classify_assistant_output(entries);
@@ -375,6 +384,10 @@ std::string sanitized_compatibility_assistant_message_data_json(std::string_view
 
 ava::core::Result<std::vector<SessionEntry>> project_portable_session_history(std::vector<SessionEntry> const& entries)
 {
+  for (auto const& entry : entries)
+    if (entry.type == EntryType::RunStop)
+      if (auto stop = parse_run_stop(entry); !stop)
+        return std::unexpected(std::move(stop.error()));
   try
   {
     auto const assistant_output = classify_assistant_output(entries);

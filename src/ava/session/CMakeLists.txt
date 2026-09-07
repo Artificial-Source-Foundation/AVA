@@ -6,6 +6,7 @@ add_library(ava_session
   "logical_projection.cpp"
   "portable_sanitization.cpp"
   "record.cpp"
+  "run_stop.cpp"
   "session_branch.cpp"
   "session_lease.cpp"
   "session_metadata.cpp"

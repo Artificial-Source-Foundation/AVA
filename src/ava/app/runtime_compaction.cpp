@@ -7,6 +7,7 @@
 #include "ava/app/runtime_json.h"
 #include "ava/app/runtime_retry.h"
 #include "ava/agent/message_builder.h"
+#include "ava/agent/tool_dispatcher.h"
 #include "ava/session/logical_projection.h"
 #include "ava/session/validation.h"
 #include "ava/provider/catalog.h"
@@ -15,6 +16,7 @@
 #include "ava/core/string_utils.h"
 
 #include <algorithm>
+#include <limits>
 #include <mutex>
 #include <optional>
 #include <tuple>
@@ -643,6 +645,64 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts c
 
 namespace ava::app::runtime {
 
+auto context_usage(std::vector<ava::session::SessionEntry> const& entries, std::string_view system_prompt, ava::config::ModelInfo const& model)
+    -> ava::core::Result<ava::agent::PreparedContextUsage>
+{
+  auto api_family = model.api_family;
+  if (api_family.empty())
+  {
+    api_family = "openai_chat_completions";
+    if (model.provider_id == "openai")
+    {
+      api_family = "openai_responses";
+    }
+    else if (model.provider_id == "anthropic")
+    {
+      api_family = "anthropic_messages";
+    }
+    else if (model.provider_id == "gemini")
+    {
+      api_family = "gemini_generate_content";
+    }
+  }
+  auto reasoning_format = model.reasoning_format;
+  if (reasoning_format.empty())
+  {
+    if (api_family == "openai_responses")
+    {
+      reasoning_format = "openai_responses";
+    }
+    else if (api_family == "anthropic_messages")
+    {
+      reasoning_format = "anthropic_thinking";
+    }
+  }
+  auto usage = ava::agent::prepared_context_usage(
+      entries, system_prompt,
+      ava::agent::MessageBuildOptions{
+          .target = ava::agent::HistoryReplayTarget{.provider_id = model.provider_id,
+                                                    .model_id = model.model_id,
+                                                    .api_family = std::move(api_family),
+                                                    .reasoning_format = std::move(reasoning_format),
+                                                    .supports_tools = model.supports_tools.value_or(true),
+                                                    .supports_images = std::ranges::find(model.input_modalities, "image") != model.input_modalities.end()}});
+  if (usage && !usage->provider_input_tokens && model.supports_tools.value_or(true))
+  {
+    // Unmeasured requests include estimated built-in schema overhead. Dynamic
+    // extension schemas and tokenizer differences remain explicitly estimated.
+    static auto const schema_tokens = []() -> std::size_t {
+      std::size_t tokens = 0;
+      for (auto const& schema : ava::agent::ToolDispatcher::tool_schemas_json())
+      {
+        tokens += ava::session::estimate_tokens(schema);
+      }
+      return tokens;
+    }();
+    usage->tokens += std::min(schema_tokens, std::numeric_limits<std::size_t>::max() - usage->tokens);
+  }
+  return usage;
+}
+
 ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, ava::session::SessionReadAuthority read_authority, std::string_view trigger,
                                                 ava::provider::Provider const& provider, ava::http::Transport& transport, RunOptions const& options,
                                                 std::vector<std::string> const& replayed_user_messages)
@@ -652,10 +712,11 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
   }
 
-  auto [paths, provider_catalog, current_model, offline, session_id, session_process_scope] = [&] {
+  auto [paths, provider_catalog, current_model, offline, session_id, session_process_scope, system_prompt] = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->paths(),      session_r->provider_catalog(), session_r->model(),
-                      session_r->is_offline(), session_r->store.session_id(), session_r->session_process_scope()};
+    return std::tuple{session_r->paths(),                 session_r->provider_catalog(), session_r->model(),
+                      session_r->is_offline(),            session_r->store.session_id(), session_r->session_process_scope(),
+                      session_r->system_prompt()};
   }();
 
   auto loaded_config = ava::session::load_compaction_config(paths);
@@ -691,13 +752,14 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
     std::size_t threshold_tokens = threshold;
     if (trigger == "auto")
     {
-      auto decision = ava::session::should_auto_compact(*entries, *config, current_model.context_window_tokens);
+      auto decision = context_usage(*entries, system_prompt, current_model);
       if (!decision)
         return std::unexpected(std::move(decision.error()));
-      if (!decision->should_compact)
+      if (threshold == 0 || decision->tokens < threshold)
+      {
         return false;
-      estimated_tokens = decision->estimated_tokens;
-      threshold_tokens = decision->threshold_tokens;
+      }
+      estimated_tokens = decision->tokens;
     }
 
     if (trigger == "context_overflow" && !context_retry_event_emitted)

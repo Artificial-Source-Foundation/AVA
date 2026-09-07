@@ -291,6 +291,9 @@ ava::core::Result<SessionStats> compute_session_stats(std::vector<SessionEntry> 
       case EntryType::Cancel:
         ++stats.counts.cancel;
         break;
+      case EntryType::RunStop:
+        ++stats.counts.run_stop;
+        break;
     }
     add_usage_and_cost(stats, entry.data_json, entry.type == EntryType::AssistantMessage);
   }

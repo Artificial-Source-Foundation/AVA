@@ -43,6 +43,7 @@ void test_session_construction_linearizes_with_workspace_revocation();
 void test_workspace_revocation_retires_retained_sessions_transactionally();
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation();
 void test_app_run_prompt_emits_events();
+void test_run_stop_schema_and_persistence();
 void test_app_run_prompt_expands_file_references();
 void test_app_run_prompt_sends_imported_image_attachment();
 void test_app_clipboard_image_file_override_imports_attachment();

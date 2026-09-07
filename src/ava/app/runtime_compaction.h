@@ -1,12 +1,16 @@
 #pragma once
 #include "ava/http/transport.h"
 #include "ava/app/runtime.h"
+#include "ava/agent/message_builder.h"
 #include "ava/core/result.h"
 
 #include <string_view>
 #include <vector>
 
 namespace ava::app::runtime {
+
+[[nodiscard]] auto context_usage(std::vector<ava::session::SessionEntry> const& entries, std::string_view system_prompt, ava::config::ModelInfo const& model)
+    -> ava::core::Result<ava::agent::PreparedContextUsage>;
 
 // Compact unlocked_session using read_authority, trigger, provider, transport, options, and replayed_user_messages.
 //

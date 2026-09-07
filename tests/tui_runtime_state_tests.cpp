@@ -2223,6 +2223,28 @@ void test_tui_todowrite_event_state_and_snapshot_hydration()
 
 void run_tui_runtime_event_state_tests()
 {
+  {
+    ava::tui::TuiRuntimeOptions options;
+    options.session_id = "auto-read-first";
+    ava::tui::RuntimePresentationState state(options);
+    expect(!state.read_only_approval().enabled() && !state.snapshot.auto_approve_reads, "TUI read permission policy defaults off");
+    ava::tui::set_read_only_approval(state.read_only_approval(), state.snapshot);
+    expect(state.read_only_approval().enabled() && state.snapshot.auto_approve_reads && state.snapshot.status.starts_with("Auto-read on"),
+           "permission toggle updates both authority and the visible receipt");
+    ava::tui::TuiRuntimeStateSnapshot same;
+    same.session_id = options.session_id;
+    state.apply_runtime_state_snapshot(options, std::move(same));
+    expect(state.read_only_approval().enabled(), "same-session completion does not undo a mid-turn permission toggle");
+    ava::tui::TuiRuntimeStateSnapshot next;
+    next.session_id = "auto-read-next";
+    state.apply_runtime_state_snapshot(options, std::move(next));
+    expect(!state.read_only_approval().enabled() && !state.snapshot.auto_approve_reads, "permission toggle does not leak into another session");
+    options.auto_approve_reads = true;
+    ava::tui::RuntimePresentationState from_cli(options);
+    expect(from_cli.read_only_approval().enabled() && from_cli.snapshot.auto_approve_reads, "CLI read-only default initializes TUI policy and indicator");
+    ava::tui::set_read_only_approval(from_cli.read_only_approval(), from_cli.snapshot, false);
+    expect(!from_cli.read_only_approval().enabled() && !from_cli.snapshot.auto_approve_reads, "user can turn the CLI default off during the session");
+  }
   test_tui_event_state_reduces_runtime_events();
   test_tui_retry_activity_settles_and_restores_contextual_hint();
   test_tui_transcript_projection_and_cap_parity();

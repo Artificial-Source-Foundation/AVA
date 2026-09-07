@@ -460,6 +460,9 @@ struct PermissionPromptView
   // Backend-owned state projected into a compact, non-authoritative notice.
   // Keep existing aggregate construction valid with -Wmissing-field-initializers.
   std::string security_notice = {};  // NOLINT(readability-redundant-member-init)
+  bool advice_available = false;
+  std::string advice = {};  // NOLINT(readability-redundant-member-init)
+  std::string read_approval_hint = {};  // NOLINT(readability-redundant-member-init)
 
   // guidance_text must never appear in debug/log representations.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
@@ -639,6 +642,8 @@ struct ComposerSnapshot
   // the next user input; never session/provider/transcript content.
   std::optional<std::string> local_command_feedback = std::nullopt;
   bool processing = false;
+  // Display mirror of the frontend-owned read approval policy.
+  bool auto_approve_reads = false;
   ActiveRunHint active_run_hint = {};
   std::size_t spinner_frame = 0;
   std::optional<std::string> token_status = std::nullopt;

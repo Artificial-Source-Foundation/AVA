@@ -25,9 +25,13 @@ from .main_paste_scrollback_attach import scenario_main_paste_scrollback_attach
 from .plugin_ui import scenario_plugin_ui
 from .lean_features import scenario_lean_features
 from .bounded_run import scenario_bounded_run
+from .auto_read import scenario_auto_read
+from .command_review import scenario_command_review
 
 
 SCENARIOS = (
+    "command_review",
+    "auto_read",
     "bounded_run",
     "lean_features",
     "suspend_resume",
@@ -56,6 +60,8 @@ SCENARIOS = (
 )
 
 SCENARIO_HANDLERS = {
+    "command_review": scenario_command_review,
+    "auto_read": scenario_auto_read,
     "bounded_run": scenario_bounded_run,
     "lean_features": scenario_lean_features,
     "suspend_resume": scenario_suspend_resume,

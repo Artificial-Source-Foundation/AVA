@@ -185,6 +185,12 @@ std::optional<bool> RuntimeActiveRunController::run_active_command(RuntimeActive
   if (draft.text.empty())
     return std::nullopt;
   auto const submitted_command = expanded_composer_draft_text(draft);
+  if (action_controller_.handle_permission_mode_command(submitted_command))
+  {
+    push_history(input_history, submitted_command);
+    clear_local_command_draft();
+    return renderer_.request_render();
+  }
   if (auto stash_argument = runtime_commands::stash_command_argument(submitted_command))
   {
     push_history(input_history, submitted_command);

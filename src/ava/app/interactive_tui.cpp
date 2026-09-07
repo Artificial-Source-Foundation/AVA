@@ -1,6 +1,8 @@
 #include "sys.h"
 #include "ava/session/run_stop.h"
+#include "ava/http/curl_transport.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/command_advice.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_jobs.h"
 #include "ava/app/command_palette.h"
@@ -440,6 +442,8 @@ int run_tui(ShellState state)
       .startup_overview = std::move(initial_startup_overview),
       .mermaid_render = mermaid_bridge->tui_bridge(),
       .key_bindings = key_bindings,
+      .auto_approve_reads = state.auto_approve_reads,
+      .command_autonomy = state.command_autonomy,
       .token_status_provider = [&unlocked_session]() { return token_status_for_session(unlocked_session); },
       .active_context_status_provider = [&unlocked_session]() { return active_context_status_for_session(unlocked_session); },
       .reasoning_status_provider = [&unlocked_session]() { return ava::app::reasoning_status_for_session(unlocked_session); },
@@ -855,6 +859,23 @@ int run_tui(ShellState state)
           [&unlocked_session](ava::permissions::PermissionPrompt const& prompt, ava::permissions::PermissionAction action) {
             return remember_permission_rule_for_prompt(unlocked_session, prompt, action);
           },
+      .explain_command = [&unlocked_session, &invocation_paths](ava::permissions::PermissionPrompt const& prompt,
+                                                                std::stop_token stop) -> ava::core::Result<ava::permissions::CommandReview> {
+        try
+        {
+          auto const inputs = [&]() -> std::pair<std::shared_ptr<ava::provider::ProviderCatalog const>, bool> {
+            auto session = runtime::session_ts::crat(unlocked_session);
+            return std::pair{session->provider_catalog(), session->is_offline()};
+          }();
+          ava::http::CurlCliTransport transport;
+          return ava::app::explain_command(invocation_paths, inputs.first, prompt, inputs.second, std::move(stop), transport);
+        }
+        catch (...)
+        {
+          // Even allocation failures leave the prompt manual, with no recommendation.
+          return ava::permissions::CommandReview{};
+        }
+      },
       .on_settings_selected = [&unlocked_session, &invocation_paths, &state_snapshot, &refresh_display_watch_state, &application_catalog, &hotkeys,
                                remember_effective_display_settings](std::string_view value) -> ava::core::Result<ava::tui::TuiRuntimeStateSnapshot> {
         if (value == "settings:keybindings.validate")

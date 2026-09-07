@@ -420,7 +420,8 @@ bool test_active_run_session_transition_discards_prior_session_events()
   auto active_select_list = ava::tui::ActiveSelectList::None;
   ava::tui::TranscriptSearchController transcript_search(presentation, renderer, navigation, active_select_list);
   std::optional<ava::tui::PendingSessionArchiveAction> session_archive_confirmation;
-  ava::tui::RuntimePromptCoordinator prompt_coordinator(options, presentation.snapshot, presentation.command_session_grants, renderer);
+  ava::tui::RuntimePromptCoordinator prompt_coordinator(options, presentation.snapshot, presentation.command_session_grants, presentation.read_only_approval(),
+                                                        renderer);
   ava::tui::RuntimePromptStashController prompt_stash(presentation, draft_state, renderer, active_select_list, options.key_bindings);
   ava::tui::RuntimePluginUiCoordinator plugin_ui;
   ava::tui::RuntimeActionController action_controller(options, presentation, draft_state, renderer, active_select_list, session_archive_confirmation);
@@ -488,7 +489,8 @@ bool test_atomic_search_input_prompt_precedence()
   ava::tui::RuntimeDraftState draft_state;
   ava::tui::RuntimeRenderer renderer(snapshot, sidebar, draft_state);
   ava::tui::TuiSessionGrantRegistry session_grants;
-  ava::tui::RuntimePromptCoordinator coordinator(options, snapshot, session_grants, renderer);
+  ava::permissions::ReadOnlyApprovalPolicy read_only_approval;
+  ava::tui::RuntimePromptCoordinator coordinator(options, snapshot, session_grants, read_only_approval, renderer);
   auto resolver = coordinator.question_resolver();
 
   bool passed = true;
@@ -1001,6 +1003,34 @@ bool test_message_boundary_navigation_on_empty_or_fitting_transcript_is_harmless
 
 void run_tui_prompt_search_race_tests()
 {
+  {
+    ava::tui::TuiRuntimeOptions options;
+    options.auto_approve_reads = true;
+    ava::tui::RuntimePresentationState state(options);
+    ava::tui::RuntimeDraftState draft;
+    ava::tui::RuntimeRenderer renderer(state.snapshot, state.sidebar, draft);
+    ava::tui::RuntimePromptCoordinator coordinator(options, state.snapshot, state.command_session_grants, state.read_only_approval(), renderer);
+    auto resolver = coordinator.permission_resolver();
+    ava::permissions::PermissionPrompt prompt{.operation = ava::permissions::Operation::ReadFile,
+                                              .mode = ava::core::Mode::Build,
+                                              .workspace_dir = "/workspace",
+                                              .target_path = "/outside.txt",
+                                              .command = "",
+                                              .tool_name = "read_file",
+                                              .reason = "outside workspace"};
+    auto result = std::async(std::launch::async, [&]() -> ava::core::Result<ava::permissions::PermissionResolutionDecision> { return resolver(prompt); });
+    auto const deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    bool serviced = false;
+    while (!serviced && std::chrono::steady_clock::now() < deadline)
+    {
+      serviced = coordinator.service_pending_request([]() -> bool { return true; });
+      std::this_thread::yield();
+    }
+    coordinator.fail_pending_requests();
+    auto decision = result.get();
+    expect(serviced && decision && decision->resolution == ava::permissions::PermissionResolution::Deny,
+           "cancellation wins before queued reads can be auto-approved");
+  }
   expect(
       test_changed_session_snapshot_resets_presentation(),
       "an authoritative changed-session snapshot clears old transcript/tool rows, advances generation, resets queued/sidebar/draft/selection/search/scroll and "

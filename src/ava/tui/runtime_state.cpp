@@ -35,6 +35,7 @@ ComposerSnapshot initial_snapshot(TuiRuntimeOptions& options)
   snapshot.mermaid_config_epoch = options.mermaid_render.config_epoch;
   snapshot.mermaid_enabled = options.mermaid_render.enabled;
   snapshot.active_run_hint = runtime_views::active_run_hint_for(options.key_bindings);
+  snapshot.auto_approve_reads = options.auto_approve_reads;
   return snapshot;
 }
 
@@ -97,6 +98,7 @@ RuntimePresentationState::RuntimePresentationState(TuiRuntimeOptions& options)
     : snapshot(initial_snapshot(options)),
       applied_slash_catalog_generation_(options.slash_catalog_generation),
       applied_workspace_catalog_generation_(options.workspace_catalog_generation),
+      read_only_approval_(options.auto_approve_reads),
       sidebar{.todos = std::move(options.initial_todos),
               .session_id = options.session_id,
               .mode = options.mode,
@@ -133,6 +135,8 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   auto const session_changed = command_session_grants.clear_for_session_transition(snapshot.session_id, state.session_id);
   if (session_changed)
   {
+    read_only_approval_.set_enabled(options.auto_approve_reads);
+    snapshot.auto_approve_reads = read_only_approval_.enabled();
     pending_image_attachments.clear();
     snapshot.pending_attachments.clear();
   }
@@ -189,6 +193,15 @@ void RuntimePresentationState::apply_runtime_state_snapshot(TuiRuntimeOptions co
   refresh_token_status(options);
   refresh_active_context_status(options);
   refresh_reasoning_status(options);
+}
+
+void set_read_only_approval(ava::permissions::ReadOnlyApprovalPolicy& policy, ComposerSnapshot& snapshot, std::optional<bool> enabled)
+{
+  policy.set_enabled(enabled.value_or(!policy.enabled()));
+  snapshot.auto_approve_reads = policy.enabled();
+  snapshot.status = policy.enabled() ? "Auto-read on: file reads/searches auto-approved; other permission checks unchanged"
+                                     : "Auto-read off: default permission checks restored";
+  snapshot.local_command_feedback = snapshot.status;
 }
 
 void close_startup_overview_presentation(ComposerSnapshot& snapshot, ActiveSelectList& active_select_list)

@@ -46,6 +46,8 @@ class RuntimeActionController final
   [[nodiscard]] bool copy_latest_assistant_message();
   void cycle_reasoning();
   void toggle_thinking_visibility();
+  void toggle_read_only_approval();
+  [[nodiscard]] auto handle_permission_mode_command(std::string_view command) -> bool;
   [[nodiscard]] bool open_model_selector();
   [[nodiscard]] bool open_reasoning_selector(bool chained_from_model_selection = false);
   [[nodiscard]] bool open_scoped_model_selector();

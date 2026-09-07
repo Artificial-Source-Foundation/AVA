@@ -205,6 +205,12 @@ RuntimeSubmitOutcome RuntimeSubmitController::submit(std::optional<std::string> 
   path_completion_force_active = false;
   if (!submitted.empty())
   {
+    if (action_controller_.handle_permission_mode_command(submitted))
+    {
+      push_history(input_history, submitted);
+      auto const rendered = renderer_.request_render();
+      return {.disposition = rendered ? RuntimeSubmitDisposition::ContinueLoop : RuntimeSubmitDisposition::BreakLoop, .terminal_write_failed = !rendered};
+    }
     if (auto stash_argument = stash_command_argument(submitted))
     {
       push_history(input_history, submitted);

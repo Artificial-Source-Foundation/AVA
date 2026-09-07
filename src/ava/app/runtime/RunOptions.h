@@ -45,6 +45,7 @@ struct RunOptions
   bool announce_execution_after_permission = false;
   bool redact_permission_audit_arguments = false;
   bool require_explicit_file_permissions = false;
+  std::shared_ptr<ava::permissions::CommandAutonomyState> command_autonomy = nullptr;
   std::shared_ptr<ava::tools::ExactFileAccess const> exact_file_access = nullptr;
   std::shared_ptr<ava::tools::CommandExecutor const> command_executor = nullptr;
   ava::event::RuntimeEventSink event_sink = nullptr;

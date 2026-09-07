@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/command/environment.h"
+#include "ava/permissions/command_autonomy.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/json.h"
 #include "ava/core/mode.h"
@@ -53,11 +54,13 @@ std::string with_provider_user_guidance(std::string content, std::string_view gu
 
   if (ava::core::json::is_valid_object(content))
   {
-    while (!content.empty() && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r')) content.pop_back();
+    while (!content.empty() && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r'))
+      content.pop_back();
     if (content.size() >= 2 && content.back() == '}')
     {
       content.pop_back();
-      while (content.size() > 1 && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r')) content.pop_back();
+      while (content.size() > 1 && (content.back() == ' ' || content.back() == '\t' || content.back() == '\n' || content.back() == '\r'))
+        content.pop_back();
       bool const empty_object = content.size() == 1;  // only remaining '{'
       if (!empty_object)
         content.push_back(',');
@@ -262,7 +265,8 @@ std::vector<std::string> lowercase_argv(std::vector<std::string> const& argv)
 {
   std::vector<std::string> result;
   result.reserve(argv.size());
-  for (auto const& arg : argv) result.push_back(lowercase(arg));
+  for (auto const& arg : argv)
+    result.push_back(lowercase(arg));
   return result;
 }
 
@@ -662,7 +666,8 @@ std::optional<StableRecipeIdentity> stable_recipe_identity(ava::command::Command
 
   std::vector<RecipeArgument> normalized_argv;
   normalized_argv.reserve(argv.size());
-  for (auto const& value : argv) normalized_argv.push_back(recipe_argument(value, plan.workspace()));
+  for (auto const& value : argv)
+    normalized_argv.push_back(recipe_argument(value, plan.workspace()));
 
   auto append_payload = [&](ava::command::detail::Sha256Builder& hash, bool include_workspace) {
     hash.append_field(kPayloadVersion);
@@ -863,6 +868,42 @@ PermissionDecision decide(PermissionRequest const& request)
   return decision(PermissionAction::Allow, "allowed by default workspace policy", default_allow_risk(request.operation));
 }
 
+auto resolve_command_review(PermissionPrompt const& prompt, CommandReview const& review) -> std::optional<PermissionResolutionDecision>
+{
+  // This resolver fallback runs only after hard policy and persistent Denies.
+  // The backend classification is authoritative; a model cannot downgrade it.
+  if (!prompt.command_metadata || !review.recommends_approval || review.text.empty() || !command_reviewer_eligible(prompt) || !prompt.command_review ||
+      review.transaction != prompt.command_review || review.transaction->status != "validated" ||
+      review.transaction->contract_digest != command_contract_digest(prompt))
+  {
+    return std::nullopt;
+  }
+  auto const& metadata = *prompt.command_metadata;
+  if (metadata.level == ava::command::CommandLevel::Critical || !metadata.executor_identity_verified ||
+      (metadata.containment_status == CommandContainmentStatus::Available && !metadata.containment_available) ||
+      (metadata.executes_mutable_project_code && metadata.containment_status != CommandContainmentStatus::Available) ||
+      (metadata.containment_status != CommandContainmentStatus::NotRequired && metadata.containment_status != CommandContainmentStatus::Available))
+  {
+    return std::nullopt;
+  }
+  PermissionResolutionDecision result{PermissionResolution::Allow, "Qwen recommended approving this noncritical command once"};
+  result.resolution_source = "qwen_command_review";
+  result.command_review = review.transaction;
+  return result;
+}
+
+auto ReadOnlyApprovalPolicy::resolve(PermissionPrompt const& prompt) const -> std::optional<PermissionResolutionDecision>
+{
+  if (!enabled_ || prompt.risk == PermissionRisk::Critical || prompt.command_metadata ||
+      (prompt.operation != Operation::ReadFile && prompt.operation != Operation::SearchFiles))
+  {
+    return std::nullopt;
+  }
+  PermissionResolutionDecision result{PermissionResolution::Allow, "auto-read enabled for file reads and searches"};
+  result.resolution_source = "read_only_auto_approval";
+  return result;
+}
+
 CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor)
 {
   return command_permission_metadata(plan, CommandContainmentInfo{}, unverified_delegated_executor);
@@ -899,7 +940,8 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
       .effective_allowed_scopes = {},
       .environment_profile_id = plan.environment_profile_id(),
       .environment_digest = plan.environment_digest(),
-      .executor_identity_verified = !unverified_delegated_executor};
+      .executor_identity_verified = !unverified_delegated_executor,
+      .review_presentation = {}};
   bool const containment_required = classification.capabilities.requires_containment || classification.capabilities.executes_mutable_project_code;
   if (!unverified_delegated_executor && metadata.containment_status == CommandContainmentStatus::Unavailable)
   {
@@ -932,6 +974,15 @@ CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan 
     }
   }
   metadata.effective_allowed_scopes = command_permission_effective_scopes(metadata);
+  auto effect = ava::command::command_effect_summary(plan);
+  metadata.effect_profile = std::move(effect.profile);
+  metadata.review_presentation = std::move(effect.presentation);
+  metadata.disclosure_safe =
+      effect.disclosure_safe && !contains_secret_like_arguments(plan.argv()) && !is_secret_path(plan.cwd()) && !is_secret_path(metadata.resolved_executable);
+  metadata.capabilities = classification.capabilities;
+  auto const relative = plan.cwd().lexically_relative(plan.workspace());
+  metadata.scope_verified =
+      !relative.empty() && !relative.is_absolute() && std::ranges::none_of(relative, [](auto const& component) -> bool { return component == ".."; });
   return metadata;
 }
 
@@ -1003,6 +1054,10 @@ bool command_permission_allows_reusable_grant(CommandPermissionMetadata const& m
 
 bool command_prompt_allows_persistent_allow(PermissionPrompt const& prompt) noexcept
 {
+  if (prompt.risk == PermissionRisk::Critical)
+  {
+    return false;
+  }
   if (!prompt.command_metadata)
     return true;
   auto const& metadata = *prompt.command_metadata;

@@ -102,12 +102,14 @@ class RuntimePresentationState final
   void refresh_active_context_status(TuiRuntimeOptions const& options);
   void refresh_reasoning_status(TuiRuntimeOptions const& options);
   void apply_runtime_state_snapshot(TuiRuntimeOptions const& options, TuiRuntimeStateSnapshot state);
+  [[nodiscard]] auto read_only_approval() noexcept -> ava::permissions::ReadOnlyApprovalPolicy& { return read_only_approval_; }
 
   ComposerSnapshot snapshot;
 
  private:
   std::optional<std::size_t> applied_slash_catalog_generation_;
   std::optional<std::size_t> applied_workspace_catalog_generation_;
+  ava::permissions::ReadOnlyApprovalPolicy read_only_approval_;
 
  public:
   SidebarSnapshot sidebar;
@@ -117,6 +119,8 @@ class RuntimePresentationState final
  private:
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
+
+void set_read_only_approval(ava::permissions::ReadOnlyApprovalPolicy& policy, ComposerSnapshot& snapshot, std::optional<bool> enabled = std::nullopt);
 
 // Shared overview presentation helpers. Normal and active-run snapshot application
 // both route through these so an open overview rebuilds from the new DTO while

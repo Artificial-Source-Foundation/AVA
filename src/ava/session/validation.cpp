@@ -325,6 +325,34 @@ void validate_structured_tool_result(SessionReplayValidation& validation, std::s
   }
 }
 
+auto valid_bound_command_review(std::string_view data_json) -> bool
+{
+  auto const review = ava::core::json::object_field(data_json, "command_review");
+  auto const metadata = ava::core::json::object_field(data_json, "command_metadata");
+  if (!review || !metadata)
+  {
+    return false;
+  }
+  auto field = [&](std::string_view key) -> std::string { return ava::core::json::string_field(*review, key).value_or(""); };
+  auto const gates = ava::core::json::strings_in_array_field(*review, "gates");
+  return ava::core::json::integer_field(*review, "version") == 1 && ava::core::json::integer_field(*review, "schema_version") == 1 &&
+         bool_field_is_true(*review, "reviewer_enabled") && field("prompt_version") == "command-review-v2" && field("provider") == "airouter" &&
+         field("model") == "Qwen3.8" && (field("autonomy_mode") == "reviewed" || field("autonomy_mode") == "high") && field("scope") == "once" &&
+         field("status") == "validated" && field("recommendation") == "approve" && (field("risk") == "low" || field("risk") == "medium") &&
+         field("policy_recheck") == "passed" && field("eligibility") == "passed" && !field("request_nonce").empty() &&
+         field("input_digest").starts_with("sha256:") && !field("plan_fingerprint").empty() &&
+         field("plan_fingerprint") == ava::core::json::string_field(*metadata, "fingerprint") &&
+         field("effect_profile") == ava::core::json::string_field(*metadata, "effect_profile") &&
+         (field("effect_profile") == "vcs_read_only" || field("effect_profile") == "executes_project_code" || field("effect_profile") == "minimal_inspection" ||
+          field("effect_profile") == "workspace_inspection") &&
+         ava::core::json::string_field(*metadata, "level") == "standard" && ava::core::json::string_field(*metadata, "execution_domain") == "direct_argv" &&
+         bool_field_is_true(*metadata, "executor_identity_verified") &&
+         (ava::core::json::string_field(*metadata, "containment_status") == "not_required" ||
+          (ava::core::json::string_field(*metadata, "containment_status") == "available" && bool_field_is_true(*metadata, "containment_available"))) &&
+         gates == std::vector<std::string>{"direct_argv", "noncritical",      "verified_executor", "workspace_scope",
+                                           "containment", "effect_allowlist", "disclosure",        "no_deny"};
+}
+
 void validate_permission_decision(SessionReplayValidation& validation, std::unordered_map<std::string, std::vector<PendingPermissionPrompt>>& pending,
                                   std::size_t index, SessionEntry const& entry)
 {
@@ -357,6 +385,16 @@ void validate_permission_decision(SessionReplayValidation& validation, std::unor
   {
     add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "", "permission_decision entry has an invalid resolution_source");
     return;
+  }
+  if (resolution_source == "qwen_command_review")
+  {
+    bool const valid =
+        action == "ask" && resolution == "allow" && risk && valid_risk(*risk) && risk != "critical" && valid_bound_command_review(entry.data_json);
+    if (!valid)
+    {
+      add_error(validation, SessionReplayIssueKind::InvalidPermissionDecision, index, entry, "", "invalid bound one-shot command review record");
+      return;
+    }
   }
 
   if (action == "allow" || action == "deny")
@@ -464,7 +502,8 @@ void validate_compaction_entry(SessionReplayValidation& validation, std::size_t 
 
 void skip_json_ws(std::string_view text, std::size_t& index)
 {
-  while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0) ++index;
+  while (index < text.size() && std::isspace(static_cast<unsigned char>(text[index])) != 0)
+    ++index;
 }
 
 bool string_has_control_byte(std::string_view value)
@@ -559,8 +598,10 @@ std::optional<std::size_t> json_value_end(std::string_view text, std::size_t sta
   if (text[start] == '[')
     return json_balanced_end(text, start, '[', ']');
   auto end = start;
-  while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']') ++end;
-  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0) --end;
+  while (end < text.size() && text[end] != ',' && text[end] != '}' && text[end] != ']')
+    ++end;
+  while (end > start && std::isspace(static_cast<unsigned char>(text[end - 1])) != 0)
+    --end;
   return end == start ? std::nullopt : std::optional<std::size_t>(end - 1);
 }
 

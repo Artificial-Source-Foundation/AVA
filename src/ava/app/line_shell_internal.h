@@ -35,6 +35,8 @@ struct ShellState
  public:
   // Lifetime contract: the borrowed session must outlive each run loop invocation.
   runtime::session_ts& unlocked_session;
+  bool auto_approve_reads = false;
+  std::shared_ptr<ava::permissions::CommandAutonomyState> command_autonomy = std::make_shared<ava::permissions::CommandAutonomyState>();
 
   // Runtime sessions can contain provider credentials and must not be debug-printed.
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT

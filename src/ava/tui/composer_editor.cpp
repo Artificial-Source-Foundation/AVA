@@ -935,6 +935,7 @@ bool apply_composer_draft_action(ComposerDraftState& draft, TuiAction action)
     case TuiAction::VariantCycle:
     case TuiAction::ReasoningSelect:
     case TuiAction::ThinkingToggle:
+    case TuiAction::PermissionsToggle:
     case TuiAction::ModelSelect:
     case TuiAction::ModelCycleForward:
     case TuiAction::ModelCycleBackward:

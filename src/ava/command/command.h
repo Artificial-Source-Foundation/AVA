@@ -408,6 +408,15 @@ class CommandIntent;
 class CommandPlan;
 class CommandPreparation;
 
+struct CommandEffectSummary
+{
+  std::string profile = "unknown";
+  std::string presentation;
+  bool disclosure_safe = false;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+[[nodiscard]] auto command_effect_summary(CommandPlan const& plan) -> CommandEffectSummary;
+
 namespace detail {
 class EnvironmentFactory;
 ava::core::VoidResult validate_environment_matches_plan(CommandEnvironment const& environment, CommandPlan const& plan);

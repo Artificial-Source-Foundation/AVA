@@ -230,16 +230,13 @@ namespace ava::permissions {
 
 using namespace permission_rules_internal;
 
-ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_permission_rule(PermissionRuleStore const& store, PermissionPrompt const& prompt)
+static ava::core::Result<std::optional<PersistentPermissionRule>> match_loaded_command_rules(PermissionRuleStore const& store, PermissionPrompt const& prompt,
+                                                                                             std::vector<PersistentPermissionRule> const& rules)
 {
-  auto rules = load_persistent_permission_rules(store);
-  if (!rules)
-    return std::unexpected(std::move(rules.error()));
-
   std::optional<PersistentPermissionRule> matched_deny;
   std::optional<PersistentPermissionRule> matched_allow;
   std::optional<ava::core::Error> deny_identity_error;
-  for (auto const& rule : *rules)
+  for (auto const& rule : rules)
   {
     auto matches = rule_matches(store, rule, prompt);
     if (!matches)
@@ -266,6 +263,45 @@ ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_perm
   if (matched_allow)
     return matched_allow;
   return std::optional<PersistentPermissionRule>{};
+}
+
+ava::core::Result<std::optional<PersistentPermissionRule>> match_persistent_permission_rule(PermissionRuleStore const& store, PermissionPrompt const& prompt)
+{
+  auto rules = load_persistent_permission_rules(store);
+  if (!rules)
+    return std::unexpected(std::move(rules.error()));
+  return match_loaded_command_rules(store, prompt, *rules);
+}
+
+auto build_command_policy_reader(PermissionRuleStore store) -> CommandPolicyReader
+{
+  return [store = std::move(store)](PermissionPrompt const& prompt) -> ava::core::Result<CommandPolicySnapshot> {
+    auto rules = load_persistent_permission_rules(store);
+    if (!rules)
+    {
+      return std::unexpected(std::move(rules.error()));
+    }
+    auto match = match_loaded_command_rules(store, prompt, *rules);
+    if (!match)
+    {
+      return std::unexpected(std::move(match.error()));
+    }
+    std::string canonical;
+    for (auto const& rule : *rules)
+    {
+      canonical += permission_rule_json(rule) + '\n';
+    }
+    CommandPolicySnapshot result{.revision = command_autonomy_digest(canonical)};
+    if (*match)
+    {
+      PermissionResolutionDecision decision{(*match)->action == PermissionAction::Deny ? PermissionResolution::Deny : PermissionResolution::Allow};
+      decision.resolution_source = "persistent_rule";
+      decision.rule_id = (*match)->rule_id;
+      decision.authoritative = true;
+      result.rule = std::move(decision);
+    }
+    return result;
+  };
 }
 
 }  // namespace ava::permissions

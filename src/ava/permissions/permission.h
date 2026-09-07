@@ -6,12 +6,16 @@
 
 #include <filesystem>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
 namespace ava::permissions {
+
+class CommandAutonomyState;
+struct CommandReviewTransaction;
 
 enum class PermissionAction
 {
@@ -83,6 +87,12 @@ struct CommandPermissionMetadata
   std::string environment_profile_id;
   std::string environment_digest;
   bool executor_identity_verified = true;
+  // Derived only from the sealed plan, never from model explanations.
+  std::string effect_profile = "unknown";
+  std::string review_presentation;
+  ava::command::CommandCapabilities capabilities = {};
+  bool scope_verified = false;
+  bool disclosure_safe = false;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -151,6 +161,7 @@ struct PermissionResolutionDecision
   std::string resolution_source;
   std::string rule_id;
   bool authoritative = false;
+  std::shared_ptr<CommandReviewTransaction> command_review = nullptr;
 
   PermissionResolutionDecision() = default;
   PermissionResolutionDecision(PermissionResolution resolution_in);
@@ -160,10 +171,7 @@ struct PermissionResolutionDecision
   // OPT_OUT keeps user_guidance and free-form text out of generated printing; this
   // hand-written print_on is only for Debug nesting under generated parents and
   // emits a bounded opaque representation (no reason/user_guidance/rule text).
-  void print_on(std::ostream& os) const
-  {
-    os << "{resolution:" << static_cast<int>(resolution) << ",authoritative:" << authoritative << '}';
-  }
+  void print_on(std::ostream& os) const { os << "{resolution:" << static_cast<int>(resolution) << ",authoritative:" << authoritative << '}'; }
 #endif
 
   // user_guidance must never appear in debug/log representations.
@@ -199,10 +207,43 @@ struct PermissionPrompt
   bool diff_truncated = false;
   std::optional<CommandPermissionMetadata> command_metadata = std::nullopt;
 
+  // Shared only for this prompt and its joined reviewer worker. The command
+  // backend mints and verifies the receipt; frontends cannot mint authority.
+  std::shared_ptr<CommandReviewTransaction> command_review = nullptr;
+  bool deterministic_auto_candidate = false;
+
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
 using PermissionResolver = std::function<ava::core::Result<PermissionResolutionDecision>(PermissionPrompt const&)>;
+
+// A reviewer supplies advice, never a command classification or reusable grant.
+struct CommandReview
+{
+  std::string text;
+  bool recommends_approval = false;
+  std::string risk;
+  std::string recommendation;
+  std::shared_ptr<CommandReviewTransaction> transaction = nullptr;
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+[[nodiscard]] auto resolve_command_review(PermissionPrompt const& prompt, CommandReview const& review) -> std::optional<PermissionResolutionDecision>;
+
+// Resolver fallback only: hard policy and persistent Denies must run first.
+// Owned by the frontend thread; never serializes grants or command authority.
+class ReadOnlyApprovalPolicy final
+{
+ public:
+  explicit ReadOnlyApprovalPolicy(bool enabled = false) : enabled_(enabled) { }
+  [[nodiscard]] auto enabled() const noexcept -> bool { return enabled_; }
+  void set_enabled(bool enabled) noexcept { enabled_ = enabled; }
+  [[nodiscard]] auto resolve(PermissionPrompt const& prompt) const -> std::optional<PermissionResolutionDecision>;
+
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+
+ private:
+  bool enabled_ = false;
+};
 
 [[nodiscard]] CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, bool unverified_delegated_executor = false);
 [[nodiscard]] CommandPermissionMetadata command_permission_metadata(ava::command::CommandPlan const& plan, CommandContainmentInfo const& containment,

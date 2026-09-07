@@ -104,12 +104,15 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   append_path_metadata(hash, cwd_metadata);
   append_path_metadata(hash, trusted_home_metadata);
   hash.append_number(ava_authority_roots.size());
-  for (auto const& root : ava_authority_roots) hash.append_field(root.string());
+  for (auto const& root : ava_authority_roots)
+    hash.append_field(root.string());
   hash.append_number(ava_authority_root_metadata.size());
-  for (auto const& root : ava_authority_root_metadata) append_path_metadata(hash, root);
+  for (auto const& root : ava_authority_root_metadata)
+    append_path_metadata(hash, root);
   append_synthetic_environment_roots(hash, synthetic_environment_roots);
   hash.append_number(plan.argv().size());
-  for (auto const& argument : plan.argv()) hash.append_field(argument);
+  for (auto const& argument : plan.argv())
+    hash.append_field(argument);
   hash.append_field(plan.raw_shell_text());
   hash.append_number(plan.path_entries().size());
   for (auto const& entry : plan.path_entries())
@@ -149,9 +152,11 @@ std::string compute_fingerprint(CommandPlan const& plan, PathMetadata const& wor
   if (classification.recipe)
   {
     hash.append_number(classification.recipe->canonical_argv.size());
-    for (auto const& argument : classification.recipe->canonical_argv) hash.append_field(argument);
+    for (auto const& argument : classification.recipe->canonical_argv)
+      hash.append_field(argument);
     hash.append_number(classification.recipe->path_arguments.size());
-    for (auto const& path : classification.recipe->path_arguments) append_path_metadata(hash, path);
+    for (auto const& path : classification.recipe->path_arguments)
+      append_path_metadata(hash, path);
   }
   hash.append_field(plan.environment_profile_id());
   hash.append_field(plan.environment_digest());
@@ -441,6 +446,67 @@ ava::core::Result<bool> plan_is_fresh(CommandPlan const& plan)
     }
   }
   return true;
+}
+
+auto command_effect_summary(CommandPlan const& plan) -> CommandEffectSummary
+{
+  CommandEffectSummary result;
+  auto const& classification = plan.classification();
+  auto const& argv = plan.argv();
+  if (plan.execution_domain() == CommandExecutionDomain::RawShell)
+  {
+    return {.profile = "raw_shell", .presentation = {}};
+  }
+  if (classification.capabilities.network_enabled)
+  {
+    return {.profile = "network", .presentation = {}};
+  }
+  if (classification.family == CommandFamily::WorkspaceMutation)
+  {
+    return {.profile = "local_mutation", .presentation = {}};
+  }
+  if (classification.family == CommandFamily::RemoteGitMutation)
+  {
+    return {.profile = "vcs_mutation", .presentation = {}};
+  }
+  if (!classification.recipe || argv.empty())
+  {
+    return result;
+  }
+  // A positive disclosure grammar, not a secret blacklist. No arbitrary argv,
+  // script names, destinations, or absolute paths are ever sent to a reviewer.
+  auto const build_path = [&](std::string_view option) -> bool { return argv.size() == 3 && argv.at(1) == option && argv.at(2) == "build"; };
+  switch (classification.recipe->recipe)
+  {
+    case CommandRecipe::Pwd:
+      return {.profile = "minimal_inspection", .presentation = "pwd", .disclosure_safe = argv.size() == 1};
+    case CommandRecipe::Ls:
+      return {.profile = "workspace_inspection",
+              .presentation = argv.size() == 1 ? "ls" : "ls <workspace-path>",
+              .disclosure_safe = argv.size() == 1 || (argv.size() == 2 && (argv.at(1) == "." || argv.at(1) == "build"))};
+    case CommandRecipe::GitStatus:
+      return {.profile = "vcs_read_only", .presentation = "git status", .disclosure_safe = argv.size() == 2 && argv.at(1) == "status"};
+    case CommandRecipe::GitDiff:
+      return {.profile = "vcs_read_only", .presentation = "git diff", .disclosure_safe = argv.size() == 2 && argv.at(1) == "diff"};
+    case CommandRecipe::GitLogOne:
+      return {.profile = "vcs_read_only", .presentation = "git log -1", .disclosure_safe = argv.size() == 3 && argv.at(1) == "log" && argv.at(2) == "-1"};
+    case CommandRecipe::CmakeBuild:
+      return {.profile = "executes_project_code", .presentation = "cmake --build <workspace-build-directory>", .disclosure_safe = build_path("--build")};
+    case CommandRecipe::Ctest:
+      return {.profile = "executes_project_code",
+              .presentation = "ctest <workspace-test-directory>",
+              .disclosure_safe = argv.size() == 1 || build_path("--test-dir")};
+    case CommandRecipe::Ninja:
+      return {.profile = "executes_project_code", .presentation = "ninja <workspace-build-directory>", .disclosure_safe = argv.size() == 1 || build_path("-C")};
+    case CommandRecipe::Make:
+      return {.profile = "executes_project_code", .presentation = "make <workspace-build-directory>", .disclosure_safe = argv.size() == 1 || build_path("-C")};
+    case CommandRecipe::Pytest:
+      return {.profile = "executes_project_code", .presentation = "pytest", .disclosure_safe = argv.size() == 1};
+    case CommandRecipe::PackageManagerRunScript:
+    case CommandRecipe::WorkspaceScript:
+      return {.profile = "executes_project_code", .presentation = {}};
+  }
+  return result;
 }
 
 CommandIntentLane CommandPlan::intent_lane() const noexcept

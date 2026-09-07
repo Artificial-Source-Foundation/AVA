@@ -277,7 +277,7 @@ void test_unavailable_probe_forces_ask()
       ava::tools::run_bash(ctx, "cmake --build " + fix.build_dir.generic_string(), ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   if (landlock_available())
   {
-    expect(result && result->exit_code == 0, "when Landlock is available, standard mutable command auto-allows without resolver");
+    expect(!result && prompts == 1 && !critical_risk, "Safe autonomy asks for mutable project code even when Landlock is available");
   }
   else
   {
@@ -514,7 +514,8 @@ void test_authority_overlap_rejected()
   command::CommandLimits limits;
   auto synth_root = fix.root / "synth";
   std::error_code ec;
-  for (auto const* d : {"home", "cfg", "cache", "data", "state", "tmp"}) std::filesystem::create_directories(synth_root / d, ec);
+  for (auto const* d : {"home", "cfg", "cache", "data", "state", "tmp"})
+    std::filesystem::create_directories(synth_root / d, ec);
   auto anchors = ava::core::AnchorSet::open({fix.ava_authority_root, synth_root});
   expect(anchors.has_value(), "authority overlap test opens its shared AnchorSet");
   if (!anchors)
@@ -708,7 +709,7 @@ void test_contained_command_writes_workspace()
   ContainmentFixture fix("writes-workspace");
   fix.write_executable("cmake", "#!/bin/sh\necho cmake-ran > " + (fix.build_dir / "marker.txt").string() + "\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0, "contained standard project command succeeds under development containment");
   expect(std::filesystem::exists(fix.build_dir / "marker.txt"), "contained command writes to workspace build directory");
@@ -733,7 +734,7 @@ void test_contained_command_writes_private_primary_group_workspace()
   }
   fix.write_executable("cmake", "#!/bin/sh\necho cmake-ran-private-group > " + (fix.build_dir / "marker.txt").string() + "\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && std::filesystem::exists(fix.build_dir / "marker.txt"),
          "contained standard project command succeeds under a private-primary-group 0770 workspace");
@@ -755,7 +756,7 @@ void test_contained_command_writes_0755_workspace()
   ContainmentFixture fix("writes-0755", S_IRWXU | S_IRGRP | S_IXGRP);
   fix.write_executable("cmake", "#!/bin/sh\necho cmake-ran-0755 > " + (fix.build_dir / "marker.txt").string() + "\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0, "contained standard project command succeeds under 0755 workspace");
   expect(std::filesystem::exists(fix.build_dir / "marker.txt"), "contained command writes to 0755 workspace build directory");
@@ -775,7 +776,7 @@ void test_contained_command_reads_system_libs()
   ContainmentFixture fix("reads-system");
   fix.write_executable("cmake", "#!/bin/sh\ncat /etc/passwd > /dev/null 2>&1 && echo SYS_READ_OK || echo SYS_READ_FAIL\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("SYS_READ_OK") != std::string::npos,
          "contained command can read system files under allowed system roots");
@@ -791,7 +792,7 @@ void test_contained_command_cannot_read_secret()
   ContainmentFixture fix("cannot-read-secret");
   fix.write_executable("cmake", "#!/bin/sh\ncat " + fix.secret_file.string() + " > /dev/null 2>&1 && echo SECRET_READ_BAD || echo SECRET_BLOCKED\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("SECRET_BLOCKED") != std::string::npos,
          "contained command cannot read a test secret file outside the workspace");
@@ -808,7 +809,7 @@ void test_contained_command_cannot_write_ava_authority()
   auto const authority_marker = fix.ava_authority_root / "marker.txt";
   fix.write_executable("cmake", "#!/bin/sh\necho bad > " + authority_marker.string() + " 2>/dev/null && echo AUTH_WRITE_BAD || echo AUTH_BLOCKED\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("AUTH_BLOCKED") != std::string::npos && !std::filesystem::exists(authority_marker),
          "contained command cannot write to AVA authority test root");
@@ -828,7 +829,7 @@ void test_contained_command_cannot_open_outbound_network()
                        "if [ $? -ne 0 ]; then echo NETWORK_BLOCKED; else echo NETWORK_OK; fi\n"
                        "exit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("NETWORK_BLOCKED") != std::string::npos,
          "contained command with network denied cannot create outbound IP socket");
@@ -850,7 +851,7 @@ void test_contained_command_cannot_open_unix_socket()
                        "if [ $? -ne 0 ]; then echo UNIX_BLOCKED; else echo UNIX_OK; fi\n"
                        "exit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("UNIX_BLOCKED") != std::string::npos,
          "contained command with network denied cannot create AF_UNIX socket");
@@ -872,7 +873,7 @@ void test_contained_command_cannot_connect_abstract()
                        "if [ $? -ne 0 ]; then echo CONNECT_BLOCKED; else echo CONNECT_OK; fi\n"
                        "exit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("CONNECT_BLOCKED") != std::string::npos,
          "contained command with network denied cannot connect to abstract socket");
@@ -892,13 +893,13 @@ void test_contained_command_cannot_escape_via_symlink()
   fix.write_executable("cmake",
                        "#!/bin/sh\ncat " + link.string() + "/test-secret > /dev/null 2>&1 && echo SYMLINK_ESCAPE_BAD || echo SYMLINK_BLOCKED\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0 && result->output.find("SYMLINK_BLOCKED") != std::string::npos,
          "contained command cannot escape workspace via symlink to external directory");
 }
 
-void test_standard_contained_no_resolver_executes()
+void test_standard_contained_requires_permission_without_resolver()
 {
   if (!landlock_available())
   {
@@ -910,14 +911,8 @@ void test_standard_contained_no_resolver_executes()
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
   auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + fix.build_dir.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
-  expect(result && result->exit_code == 0 && std::filesystem::exists(fix.build_dir / "auto.txt"),
-         "standard contained command executes automatically without a resolver");
-  if (result)
-  {
-    expect(result->containment_applied, "contained command reports containment applied in result");
-    expect(!result->containment_profile_id.empty(), "contained command reports containment profile in result");
-    expect(result->containment_network_mode == "denied", "contained command reports network denied mode in result");
-  }
+  expect(!result && result.error().format().contains("no_resolver") && !std::filesystem::exists(fix.build_dir / "auto.txt"),
+         "Safe autonomy does not execute project code without permission even when containment is available");
 }
 
 void test_contained_command_cancel()
@@ -971,7 +966,7 @@ void test_contained_direct_file_recipe()
   ::chmod(test_file.c_str(), S_IRUSR | S_IWUSR);
   fix.write_executable("cmake", "#!/bin/sh\ncat " + test_file.string() + " > /dev/null 2>&1 && echo FILE_READ_OK || echo FILE_READ_FAIL\nexit 0\n");
   ScopedEnvVar const path_guard("PATH", fix.bin.string() + ":/usr/bin:/bin");
-  auto result = ava::tools::run_bash(fix.make_context(), "cmake --build " + test_file.generic_string(),
+  auto result = ava::tools::run_bash(fix.make_allow_context(), "cmake --build " + test_file.generic_string(),
                                      ava::tools::BashOptions{.timeout = std::chrono::milliseconds(5000)});
   expect(result && result->exit_code == 0, "contained command with direct-file recipe argument installs containment and executes");
   if (result)
@@ -1022,7 +1017,7 @@ void run_containment_tests()
   test_contained_command_cannot_open_unix_socket();
   test_contained_command_cannot_connect_abstract();
   test_contained_command_cannot_escape_via_symlink();
-  test_standard_contained_no_resolver_executes();
+  test_standard_contained_requires_permission_without_resolver();
   test_contained_command_cancel();
   test_contained_direct_file_recipe();
 }

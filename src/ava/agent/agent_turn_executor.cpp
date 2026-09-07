@@ -69,6 +69,8 @@ ava::core::VoidResult AgentTurnExecutor::initialize_tools()
                                .transport_factory = options_.transport_factory,
                                .edit_history = tool_execution.edit_history,
                                .edit_turn_id = tool_execution.edit_turn_id,
+                               .command_autonomy = tool_execution.command_autonomy,
+                               .command_policy_reader = tool_execution.command_policy_reader,
                               .lsp_diagnostics_provider = tool_resources.lsp_diagnostics_provider,
                               .plugin_global_plugins_dir = tool_resources.plugin_global_plugins_dir,
                               .plugin_project_plugins_dir = tool_resources.plugin_project_plugins_dir,

@@ -414,7 +414,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
     if (start == std::string::npos)
       return std::string{};
     auto end = start;
-    while (end < text.size() && !std::isspace(static_cast<unsigned char>(text[end]))) ++end;
+    while (end < text.size() && !std::isspace(static_cast<unsigned char>(text[end])))
+      ++end;
     return text.substr(start, end - start);
   };
   auto const permission_rule_id = add_permission_rule ? extract_rule_id(add_permission_rule->output[0]) : std::string{};
@@ -595,7 +596,8 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
   {
     std::string long_unicode_display;
     long_unicode_display.reserve(80 * 3);
-    for (int index = 0; index < 80; ++index) long_unicode_display += "你";
+    for (int index = 0; index < 80; ++index)
+      long_unicode_display += "你";
     ava::permissions::PersistentPermissionRule long_recipe_rule{
         .rule_id = "permrule_display_only",
         .scope = ava::permissions::PermissionRuleScope::Workspace,
@@ -734,7 +736,9 @@ void app_command_dispatcher_catalog_part(ava::app::runtime::session_ts& unlocked
                                                                                             .resolution_source = "resolver",
                                                                                             .resolution_reason = "remembered deny | rule",
                                                                                             .actor = "tui",
-                                                                                            .rule_id = permission_rule_id});
+                                                                                            .rule_id = permission_rule_id,
+                                                                                            .command_review_json = {},
+                                                                                            .autonomy_mode = {}});
   expect(append_permission_audit.has_value(), append_permission_audit
                                                   ? "command dispatcher test appends a permission audit entry"
                                                   : "command dispatcher test appends a permission audit entry: " + append_permission_audit.error().format());

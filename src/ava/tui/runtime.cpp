@@ -354,7 +354,8 @@ int run_interactive_composer(TuiRuntimeOptions options)
   };
   TranscriptSearchController transcript_search(presentation_state, renderer, navigation, active_select_list);
   std::optional<PendingSessionArchiveAction> session_archive_confirmation;
-  RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, renderer, &active_select_list);
+  RuntimePromptCoordinator prompt_coordinator(options, snapshot, command_session_grants, presentation_state.read_only_approval(), renderer,
+                                              &active_select_list);
   [[maybe_unused]] auto permission_resolver = prompt_coordinator.permission_resolver();
   [[maybe_unused]] auto question_resolver = prompt_coordinator.question_resolver();
   auto render = [&]() -> bool { return renderer.render(); };
@@ -2064,6 +2065,11 @@ int run_interactive_composer(TuiRuntimeOptions options)
     {
       pending_escape_clear = false;
       toggle_thinking_visibility();
+    }
+    else if (is_action(TuiAction::PermissionsToggle))
+    {
+      pending_escape_clear = false;
+      action_controller.toggle_read_only_approval();
     }
     else if (is_action(TuiAction::OverviewToggle))
     {

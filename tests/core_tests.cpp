@@ -76,6 +76,7 @@ void run_process_supervisor_posix_tests();
 void run_mcp_tests();
 void run_mermaid_render_coordinator_tests();
 void run_permission_rules_tests();
+void run_command_review_tests();
 void run_tui_composer_tests();
 void run_terminal_horizontal_layout_tests();
 void run_terminal_color_tests();
@@ -159,6 +160,7 @@ constexpr std::array kTestSuites{
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"mermaid_render", run_mermaid_render_coordinator_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},
+    TestSuite{.name = "command_review", .run = run_command_review_tests},
     TestSuite{"tui_composer", run_tui_composer_tests},
     TestSuite{"terminal_horizontal_layout", run_terminal_horizontal_layout_tests},
     TestSuite{"terminal_color", run_terminal_color_tests},

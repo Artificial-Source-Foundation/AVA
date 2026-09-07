@@ -666,11 +666,19 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
   auto const selected = prompt.guidance_mode ? PermissionPromptChoice::Deny : prompt.selected_choice;
   auto const actions =
       permission_dock_actions(selected, prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
-  auto const keys = prompt.guidance_mode
-                        ? permission_guidance_dock_keys(width)
-                        : permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
+  auto keys = prompt.guidance_mode
+                  ? permission_guidance_dock_keys(width)
+                  : permission_dock_keys(prompt.allow_session_available, prompt.allow_remember_available, prompt.deny_remember_available, width);
+  if (prompt.advice_available && !prompt.guidance_mode)
+  {
+    keys = fit_line_preserving_sgr("  E explain with Qwen · " + keys, width);
+  }
   auto const guidance_line = prompt.guidance_mode ? permission_guidance_line(prompt, width) : std::string{};
   auto header = permission_dock_header(width, max_lines <= 4 && !prompt.security_notice.empty());
+  if (!prompt.read_approval_hint.empty())
+  {
+    header = fit_line_preserving_sgr(header + " · " + sanitize_terminal_text(prompt.read_approval_hint), width);
+  }
   auto const remember_preview = !prompt.guidance_mode ? permission_remember_preview_line(prompt, width) : std::string{};
 
   if (prompt.guidance_mode)
@@ -742,6 +750,22 @@ std::vector<std::string> render_permission_prompt(PermissionPromptView const& pr
   if (auto metadata = permission_dock_metadata(metadata_text, width); !metadata.empty() && max_lines > lines.size() + reserved_tail)
     lines.push_back(std::move(metadata));
 
+  if (!prompt.advice.empty() && max_lines > lines.size() + reserved_tail)
+  {
+    auto const budget = max_lines - lines.size() - reserved_tail;
+    std::vector<std::string> wrapped;
+    for (auto const& raw_line : split_lines(prompt.advice))
+    {
+      auto rows = wrap_transcript_text(sanitize_terminal_text(raw_line), width > 4 ? width - 4 : 1);
+      wrapped.insert(wrapped.end(), rows.begin(), rows.end());
+    }
+    bool const truncated = wrapped.size() > budget;
+    for (std::size_t i = 0; i < std::min(budget, wrapped.size()); ++i)
+    {
+      lines.push_back(
+          fit_line_preserving_sgr("  " + (truncated && i + 1 == budget ? "... advice shortened; review the full command above" : wrapped.at(i)), width));
+    }
+  }
   if (!prompt.diff_preview.empty() && max_lines > lines.size() + reserved_tail)
   {
     auto const diff_budget = max_lines - lines.size() - reserved_tail;

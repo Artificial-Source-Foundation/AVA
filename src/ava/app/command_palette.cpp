@@ -649,6 +649,15 @@ void add_parent_summary_hint(tui::SelectListView& view, ava::session::SessionTre
     parent->detail += " · " + hint;
 }
 
+void add_autonomy_completions(tui::SlashCommandItem& item)
+{
+  add_completion(item, 0, "autonomy", "Command autonomy; Deny and Critical always win", "Safety", {}, false);
+  for (auto const* mode : {"manual", "safe", "reviewed", "high"})
+  {
+    add_completion(item, 1, mode, "Select deterministic command autonomy", "Safety", {"autonomy"}, false);
+  }
+}
+
 void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items, runtime::session_ts const& unlocked_session,
                                       std::vector<CommandHotkey> const& hotkeys, std::vector<WorkspacePathCandidate> const& path_completions,
                                       ava::session::SessionTreeIndex const* session_tree)
@@ -819,13 +828,15 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   if (auto index = find_item_index(items, "/jobs"))
   {
     auto& item = items[*index];
-    for (auto const& action : {"show", "wait", "result", "cancel", "promote"}) add_completion(item, 0, action, "Subagent job control", "Sessions");
+    for (auto const& action : {"show", "wait", "result", "cancel", "promote"})
+      add_completion(item, 0, action, "Subagent job control", "Sessions");
     if (subagent_coordinator)
     {
       auto const jobs = subagent_coordinator->list(session_id);
       std::vector<std::string> job_ids;
       job_ids.reserve(jobs.size());
-      for (auto const& snapshot : jobs) job_ids.push_back(snapshot.job.identity.job_id);
+      for (auto const& snapshot : jobs)
+        job_ids.push_back(snapshot.job.identity.job_id);
       auto const job_refs = unique_short_id_refs(job_ids);
       for (std::size_t job_index = 0; job_index < jobs.size(); ++job_index)
       {
@@ -841,6 +852,13 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
   if (auto index = find_item_index(items, "/permissions"))
   {
     auto& item = items[*index];
+    add_completion(item, 1, "on", "Enable Reviewed autonomy for eligible sealed commands", "Safety", {"review"}, false);
+    add_completion(item, 1, "off", "Select Safe autonomy without remote review", "Safety", {"review"}, false);
+    add_completion(item, 0, "review", "Bound one-shot review of deterministically eligible plans (TUI)", "Safety", {}, false);
+    add_autonomy_completions(item);
+    add_completion(item, 0, "toggle", "Toggle Auto-read during this session (F7); other permission checks unchanged", "Safety", {}, false);
+    add_completion(item, 0, "read-only", "Auto-approve file reads/searches for this session", "Safety", {}, false);
+    add_completion(item, 0, "default", "Restore default permission checks for this session", "Safety", {}, false);
     for (auto const& subcommand : {"list", "audit", "diagnose", "explain", "add", "remove"})
     {
       add_completion(item, 0, subcommand, "Permission rule command", "Safety");
@@ -875,7 +893,8 @@ void add_backend_argument_completions(std::vector<tui::SlashCommandItem>& items,
     {
       std::vector<std::string> rule_ids;
       rule_ids.reserve(rules->size());
-      for (auto const& rule : *rules) rule_ids.push_back(rule.rule_id);
+      for (auto const& rule : *rules)
+        rule_ids.push_back(rule.rule_id);
       auto const rule_refs = unique_short_id_refs(rule_ids);
       for (std::size_t rule_index = 0; rule_index < rules->size(); ++rule_index)
       {

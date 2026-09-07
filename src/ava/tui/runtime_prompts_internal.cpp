@@ -10,6 +10,7 @@
 #include "ava/tui/runtime_views_internal.h"
 #include "ava/tui/session_grants.h"
 #include "ava/tui/terminal.h"
+#include "ava/core/thread.h"
 
 #include <algorithm>
 #include <chrono>
@@ -28,6 +29,26 @@ using runtime_views::permission_prompt_view;
 using runtime_views::question_answer_from_view;
 using runtime_views::question_prompt_view;
 
+namespace {
+auto permission_request_label(ava::permissions::PermissionPrompt const& prompt) -> std::string
+{
+  auto label = std::string("permission requested");
+  if (!prompt.tool_name.empty())
+  {
+    label += ": " + prompt.tool_name;
+  }
+  if (!prompt.command.empty())
+  {
+    label += " " + prompt.command;
+  }
+  if (prompt.target_path.has_filename())
+  {
+    label += " " + prompt.target_path.generic_string();
+  }
+  return label;
+}
+}  // namespace
+
 bool detail::prompt_wheel_input_suppressed(Key key, std::optional<std::chrono::steady_clock::time_point> const& deadline,
                                            std::chrono::steady_clock::time_point now)
 {
@@ -43,8 +64,14 @@ PendingQuestionRequest::PendingQuestionRequest(ava::agent::QuestionPrompt prompt
 }
 
 RuntimePromptCoordinator::RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants,
-                                                   RuntimeRenderer& renderer, ActiveSelectList* active_select_list)
-    : options_(options), snapshot_(snapshot), session_grants_(session_grants), renderer_(renderer), active_select_list_(active_select_list)
+                                                   ava::permissions::ReadOnlyApprovalPolicy& read_only_approval, RuntimeRenderer& renderer,
+                                                   ActiveSelectList* active_select_list)
+    : options_(options),
+      snapshot_(snapshot),
+      session_grants_(session_grants),
+      read_only_approval_(read_only_approval),
+      renderer_(renderer),
+      active_select_list_(active_select_list)
 {
 }
 
@@ -107,14 +134,35 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
   auto& snapshot = snapshot_;
   auto& command_session_grants = session_grants_;
   auto& ui_mutex = renderer_.ui_mutex;
-  auto permission_label = std::string("permission requested");
-  if (!prompt.tool_name.empty())
-    permission_label += ": " + prompt.tool_name;
-  if (!prompt.command.empty())
-    permission_label += " " + prompt.command;
-  if (prompt.target_path.has_filename())
-    permission_label += " " + prompt.target_path.generic_string();
-  emit_prompt_audit("tui:permission_request", std::move(permission_label), prompt.permission_request_id, prompt.tool_name, prompt.reason);
+  auto update_read_approval_hint = [&]() -> void {
+    if (snapshot.permission_prompt)
+    {
+      snapshot.permission_prompt->read_approval_hint = std::string("Auto-read ") + (read_only_approval_.enabled() ? "on" : "off") + " · " +
+                                                       keys_display(options.key_bindings, TuiAction::PermissionsToggle) + " toggle";
+    }
+  };
+  if (terminal_signal_received() || (stop_requested && stop_requested()))
+  {
+    return ava::permissions::PermissionResolution::Deny;
+  }
+  auto finish_auto_read = [&](ava::permissions::PermissionResolutionDecision decision) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    emit_prompt_audit("tui:permission_allow", "file read/search auto-approved", prompt.permission_request_id, prompt.tool_name, prompt.reason, decision.reason);
+    {
+      std::scoped_lock lock(ui_mutex);
+      snapshot.permission_prompt.reset();
+      snapshot.status = "Auto-read: file read/search approved";
+    }
+    if (!render())
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render auto-read approval"));
+    }
+    return decision;
+  };
+  if (auto decision = read_only_approval_.resolve(prompt))
+  {
+    return finish_auto_read(std::move(*decision));
+  }
+  emit_prompt_audit("tui:permission_request", permission_request_label(prompt), prompt.permission_request_id, prompt.tool_name, prompt.reason);
     // A durable Deny never grants execution authority, so preserve it even
     // when one-shot Critical/unverified commands cannot be remembered as Allows.
   auto const remember_availability = permission_prompt_remember_availability(prompt, static_cast<bool>(options.remember_permission_rule));
@@ -131,7 +179,13 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     static_cast<void>(render());
     ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::AllowSessionGrant};
-    decision.resolution_source = "tui_session_grant";
+    decision.resolution_source = "session_grant";
+    return decision;
+  }
+  if (prompt.deterministic_auto_candidate && options.command_autonomy && ava::permissions::command_deterministic_auto(prompt, options.command_autonomy->mode()))
+  {
+    ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::Allow};
+    decision.resolution_source = "deterministic_command_auto";
     return decision;
   }
   {
@@ -139,6 +193,9 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     // Competing prompt authority closes process-local selectors so they cannot hide under the prompt and reappear.
     close_competing_select_list_for_prompt(snapshot, active_select_list_);
     snapshot.permission_prompt = permission_prompt_view(prompt);
+    snapshot.permission_prompt->advice_available =
+        static_cast<bool>(options.explain_command) && prompt.command_review && ava::permissions::command_reviewer_eligible(prompt);
+    update_read_approval_hint();
     request_attention(snapshot, AttentionEvent::Approval);
     snapshot.permission_prompt->selected_choice = PermissionPromptChoice::Deny;
     snapshot.permission_prompt->allow_session_available = allow_session_available;
@@ -152,6 +209,42 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
   if (!render())
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission prompt"));
+  }
+
+  // Scoped worker is canceled and joined on every exit; no result can reach another prompt.
+  // Single writer publishes through release/acquire; the UI reads only after completion.
+  std::optional<ava::core::Result<ava::permissions::CommandReview>> advice_result;
+  std::atomic<bool> advice_done{false};
+  bool advice_pending = false;
+  std::optional<ava::core::JoinThread> advice_worker;
+  bool advice_started = false;
+  auto start_advice = [&] -> void {
+    if (advice_started || !snapshot.permission_prompt || !snapshot.permission_prompt->advice_available)
+    {
+      return;
+    }
+    advice_started = true;
+    advice_pending = true;
+    snapshot.permission_prompt->advice = "Qwen is explaining this command... You can still approve or reject now.";
+    advice_worker.emplace(ava::core::JoinThread::create("command_advice", [&options, &prompt, &advice_result, &advice_done](std::stop_token stop) -> void {
+      try
+      {
+        advice_result.emplace(options.explain_command(prompt, std::move(stop)));
+      }
+      catch (...)
+      {
+        advice_result.reset();
+      }
+      advice_done.store(true, std::memory_order_release);
+    }));
+  };
+  if (options.command_advice_enabled)
+  {
+    start_advice();
+    if (!render())
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render command explanation"));
+    }
   }
 
   auto resolve_choice = [&](PermissionPromptChoice selected,
@@ -234,7 +327,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
         return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to clear permission prompt"));
       }
       ava::permissions::PermissionResolutionDecision decision{ava::permissions::PermissionResolution::AllowSessionGrant};
-      decision.resolution_source = "tui_session_grant";
+      decision.resolution_source = "session_grant";
       return decision;
     }
 
@@ -307,7 +400,7 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     else
     {
-      choice_input = stop_requested ? read_curses_input_with_timeout(std::chrono::milliseconds(100)) : read_curses_input();
+      choice_input = (stop_requested || advice_pending) ? read_curses_input_with_timeout(std::chrono::milliseconds(100)) : read_curses_input();
     }
     if (stop_requested && stop_requested())
     {
@@ -326,6 +419,44 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
     }
     if (!choice_input)
     {
+      // Handle queued human input before considering an automatic decision.
+      if (advice_pending && advice_done.load(std::memory_order_acquire))
+      {
+        advice_pending = false;
+        auto advice = advice_result ? std::move(*advice_result)
+                                    : ava::core::Result<ava::permissions::CommandReview>{std::unexpected(
+                                          ava::core::Error(ava::core::ErrorCategory::Provider, "Command explanation unavailable; decide manually."))};
+        if (snapshot.permission_prompt)
+        {
+          snapshot.permission_prompt->advice = advice && !advice->text.empty() ? advice->text : "Command explanation unavailable; decide manually.";
+          if (!advice)
+          {
+            snapshot.permission_prompt->advice = advice.error().message();
+          }
+        }
+        if (advice && options.command_advice_enabled)
+        {
+          if (auto decision = ava::permissions::resolve_command_review(prompt, *advice))
+          {
+            emit_prompt_audit("tui:permission_allow", "noncritical command approved once after Qwen review", prompt.permission_request_id, prompt.tool_name,
+                              prompt.reason, decision->reason);
+            {
+              std::scoped_lock lock(ui_mutex);
+              snapshot.permission_prompt.reset();
+              snapshot.status = "Qwen approved this noncritical command once";
+            }
+            if (!render())
+            {
+              return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render command review"));
+            }
+            return *decision;
+          }
+        }
+        if (!render())
+        {
+          return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render command explanation"));
+        }
+      }
       wheel_governor.reset();
       wheel_suppression_deadline.reset();
       continue;
@@ -355,6 +486,31 @@ ava::core::Result<ava::permissions::PermissionResolutionDecision> RuntimePromptC
       return resolve_choice(PermissionPromptChoice::Deny);
     }
 
+    if (key_matches_action(options.key_bindings, TuiAction::PermissionsToggle, choice_input->event.key))
+    {
+      set_read_only_approval(read_only_approval_, snapshot);
+      update_read_approval_hint();
+      if (auto decision = read_only_approval_.resolve(prompt))
+      {
+        return finish_auto_read(std::move(*decision));
+      }
+      if (!render())
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render permission mode"));
+      }
+      continue;
+    }
+
+    if (snapshot.permission_prompt && !snapshot.permission_prompt->guidance_mode && choice_input->event.key == Key::Character &&
+        (choice_input->event.character == 'e' || choice_input->event.character == 'E'))
+    {
+      start_advice();
+      if (!render())
+      {
+        return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Io, "failed to render command explanation"));
+      }
+      continue;
+    }
     auto input_result =
         snapshot.permission_prompt ? handle_permission_prompt_input(*snapshot.permission_prompt, choice_input->event) : PermissionPromptInputResult{};
     if (input_result.action == PermissionPromptInputAction::ResolveAllow)

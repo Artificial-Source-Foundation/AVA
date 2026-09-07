@@ -68,6 +68,7 @@ enum class TuiAction
   VariantCycle,
   ReasoningSelect,
   ThinkingToggle,
+  PermissionsToggle,
   ModelSelect,
   ModelCycleForward,
   ModelCycleBackward,

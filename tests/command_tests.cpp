@@ -2,6 +2,9 @@
 #include "tests/support/test_harness.h"
 #include "ava/command/command.h"
 #include "ava/command/discovery.h"
+#include "ava/tools/file_tools.h"
+#include "ava/session/validation.h"
+#include "ava/permissions/command_autonomy.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
 
@@ -443,7 +446,8 @@ void test_workspace_spoofs_are_not_inspection_recipes()
 void test_recipe_paths_are_logical_sealed_and_fresh()
 {
   CommandFixture fixture("recipe-paths");
-  for (auto const name : {"cmake", "ctest", "pytest"}) fixture.executable(name);
+  for (auto const name : {"cmake", "ctest", "pytest"})
+    fixture.executable(name);
   auto const outside = fixture.root / "outside";
   std::filesystem::create_directories(outside);
   ::chmod(outside.c_str(), S_IRWXU);
@@ -991,7 +995,8 @@ void test_synthetic_environment_roots_are_sealed_and_fresh()
 void test_capabilities_scopes_and_standard_recipes()
 {
   CommandFixture fixture("policy");
-  for (auto const name : {"git", "cmake", "ctest", "pytest", "npm", "python"}) fixture.executable(name);
+  for (auto const name : {"git", "cmake", "ctest", "pytest", "npm", "python"})
+    fixture.executable(name);
   auto options = fixture.options();
   auto pull = command::seal_command_plan(*command::CommandIntent::structured({"git", "pull"}), options);
   auto fetch = command::seal_command_plan(*command::CommandIntent::structured({"git", "fetch"}), options);
@@ -1129,7 +1134,8 @@ void test_ancestor_freshness_detects_mode_and_replacement()
 void test_stable_recipe_identity_is_scope_aware_and_secret_free()
 {
   CommandFixture fixture("stable-recipe-identity");
-  for (auto const name : {"cmake", "npm", "python"}) fixture.executable(name);
+  for (auto const name : {"cmake", "npm", "python"})
+    fixture.executable(name);
   std::filesystem::create_directories(fixture.workspace / "build-other");
   ::chmod((fixture.workspace / "build-other").c_str(), S_IRWXU);
 
@@ -1317,7 +1323,8 @@ void test_unsafe_executables_and_ancestors_are_rejected_without_blocking()
 void test_credential_bearing_commands_never_mint_recipes()
 {
   CommandFixture fixture("credential-recipe-refusal");
-  for (auto const name : {"curl", "wget", "cmake"}) fixture.executable(name);
+  for (auto const name : {"curl", "wget", "cmake"})
+    fixture.executable(name);
   ava::permissions::CommandContainmentInfo const contained{.available = true, .profile_id = "ava-development-v1", .network_allowed = false};
   auto metadata = [&](ava::core::Result<command::CommandPlan> const& plan) {
     return plan ? ava::permissions::command_permission_metadata(*plan, contained) : ava::permissions::CommandPermissionMetadata{};
@@ -1370,10 +1377,197 @@ void test_credential_bearing_commands_never_mint_recipes()
          "auth, arbitrary URL query, and URL userinfo forms never mint recipe keys or display, while a plain curl URL still does");
 }
 
+void mutate_review_receipt(std::string_view scenario, CommandFixture& fixture, ava::permissions::PermissionPrompt const& prompt,
+                           ava::permissions::PermissionResolutionDecision& allowed, std::string& revision, bool& denied,
+                           std::shared_ptr<ava::permissions::CommandAutonomyState> const& mode, bool& canceled)
+{
+  using namespace ava::permissions;
+  auto const transaction = prompt.command_review;
+  if (std::string_view(scenario) == "policy_change")
+  {
+    revision = "changed-policy";
+  }
+  if (std::string_view(scenario) == "deny")
+  {
+    denied = true;
+  }
+  if (std::string_view(scenario) == "cancel")
+  {
+    canceled = true;
+  }
+  if (std::string_view(scenario) == "command_change")
+  {
+    auto changed = prompt;
+    changed.command = "cmake --build another-directory";
+    transaction->contract_digest = command_contract_digest(changed);
+  }
+  if (std::string_view(scenario) == "mode_change")
+  {
+    mode->set_mode(CommandAutonomyMode::Safe);
+    mode->set_mode(CommandAutonomyMode::Reviewed);
+  }
+  if (std::string_view(scenario) == "executable_change")
+  {
+    fixture.executable("cmake", "#!/bin/sh\nexit 3\n");
+  }
+  if (std::string_view(scenario) == "cwd_change")
+  {
+    ::chmod(fixture.workspace.c_str(), S_IRUSR | S_IXUSR);
+  }
+  if (std::string_view(scenario) == "foreign_receipt")
+  {
+    allowed.command_review = std::make_shared<CommandReviewTransaction>(*transaction);
+  }
+}
+
+void verify_review_receipt_reuse(ava::tools::ToolContext& context, CommandFixture const& fixture, ava::command::CommandPreparation const& prepared,
+                                 std::optional<ava::permissions::PermissionResolutionDecision> const& previous_allow,
+                                 std::vector<ava::session::SessionEntry> const& journal)
+{
+  using namespace ava::permissions;
+  auto valid = ava::session::validate_session_replay(journal);
+  expect(valid.ok(), "reviewed Ask and bound Allow records pass semantic session replay");
+  if (!journal.empty())
+  {
+    auto altered = journal;
+    auto& record = altered.back().data_json;
+    auto index = record.find(R"("policy_recheck":"passed")");
+    if (index != std::string::npos)
+    {
+      record.replace(index, std::string(R"("policy_recheck":"passed")").size(), R"("policy_recheck":"failed")");
+    }
+    expect(!ava::session::validate_session_replay(altered).ok(), "replay rejects reviewer authority without a passed backend recheck");
+  }
+  expect(previous_allow && previous_allow->command_review && !previous_allow->command_review->admission_check,
+         "completed one-shot receipt cannot retain the scoped backend admission callback");
+  int next_prompts = 0;
+  context.permission_resolver = [&](PermissionPrompt const& next) -> ava::core::Result<PermissionResolutionDecision> {
+    ++next_prompts;
+    if (!next.command_review)
+    {
+      return PermissionResolution::Deny;
+    }
+    return *previous_allow;
+  };
+  auto reused = ava::tools::ensure_command_permission(context, "cmake --build build", prepared,
+                                                      CommandContainmentInfo{.available = true, .profile_id = "fixture-contained", .network_allowed = false},
+                                                      false, "bash", "fixture permission");
+  expect(!reused, "a prior prompt receipt cannot authorize even the same plan a second time");
+  expect(next_prompts == 2, "reused receipt human fallback prompt count: " + std::to_string(next_prompts));
+  auto still_fresh = command::plan_is_fresh(prepared.plan());
+  expect(still_fresh && *still_fresh, "reuse fixture preserves sealed plan freshness");
+  // Persistence creates a sibling directory, changing sealed ancestor
+  // metadata. Exercise same-plan receipt reuse before that filesystem work.
+  ava::session::SessionStore store({.root_dir = fixture.root / "journal", .workspace_dir = fixture.workspace, .session_id = "review"});
+  for (auto const& entry : journal)
+  {
+    expect(append_session_entry_for_test(store, entry).has_value(), "review evidence persists through session lease append");
+  }
+  auto persisted = store.load();
+  expect(persisted && ava::session::validate_session_replay(*persisted).ok(), "persisted reviewed permission records load and replay successfully");
+  context.permission_resolver = nullptr;
+}
+
+void test_command_autonomy_backend_receipt(std::string_view scenario)
+{
+  using namespace ava::permissions;
+  CommandFixture fixture(std::string("review-receipt-") + std::string(scenario));
+  fixture.executable("cmake");
+  auto intent = command::CommandIntent::compatibility("cmake --build build");
+  auto prepared =
+      intent ? command::prepare_command(*intent, fixture.options()) : ava::core::Result<command::CommandPreparation>{std::unexpected(intent.error())};
+  expect(prepared.has_value(), "review boundary fixture seals a real executable and cwd");
+  if (!prepared)
+  {
+    return;
+  }
+  auto mode = std::make_shared<CommandAutonomyState>();
+  mode->set_mode(CommandAutonomyMode::Reviewed);
+  std::string revision = "initial-policy";
+  bool denied = false;
+  bool canceled = false;
+  std::optional<PermissionResolutionDecision> previous_allow;
+  int prompts = 0;
+  std::vector<ava::session::SessionEntry> journal;
+  ava::tools::ToolContext context{.workspace_dir = fixture.workspace, .edit_turn_id = {}};
+  context.command_autonomy = mode;
+  context.cancel_requested = [&] -> bool { return canceled; };
+  context.command_policy_reader = [&](PermissionPrompt const&) -> ava::core::Result<CommandPolicySnapshot> {
+    CommandPolicySnapshot result{.revision = revision};
+    if (denied)
+    {
+      result.rule.emplace(PermissionResolution::Deny);
+    }
+    return result;
+  };
+  context.permission_audit_sink = [&](ava::tools::PermissionAuditEvent const& event) -> ava::core::VoidResult {
+    journal.push_back(ava::session::SessionEntry{.id = "review-entry-" + std::to_string(journal.size()),
+                                                 .parent_id = journal.empty() ? "" : journal.back().id,
+                                                 .type = ava::session::EntryType::PermissionDecision,
+                                                 .timestamp = "2026-09-06T00:00:00Z",
+                                                 .data_json = ava::tools::permission_audit_data_json(event)});
+    return {};
+  };
+  context.permission_resolver = [&](PermissionPrompt const& prompt) -> ava::core::Result<PermissionResolutionDecision> {
+    ++prompts;
+    if (!prompt.command_review)
+    {
+      return PermissionResolution::Deny;
+    }
+    auto transaction = prompt.command_review;
+    transaction->status = "validated";
+    transaction->risk = "low";
+    transaction->recommendation = "approve";
+    CommandReview review{.text = "Fixture review", .recommends_approval = true, .risk = "low", .recommendation = "approve", .transaction = transaction};
+    auto allowed = resolve_command_review(prompt, review);
+    expect(allowed.has_value(), "eligible bound fixture can propose a one-shot decision");
+    if (!allowed)
+    {
+      return PermissionResolution::Deny;
+    }
+    previous_allow = *allowed;
+    mutate_review_receipt(scenario, fixture, prompt, *allowed, revision, denied, mode, canceled);
+    return *allowed;
+  };
+  auto permission = ava::tools::ensure_command_permission(
+      context, "cmake --build build", *prepared, CommandContainmentInfo{.available = true, .profile_id = "fixture-contained", .network_allowed = false}, false,
+      "bash", "fixture permission");
+  if (std::string_view(scenario) == "approve")
+  {
+    expect(permission && prompts == 1, "backend accepts an exact bound reviewed one-shot");
+    verify_review_receipt_reuse(context, fixture, *prepared, previous_allow, journal);
+  }
+  else
+  {
+    expect(!permission, "changed policy, mode, executable, cwd, or foreign receipt cannot execute");
+  }
+  if (std::string_view(scenario) == "policy_change" || std::string_view(scenario) == "mode_change" || std::string_view(scenario) == "foreign_receipt" ||
+      std::string_view(scenario) == "command_change")
+  {
+    expect(prompts == 2, "recoverable stale review gets exactly one human fallback, with no new review receipt");
+  }
+  if (std::string_view(scenario) == "cwd_change")
+  {
+    ::chmod(fixture.workspace.c_str(), S_IRWXU);
+  }
+}
+
+void test_command_autonomy_backend_receipts()
+{
+  // Real sealed executable/cwd with declared containment metadata. The separate
+  // command_review execution fixture proves actual Linux installation.
+  for (auto const* scenario :
+       {"approve", "policy_change", "deny", "cancel", "command_change", "mode_change", "executable_change", "cwd_change", "foreign_receipt"})
+  {
+    test_command_autonomy_backend_receipt(scenario);
+  }
+}
+
 }  // namespace
 
 void run_command_tests()
 {
+  test_command_autonomy_backend_receipts();
   test_compatibility_parser_is_lossless_or_raw_shell();
   test_compatibility_shell_words_are_critical_raw_shell();
   test_intent_bounds_and_path_bounds_do_not_underflow();

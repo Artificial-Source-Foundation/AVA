@@ -5,7 +5,7 @@ namespace ava::tui {
 
 bool tui_session_grant_eligible(ava::permissions::PermissionPrompt const& prompt) noexcept
 {
-  if (prompt.operation != ava::permissions::Operation::RunCommand || !prompt.command_metadata ||
+  if (prompt.operation != ava::permissions::Operation::RunCommand || prompt.risk == ava::permissions::PermissionRisk::Critical || !prompt.command_metadata ||
       !ava::permissions::command_permission_allows_reusable_grant(*prompt.command_metadata))
     return false;
 

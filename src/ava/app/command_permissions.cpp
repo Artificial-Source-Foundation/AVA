@@ -51,7 +51,10 @@ struct PermissionAuditRow
 
 std::string permissions_usage()
 {
-  return "usage: /permissions <list|audit|diagnose|explain|add|remove> ...\n"
+  return "usage: /permissions <toggle|read-only|default|list|audit|diagnose|explain|add|remove> ...\n"
+         "  /permissions toggle|read-only|default: interactive Auto-read control; other permission checks stay unchanged\n"
+         "  /permissions autonomy [manual|safe|reviewed|high]: deterministic command autonomy (TUI)\n"
+         "  /permissions review [on|off]: alias for Reviewed/Safe; only eligible disclosures reach Qwen\n"
          "  /permissions list [query]\n"
          "  /permissions audit [query]\n"
          "  /permissions audit summary [query]\n"
@@ -61,7 +64,7 @@ std::string permissions_usage()
          "  /permissions explain <rule_id>\n"
          "  /permissions add action=<allow|deny> operation=<operation> reason=\"<why>\" "
          "[scope=workspace|global] [mode=any|build|plan] [path=<path>] [command=\"<cmd>\"] [recipe_key=<key>] [tool=<tool>]\n"
-         "    Advanced: exact Critical command Allows require critical_acknowledged=true and command=<exact command>; prompt UI never creates them.\n"
+         "    Critical commands always require one-shot approval; persistent Allows cannot authorize them.\n"
          "  /permissions remove <rule_id>\n"
          "    Remove requires the full rule id from explain/completion; list ordinals are display-only.\n"
          "operations: read, search, edit, bash, network.fetch, network.search, lsp.server.launch, lsp.query, "

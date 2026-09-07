@@ -61,6 +61,7 @@ void print_help()
   std::cout << "  ava --trace  # write a private bounded production trace\n";
   std::cout << "  ava [--agent name] [--system-prompt text] [--append-system-prompt text]\n";
   std::cout << "  ava [--tools list] [--exclude-tools list] [--no-builtin-tools|--no-tools]\n";
+  std::cout << "  ava --allow read-only  # auto-approve file reads/searches; toggle with F7 or /permissions toggle\n";
   std::cout << "  ava --print [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava -p [@file ...] [prompt] [--json|--output json] [--allow read-only] [--allow-tool list]\n";
   std::cout << "  ava --rpc [--allow read-only] [--allow-tool list]\n";
@@ -317,7 +318,7 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
   std::vector<std::string> cli_file_arguments;
   auto print_output_format = ava::app::PrintOutputFormat::Text;
   bool print_output_flag_seen = false;
-  bool print_permission_flag_seen = false;
+  bool headless_tool_allow_flag_seen = false;
   ava::app::runtime::PromptOverrides prompt_overrides;
   ava::app::HeadlessPermissionPolicyOptions headless_permission_policy;
   ava::agent::ToolVisibilityOptions tool_visibility;
@@ -588,7 +589,6 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
         std::cerr << argv[0] << ": " << added.error().format() << '\n';
         return 2;
       }
-      print_permission_flag_seen = true;
       continue;
     }
     if (arg == "--allow-tool")
@@ -603,7 +603,7 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
         std::cerr << argv[0] << ": " << added.error().format() << '\n';
         return 2;
       }
-      print_permission_flag_seen = true;
+      headless_tool_allow_flag_seen = true;
       continue;
     }
     if (arg == "--tools" || arg == "-t")
@@ -772,9 +772,9 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
     return fatal_error(2, "--json and --output text/json are only supported with --print; use --rpc or --output rpc for RPC");
   }
 
-  if (!print_mode && !rpc_mode && print_permission_flag_seen)
+  if (!print_mode && !rpc_mode && headless_tool_allow_flag_seen)
   {
-    return fatal_error(2, "--allow and --allow-tool are only supported with --print or --rpc");
+    return fatal_error(2, "--allow-tool is only supported with --print or --rpc");
   }
 
   auto const selected_persisted_session_mode = (requested_session_id ? 1 : 0) + (continue_last_session ? 1 : 0) + (fork_session_id ? 1 : 0);
@@ -880,7 +880,7 @@ int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_p
   }
 
   bool const print_farewell = !line_shell && stdin_is_tty() && stdout_is_tty();
-  int const status = run_interactive(*unlocked_session_result, line_shell);
+  int const status = run_interactive(*unlocked_session_result, line_shell, headless_permission_policy);
   if (print_farewell)
     print_exit_card(*unlocked_session_result, status);
   return status;

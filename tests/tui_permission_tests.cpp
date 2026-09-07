@@ -871,6 +871,11 @@ void test_tui_session_grant_registry()
          "TUI session grants require exact session, mode, tool, and workspace recipe matches");
 
   auto no_longer_eligible = prompt;
+  no_longer_eligible.risk = ava::permissions::PermissionRisk::Critical;
+  expect(!ava::tui::tui_session_grant_eligible(no_longer_eligible) && !registry.matches("session_a", no_longer_eligible) &&
+             !ava::permissions::command_prompt_allows_persistent_allow(no_longer_eligible),
+         "Critical prompt risk independently defeats session and persistent reusable authority");
+  no_longer_eligible = prompt;
   no_longer_eligible.command_metadata->effective_allowed_scopes = {ava::command::InteractiveScope::Once};
   expect(!ava::tui::tui_session_grant_eligible(no_longer_eligible) && !registry.matches("session_a", no_longer_eligible) &&
              registry.add("session_a", no_longer_eligible) == ava::tui::TuiSessionGrantInsertResult::Ineligible,

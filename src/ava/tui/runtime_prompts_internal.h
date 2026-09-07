@@ -64,7 +64,8 @@ enum class SearchInputPromptDispatchResult
 class RuntimePromptCoordinator final
 {
  public:
-  RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants, RuntimeRenderer& renderer,
+  RuntimePromptCoordinator(TuiRuntimeOptions& options, ComposerSnapshot& snapshot, TuiSessionGrantRegistry& session_grants,
+                           ava::permissions::ReadOnlyApprovalPolicy& read_only_approval, RuntimeRenderer& renderer,
                            ActiveSelectList* active_select_list = nullptr);
   RuntimePromptCoordinator(RuntimePromptCoordinator const&) = delete;
   RuntimePromptCoordinator& operator=(RuntimePromptCoordinator const&) = delete;
@@ -112,6 +113,7 @@ class RuntimePromptCoordinator final
   TuiRuntimeOptions& options_;
   ComposerSnapshot& snapshot_;
   TuiSessionGrantRegistry& session_grants_;
+  ava::permissions::ReadOnlyApprovalPolicy& read_only_approval_;
   RuntimeRenderer& renderer_;
   // Optional: when set, prompt acquisition closes an open startup overview select-list.
   ActiveSelectList* active_select_list_ = nullptr;

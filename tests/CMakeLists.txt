@@ -242,6 +242,7 @@ set(AVA_TESTS_SOURCES
   "mcp_tests.cpp"
   "mermaid_render_coordinator_tests.cpp"
   "permission_rules_tests.cpp"
+  "command_review_tests.cpp"
   "plugin_tests.cpp"
   "plugin_runner_process_tests.cpp"
   "plugin_ui_tests.cpp"
@@ -395,6 +396,7 @@ set(AVA_TEST_SUITES
   mcp
   mermaid_render
   permission_rules
+  command_review
   tui_composer
   terminal_color
   terminal_horizontal_layout
@@ -1212,6 +1214,7 @@ if(Python3_Interpreter_FOUND)
 
   set(AVA_TUI_TMUX_SMOKE_SCENARIOS
     bounded_run
+    auto_read
     lean_features
     suspend_resume
     keybind_conflict
@@ -1236,6 +1239,9 @@ if(Python3_Interpreter_FOUND)
     main_session_mgmt
     main_paste_scrollback_attach
     plugin_ui)
+  if(APPLE)
+    list(APPEND AVA_TUI_TMUX_SMOKE_SCENARIOS command_review)
+  endif()
   foreach(AVA_TUI_TMUX_SMOKE_SCENARIO IN LISTS AVA_TUI_TMUX_SMOKE_SCENARIOS)
     add_test(
       NAME ava_tui.tmux_smoke_${AVA_TUI_TMUX_SMOKE_SCENARIO}

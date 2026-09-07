@@ -1,12 +1,13 @@
 #pragma once
 
+#include "ava/permissions/command_autonomy.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/result.h"
 
 #include <filesystem>
-#include <optional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -123,6 +124,7 @@ void register_enforceable_permission_rule_files(PermissionRuleStore const& store
 // authoritative; allows are deliberately ignored and absence of a deny returns
 // Allow without prompting.
 [[nodiscard]] PermissionResolver build_persistent_permission_deny_preflight(PermissionRuleStore store);
+[[nodiscard]] auto build_command_policy_reader(PermissionRuleStore store) -> CommandPolicyReader;
 
 [[nodiscard]] std::string permission_rule_json(PersistentPermissionRule const& rule);
 [[nodiscard]] std::string permission_rules_result_json(PermissionRuleStore const& store, std::vector<PersistentPermissionRule> const& rules);

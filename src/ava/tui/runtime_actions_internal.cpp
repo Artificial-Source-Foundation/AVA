@@ -10,6 +10,7 @@
 #include "ava/tui/runtime_transcript_internal.h"
 #include "ava/tui/terminal.h"
 #include "ava/tui/terminal_image.h"
+#include "ava/core/string_utils.h"
 #include "ava/core/thread.h"
 
 #include <cerrno>
@@ -27,6 +28,80 @@
 #include <curses.h>
 
 namespace ava::tui {
+
+namespace {
+
+void apply_autonomy_command(std::string_view command, TuiRuntimeOptions& options, RuntimePresentationState& presentation_state)
+{
+  if (!options.command_autonomy)
+  {
+    options.command_autonomy = std::make_shared<ava::permissions::CommandAutonomyState>();
+  }
+  if (command != "/permissions autonomy")
+  {
+    auto mode = ava::permissions::parse_command_autonomy_mode(command.substr(std::string_view("/permissions autonomy ").size()));
+    if (!mode)
+    {
+      presentation_state.snapshot.status = "Autonomy modes: manual, safe, reviewed, high (no bypass mode)";
+      presentation_state.snapshot.local_command_feedback = presentation_state.snapshot.status;
+      return;
+    }
+    options.command_autonomy->set_mode(*mode);
+  }
+  options.command_advice_enabled = ava::permissions::command_review_mode(options.command_autonomy->mode());
+  presentation_state.snapshot.status =
+      "Command autonomy: " + ava::permissions::to_string(options.command_autonomy->mode()) + "; Deny and Critical human one-shot requirements unchanged";
+  presentation_state.snapshot.local_command_feedback = presentation_state.snapshot.status;
+}
+
+}  // namespace
+
+void RuntimeActionController::toggle_read_only_approval()
+{
+  set_read_only_approval(presentation_state_.read_only_approval(), presentation_state_.snapshot);
+}
+
+auto RuntimeActionController::handle_permission_mode_command(std::string_view command) -> bool
+{
+  command = ava::core::trim_view(command);
+  if (command == "/permissions autonomy" || command.starts_with("/permissions autonomy "))
+  {
+    apply_autonomy_command(command, options_, presentation_state_);
+    return true;
+  }
+  if (command == "/permissions review" || command == "/permissions review on" || command == "/permissions review off")
+  {
+    options_.command_advice_enabled = command == "/permissions review" ? !options_.command_advice_enabled : command.ends_with(" on");
+    if (!options_.command_autonomy)
+    {
+      options_.command_autonomy = std::make_shared<ava::permissions::CommandAutonomyState>();
+    }
+    options_.command_autonomy->set_mode(options_.command_advice_enabled ? ava::permissions::CommandAutonomyMode::Reviewed
+                                                                        : ava::permissions::CommandAutonomyMode::Safe);
+    presentation_state_.snapshot.status = options_.command_advice_enabled
+                                              ? "Qwen review on: deterministic eligible plans only; Critical commands are never sent"
+                                              : "Qwen review off; Safe autonomy, no remote command review";
+    presentation_state_.snapshot.local_command_feedback = presentation_state_.snapshot.status;
+    return true;
+  }
+  if (command == "/permissions toggle" || command == "/perms toggle")
+  {
+    toggle_read_only_approval();
+  }
+  else if (command == "/permissions read-only" || command == "/perms read-only")
+  {
+    set_read_only_approval(presentation_state_.read_only_approval(), presentation_state_.snapshot, true);
+  }
+  else if (command == "/permissions default" || command == "/perms default")
+  {
+    set_read_only_approval(presentation_state_.read_only_approval(), presentation_state_.snapshot, false);
+  }
+  else
+  {
+    return false;
+  }
+  return true;
+}
 namespace {
 
 constexpr auto kDisplayReloadPollInterval = std::chrono::milliseconds(500);

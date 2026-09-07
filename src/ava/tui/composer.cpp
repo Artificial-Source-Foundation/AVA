@@ -1696,7 +1696,18 @@ ComposerVerticalLayout calculate_composer_vertical_layout(ComposerSnapshot const
   auto const prompt_reserve = prompt_active ? std::min(kMinimumPromptLines, content_height) : std::size_t{0};
   normal_composer_lines = prompt_active ? std::min(desired_composer_lines, content_height - prompt_reserve) : desired_composer_lines;
   auto const max_prompt_lines = content_height > normal_composer_lines ? content_height - normal_composer_lines : 0;
-  auto const prompt_line_limit = snapshot.permission_prompt && !snapshot.permission_prompt->diff_preview.empty() ? std::size_t{12} : std::size_t{7};
+  auto prompt_line_limit = std::size_t{7};
+  if (snapshot.permission_prompt)
+  {
+    if (!snapshot.permission_prompt->advice.empty())
+    {
+      prompt_line_limit = 16;
+    }
+    else if (!snapshot.permission_prompt->diff_preview.empty())
+    {
+      prompt_line_limit = 12;
+    }
+  }
   auto const prompt_line_budget = prompt_active ? std::min(prompt_line_limit, max_prompt_lines) : 0;
   permission_lines =
       snapshot.permission_prompt ? detail::render_permission_prompt(*snapshot.permission_prompt, width, prompt_line_budget) : std::vector<std::string>{};

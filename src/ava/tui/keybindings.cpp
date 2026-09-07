@@ -68,6 +68,7 @@ constexpr std::array kActions = {TuiAction::Submit,
                                  TuiAction::VariantCycle,
                                  TuiAction::ReasoningSelect,
                                  TuiAction::ThinkingToggle,
+                                 TuiAction::PermissionsToggle,
                                  TuiAction::ModelSelect,
                                  TuiAction::ModelCycleForward,
                                  TuiAction::ModelCycleBackward,
@@ -226,6 +227,7 @@ constexpr std::array kActionAliases = {
     ActionAlias{"app.thinking.select", TuiAction::ReasoningSelect, 2},
     ActionAlias{"thinkingSelect", TuiAction::ReasoningSelect, 1},
     ActionAlias{"app.thinking.toggle", TuiAction::ThinkingToggle, 2},
+    ActionAlias{.name = "app.permissions.toggle", .action = TuiAction::PermissionsToggle, .precedence = 2},
     ActionAlias{"toggleThinking", TuiAction::ThinkingToggle, 1},
     ActionAlias{"app.message.followUp", TuiAction::MessageFollowUp, 2},
     ActionAlias{"followUp", TuiAction::MessageFollowUp, 1},
@@ -733,6 +735,7 @@ bool is_select_action(TuiAction action)
     case TuiAction::ReasoningSelect:
     case TuiAction::ThinkingToggle:
     case TuiAction::ModelSelect:
+    case TuiAction::PermissionsToggle:
     case TuiAction::ModelCycleForward:
     case TuiAction::ModelCycleBackward:
     case TuiAction::MessageFollowUp:
@@ -911,6 +914,8 @@ std::string_view config_action_id(TuiAction action)
       return "app.thinking.select";
     case TuiAction::ThinkingToggle:
       return "app.thinking.toggle";
+    case TuiAction::PermissionsToggle:
+      return "app.permissions.toggle";
     case TuiAction::ModelSelect:
       return "app.model.select";
     case TuiAction::ModelCycleForward:
@@ -1086,6 +1091,7 @@ TuiKeyBindings default_key_bindings()
                                      {TuiAction::VariantCycle, {Key::CtrlT}},
                                      {TuiAction::ReasoningSelect, {Key::ShiftTab}},
                                      {TuiAction::ThinkingToggle, {}},
+                                     {TuiAction::PermissionsToggle, {Key::F7}},
                                      {TuiAction::ModelSelect, {Key::CtrlL}},
                                      {TuiAction::ModelCycleForward, {Key::CtrlP}},
                                      {TuiAction::ModelCycleBackward, {Key::CtrlShiftP}},
@@ -1729,6 +1735,8 @@ std::string action_name(TuiAction action)
       return "reasoning_select";
     case TuiAction::ThinkingToggle:
       return "thinking_toggle";
+    case TuiAction::PermissionsToggle:
+      return "permissions_toggle";
     case TuiAction::ModelSelect:
       return "model_select";
     case TuiAction::ModelCycleForward:
@@ -1909,6 +1917,8 @@ std::string action_label(TuiAction action)
       return "Select thinking mode";
     case TuiAction::ThinkingToggle:
       return "Toggle thinking";
+    case TuiAction::PermissionsToggle:
+      return "Toggle Auto-read permissions";
     case TuiAction::ModelSelect:
       return "Select model";
     case TuiAction::ModelCycleForward:
@@ -2102,6 +2112,8 @@ std::string action_description(TuiAction action)
       return "Choose a policy-supported thinking mode between turns";
     case TuiAction::ThinkingToggle:
       return "Toggle thinking block visibility without changing provider reasoning mode";
+    case TuiAction::PermissionsToggle:
+      return "Toggle automatic file read/search approval, including during a turn; other permission checks stay unchanged";
     case TuiAction::ModelSelect:
       return "Open the model selector when available";
     case TuiAction::ModelCycleForward:

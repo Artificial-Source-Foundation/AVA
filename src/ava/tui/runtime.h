@@ -9,6 +9,7 @@
 #include "ava/tui/runtime_plugin_ui.h"
 #include "ava/tui/terminal.h"
 #include "ava/session/attachments.h"
+#include "ava/permissions/command_autonomy.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/result.h"
 
@@ -16,6 +17,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -337,6 +339,9 @@ struct TuiRuntimeOptions
   std::optional<StartupOverviewSnapshot> startup_overview = std::nullopt;
   TuiMermaidRenderBridge mermaid_render;
   TuiKeyBindings key_bindings = default_key_bindings();
+  bool auto_approve_reads = false;
+  bool command_advice_enabled = false;
+  std::shared_ptr<ava::permissions::CommandAutonomyState> command_autonomy = nullptr;
   // Called on the TUI main thread at startup and after a submit worker completes; never from render/spinner loops.
   std::function<std::optional<std::string>()> token_status_provider;
   std::function<std::optional<std::string>()> active_context_status_provider;
@@ -394,6 +399,8 @@ struct TuiRuntimeOptions
   std::function<ava::core::Result<SelectListView>()> on_branch_summary_refresh_catalog;
   std::function<ava::core::Result<TuiRememberedPermissionRule>(ava::permissions::PermissionPrompt const&, ava::permissions::PermissionAction)>
       remember_permission_rule;
+  // Scoped review worker; only the command backend can issue/accept its bound receipt.
+  std::function<ava::core::Result<ava::permissions::CommandReview>(ava::permissions::PermissionPrompt const&, std::stop_token)> explain_command;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_settings_selected;
   std::function<ava::core::Result<TuiRuntimeStateSnapshot>(std::string_view)> on_model_selected;
   // No value clears the explicit AVA level and restores model/provider default.

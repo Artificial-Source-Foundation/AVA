@@ -75,6 +75,10 @@ bool valid_resolution(std::string_view resolution)
 
 bool valid_resolution_source(std::string_view source)
 {
+  if (source == "qwen_command_review" || source == "deterministic_command_auto" || source == "review_precondition_failed")
+  {
+    return true;
+  }
   if (source == "policy" || source == "resolver" || source == "session_grant" || source == "no_resolver" || source == "resolver_failed" ||
       source == "persistent_rule" || source == "persistent_rule_error" || source == "client_cancel" || source == "hard_scope" || source == "session_config" ||
       source == "client")
@@ -124,10 +128,12 @@ bool present_integer_matching(std::string_view object, std::string_view key, boo
   if (end < object.size() && object[end] == '-')
     ++end;
   auto const digits_start = end;
-  while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0) ++end;
+  while (end < object.size() && std::isdigit(static_cast<unsigned char>(object[end])) != 0)
+    ++end;
   if (end == digits_start)
     return false;
-  while (end < object.size() && std::isspace(static_cast<unsigned char>(object[end])) != 0) ++end;
+  while (end < object.size() && std::isspace(static_cast<unsigned char>(object[end])) != 0)
+    ++end;
   if (end < object.size() && !is_json_value_delimiter(object[end]))
     return false;
   auto const value = ava::core::json::integer_field(object, key);

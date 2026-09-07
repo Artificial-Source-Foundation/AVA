@@ -5,6 +5,7 @@
 #include "ava/observability/run_observer.h"
 #include "ava/process/scope.h"
 #include "ava/tools/tool_io.h"
+#include "ava/permissions/command_autonomy.h"
 #include "ava/permissions/permission.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/mode.h"
@@ -57,6 +58,8 @@ struct PermissionAuditEvent
   // fields derived from arguments when a strict frontend supplied redacted args.
   bool command_arguments_redacted = false;
   std::optional<ava::permissions::CommandPermissionMetadata> command_metadata = std::nullopt;
+  std::string command_review_json;
+  std::string autonomy_mode;
 
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
@@ -150,6 +153,10 @@ struct ToolContext
   // Session journal is shared only by workers in the same native editing turn.
   std::shared_ptr<EditHistory> edit_history = nullptr;
   std::string edit_turn_id;
+  // Shared mode epoch is owned by the frontend; policy reader reloads native
+  // rule storage. Neither callback may be supplied by model tool arguments.
+  std::shared_ptr<ava::permissions::CommandAutonomyState> command_autonomy = nullptr;
+  ava::permissions::CommandPolicyReader command_policy_reader = nullptr;
   std::shared_ptr<ava::lsp::DiagnosticsProvider> lsp_diagnostics_provider = nullptr;
   std::filesystem::path plugin_global_plugins_dir = {};
   std::filesystem::path plugin_project_plugins_dir = {};

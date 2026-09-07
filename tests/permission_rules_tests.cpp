@@ -1559,6 +1559,88 @@ void test_registered_permission_rule_paths_protect_agent_loop_context()
 
 void run_permission_rules_tests()
 {
+  {
+    using namespace ava::permissions;
+    auto const store = test_store(create_empty_root("command-autonomy-policy-snapshot"));
+    auto const prompt = command_prompt(store, "cmake --build build");
+    auto read_policy = build_command_policy_reader(store);
+    auto before = read_policy(prompt);
+    expect(before && !before->rule, "review policy snapshot starts without matching authority");
+    auto deny = add_persistent_permission_rule(store, PermissionRuleDraft{.scope = PermissionRuleScope::Workspace,
+                                                                          .action = PermissionAction::Deny,
+                                                                          .operation = Operation::RunCommand,
+                                                                          .mode = PermissionRuleMode::Build,
+                                                                          .tool_name = "bash",
+                                                                          .target_path = {},
+                                                                          .command = prompt.command,
+                                                                          .command_recipe_key = {},
+                                                                          .recipe_display = {},
+                                                                          .reason = "synthetic review policy change",
+                                                                          .actor = "test"});
+    auto after = read_policy(prompt);
+    expect(deny && before && after && before->revision != after->revision && after->rule && after->rule->resolution == PermissionResolution::Deny &&
+               after->rule->rule_id == deny->rule_id,
+           "review policy reader reloads durable Deny and changes its content revision");
+    int prompts = 0;
+    auto resolver = build_persistent_permission_rule_resolver(store, [&](PermissionPrompt const&) -> ava::core::Result<PermissionResolutionDecision> {
+      ++prompts;
+      PermissionResolutionDecision automatic{PermissionResolution::Allow};
+      automatic.resolution_source = "qwen_command_review";
+      return automatic;
+    });
+    auto blocked = resolver(prompt);
+    expect(blocked && blocked->resolution == PermissionResolution::Deny && prompts == 0,
+           "persistent Deny prevents the reviewer resolver from being reached at all");
+    write_file_with_mode(store.global_rules_file, "invalid json", S_IRUSR | S_IWUSR);
+    expect(!read_policy(prompt), "unreadable policy content never produces a reviewer admission snapshot");
+  }
+  {
+    using namespace ava::permissions;
+    auto const root = create_empty_root("auto-read-permission-policy");
+    auto const store = test_store(root);
+    auto prompt = read_prompt(store, root / "outside.txt");
+    ReadOnlyApprovalPolicy policy;
+    expect(!policy.resolve(prompt), "Auto-read starts disabled");
+    policy.set_enabled(true);
+    auto approved = policy.resolve(prompt);
+    expect(approved && approved->resolution == PermissionResolution::Allow && approved->resolution_source == "read_only_auto_approval",
+           "Auto-read supplies an audited ordinary Allow for eligible read prompts");
+    prompt.operation = Operation::SearchFiles;
+    expect(policy.resolve(prompt).has_value(), "Auto-read covers directory listings and searches");
+    for (auto operation : {Operation::EditFile, Operation::RunCommand, Operation::NetworkFetch, Operation::NetworkSearch, Operation::SkillLoad,
+                           Operation::TaskRun, Operation::McpToolCall, Operation::PluginToolCall, Operation::LspServerLaunch, Operation::LspQuery})
+    {
+      prompt.operation = operation;
+      expect(!policy.resolve(prompt), "Auto-read cannot authorize writes, shell, network, extensions, subagents or LSP");
+    }
+    prompt.operation = Operation::ReadFile;
+    prompt.risk = PermissionRisk::Critical;
+    expect(!policy.resolve(prompt), "Auto-read never resolves a CriticalAsk prompt");
+    prompt.risk = PermissionRisk::High;
+    prompt.command_metadata.emplace();
+    expect(!policy.resolve(prompt), "Auto-read refuses prompts carrying command execution metadata");
+    prompt.command_metadata.reset();
+    policy.set_enabled(false);
+    expect(!policy.resolve(prompt), "turning Auto-read off immediately restores prompts without a reusable grant");
+    policy.set_enabled(true);
+
+    auto denied = add_exact_workspace_deny(store, Operation::ReadFile, prompt.target_path, "read_file", "keep this read denied");
+    expect(denied.has_value(), "Auto-read deny-precedence fixture persists an exact read Deny");
+    int fallback_calls = 0;
+    auto resolver = build_persistent_permission_rule_resolver(store, [&](PermissionPrompt const& request) -> ava::core::Result<PermissionResolutionDecision> {
+      ++fallback_calls;
+      return policy.resolve(request).value_or(PermissionResolutionDecision{PermissionResolution::Deny});
+    });
+    auto result = resolver(prompt);
+    expect(result && result->resolution == PermissionResolution::Deny && fallback_calls == 0, "saved read Deny takes precedence over enabled Auto-read");
+    prompt.target_path = root / "another.txt";
+    result = resolver(prompt);
+    expect(result && result->resolution == PermissionResolution::Allow && fallback_calls == 1,
+           "unmatched read prompt reaches Auto-read through the normal persistent-rule resolver");
+    write_file_with_mode(store.global_rules_file, "invalid json", S_IRUSR | S_IWUSR);
+    result = resolver(prompt);
+    expect(result && result->resolution == PermissionResolution::Deny && fallback_calls == 1, "unsafe permission storage still fails closed before Auto-read");
+  }
   test_permission_rule_storage_add_list_remove();
   test_old_critical_acknowledgements_never_recover_authority();
   test_legacy_command_allows_are_removed_one_at_a_time();

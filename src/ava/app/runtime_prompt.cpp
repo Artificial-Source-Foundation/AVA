@@ -493,6 +493,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                 .process_scope = run_process_scope,
                 .edit_history = session_r->edit_history(),
                 .edit_turn_id = ava::core::make_id("edit-turn"),
+                .command_autonomy = runtime_options.command_autonomy,
+                .command_policy_reader = ava::permissions::build_command_policy_reader(permission_rule_store_copy),
             },
         .subagents = std::move(subagents),
         .tool_visibility = session_r->tool_visibility(),

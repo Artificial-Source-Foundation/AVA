@@ -19,6 +19,7 @@ target_sources(ava_app
     "branch_summary_coordinator.cpp"
     "clipboard_image.cpp"
     "command_catalog.cpp"
+    "command_advice.cpp"
     "command_connect.cpp"
     "command_format.cpp"
     "command_help.cpp"

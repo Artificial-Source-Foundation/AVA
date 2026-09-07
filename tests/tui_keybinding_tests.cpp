@@ -10,6 +10,12 @@
 
 void run_tui_keybinding_tests()
 {
+  expect(ava::tui::key_matches_action(ava::tui::default_key_bindings(), ava::tui::TuiAction::PermissionsToggle, ava::tui::Key::F7),
+         "F7 toggles Auto-read by default without taking over model or reasoning shortcuts");
+  auto auto_read_key = ava::tui::parse_key_bindings_json(R"({"app.permissions.toggle":["F8"]})");
+  expect(auto_read_key && ava::tui::key_matches_action(*auto_read_key, ava::tui::TuiAction::PermissionsToggle, ava::tui::Key::F8) &&
+             !ava::tui::key_matches_action(*auto_read_key, ava::tui::TuiAction::PermissionsToggle, ava::tui::Key::F7),
+         "Auto-read shortcut supports normal keybinding overrides");
   auto const key_bindings = ava::tui::parse_key_bindings_json(
       "{\"submit\":\"Ctrl+T, Enter\",\"new_line\":\"Shift+Enter, Ctrl+Enter\",\"message_follow_up\":\"Alt+Enter\","
       "\"delete_to_line_start\":\"Ctrl+U\","

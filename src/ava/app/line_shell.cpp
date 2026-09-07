@@ -493,6 +493,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
       return with_provider_runtime(state, "\nthis command expands to a prompt and needs provider auth.",
                                    [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                      run_options.permission_resolver = permission_resolver;
+                                     run_options.command_autonomy = state.command_autonomy;
                                      run_options.question_resolver = question_resolver;
                                      run_options.event_sink = std::move(event_sink);
                                      run_options.cancel_requested = std::move(cancel_requested);
@@ -537,6 +538,7 @@ LineResult handle_line(ShellState& state, std::string const& line, ava::permissi
   return with_provider_runtime(state, "\nslash tool commands still work offline.",
                                [&](ava::provider::Provider const& provider, ava::http::Transport& transport, ava::app::runtime::RunOptions run_options) {
                                  run_options.permission_resolver = permission_resolver;
+                                 run_options.command_autonomy = state.command_autonomy;
                                  run_options.question_resolver = question_resolver;
                                  run_options.event_sink = std::move(event_sink);
                                  run_options.cancel_requested = std::move(cancel_requested);
@@ -589,6 +591,7 @@ int run_line_shell(ShellState state, std::istream& input, std::ostream& output)
   };
 
   ava::tui::TuiSessionGrantRegistry session_grants;
+  ava::permissions::ReadOnlyApprovalPolicy read_only_approval(state.auto_approve_reads);
   std::string line;
   while (true)
   {
@@ -614,8 +617,19 @@ int run_line_shell(ShellState state, std::istream& input, std::ostream& output)
     }
 
     auto const session_id_before = runtime::session_ts::rat(unlocked_session)->store.session_id();
+    if (line == "/permissions toggle" || line == "/permissions read-only" || line == "/permissions default")
+    {
+      read_only_approval.set_enabled(line == "/permissions toggle" ? !read_only_approval.enabled() : line == "/permissions read-only");
+      write_sanitized_line(output, read_only_approval.enabled() ? "Auto-read on: file reads/searches auto-approved; other permission checks unchanged"
+                                                                : "Auto-read off: default permission checks restored");
+      continue;
+    }
     auto fallback_permission_resolver =
         [&](ava::permissions::PermissionPrompt const& prompt) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+      if (auto decision = read_only_approval.resolve(prompt))
+      {
+        return *decision;
+      }
       auto const current_session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
       bool const allow_session_available = ava::tui::tui_session_grant_eligible(prompt);
       if (allow_session_available && session_grants.matches(current_session_id, prompt))
@@ -684,7 +698,10 @@ int run_line_shell(ShellState state, std::istream& input, std::ostream& output)
     for (auto const& result_output : result.output) write_sanitized_block(output, result_output);
 
     auto const current_session_id = runtime::session_ts::rat(unlocked_session)->store.session_id();
-    static_cast<void>(session_grants.clear_for_session_transition(session_id_before, current_session_id));
+    if (session_grants.clear_for_session_transition(session_id_before, current_session_id))
+    {
+      read_only_approval.set_enabled(state.auto_approve_reads);
+    }
     if (result.quit)
     {
       print_current_resume_command();
@@ -696,11 +713,11 @@ int run_line_shell(ShellState state, std::istream& input, std::ostream& output)
 
 namespace ava::app {
 
-int run_interactive(runtime::session_ts& unlocked_session, bool force_line_shell)
+auto run_interactive(runtime::session_ts& unlocked_session, bool force_line_shell, HeadlessPermissionPolicyOptions const& permission_policy) -> int
 {
   AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, "calling run_interactive");
 
-  line_shell_internal::ShellState state{.unlocked_session = unlocked_session};
+  line_shell_internal::ShellState state{.unlocked_session = unlocked_session, .auto_approve_reads = permission_policy.allow_read_only};
   if (!force_line_shell && ava::tui::terminal_is_tty())
     return line_shell_internal::run_tui(state);
   return line_shell_internal::run_line_shell(state, std::cin, std::cout);

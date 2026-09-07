@@ -191,6 +191,10 @@ std::string render_composer_footer_line_impl(ComposerSnapshot const& snapshot, s
     {
       mode = "Build";
     }
+    if (snapshot.auto_approve_reads)
+    {
+      mode += " · Auto-read";
+    }
     if (!mode.empty())
     {
       auto const mode_style = snapshot.mode == "plan" ? kSgrWarning : kSgrAccent;

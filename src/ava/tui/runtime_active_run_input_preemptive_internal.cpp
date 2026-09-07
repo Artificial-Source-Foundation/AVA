@@ -48,6 +48,11 @@ RuntimeActiveRunController::InputHandling RuntimeActiveRunController::handle_pre
 
   if (auto handled = navigation_.handle_sidebar_drawer_input(active_event))
     return to_input_handling(*handled);
+  if (is_action(active_event, TuiAction::PermissionsToggle))
+  {
+    action_controller_.toggle_read_only_approval();
+    return to_input_handling(renderer_.request_render());
+  }
   if (jump_mode != ComposerJumpMode::None)
   {
     if (is_action(active_event, TuiAction::JumpForward) || is_action(active_event, TuiAction::JumpBackward))

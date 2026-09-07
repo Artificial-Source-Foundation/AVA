@@ -2,6 +2,7 @@
 
 #include "ava/debug/print_members_on.h"
 #include "ava/process/scope.h"
+#include "ava/permissions/command_autonomy.h"
 
 #include <filesystem>
 #include <functional>
@@ -40,6 +41,8 @@ struct ToolExecutionOptions
   std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;
   std::shared_ptr<ava::tools::EditHistory> edit_history = nullptr;
   std::string edit_turn_id;
+  std::shared_ptr<ava::permissions::CommandAutonomyState> command_autonomy = nullptr;
+  ava::permissions::CommandPolicyReader command_policy_reader = nullptr;
 
   // Includes authority roots and capability adapters; never stream this
   // aggregate through generated debug output.

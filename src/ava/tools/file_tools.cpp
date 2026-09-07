@@ -30,6 +30,24 @@ struct PermissionDiffPreview
   bool truncated = false;
 };
 
+struct CommandReviewLease
+{
+  std::shared_ptr<ava::permissions::CommandReviewTransaction> transaction;
+  explicit CommandReviewLease(std::shared_ptr<ava::permissions::CommandReviewTransaction> pending) : transaction(std::move(pending)) { }
+  CommandReviewLease(CommandReviewLease const&) = delete;
+  auto operator=(CommandReviewLease const&) -> CommandReviewLease& = delete;
+  CommandReviewLease(CommandReviewLease&&) = delete;
+  auto operator=(CommandReviewLease&&) -> CommandReviewLease& = delete;
+  ~CommandReviewLease()
+  {
+    if (transaction)
+    {
+      transaction->admission_check = nullptr;
+    }
+  }
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+};
+
 using detail::check_canceled;
 using detail::is_canceled_error;
 using detail::read_all_text;
@@ -85,7 +103,9 @@ PermissionAuditEvent audit_event(ToolContext const& context, std::string permiss
       .actor = context.permission_actor.empty() ? std::string("agent") : context.permission_actor,
       .rule_id = "",
       .command_arguments_redacted = context.redact_permission_audit_arguments,
-      .command_metadata = std::move(command_metadata)};
+      .command_metadata = std::move(command_metadata),
+      .command_review_json = {},
+      .autonomy_mode = {}};
 }
 
 void capture_permission_denial_guidance(ToolContext const& context, std::string_view user_guidance)
@@ -179,7 +199,7 @@ ava::core::Error permission_denied_error(std::string_view error_message, ava::pe
   {
     error.with_context("path", target_path.string());
   }
-  // Guidance never enters Error context/format: public tool-result details,
+  // User-authored guidance never enters Error context/format: public tool-result details,
   // diagnostics, audits, and events consume this sanitized Error only.
   if (decision.action == ava::permissions::PermissionAction::Ask)
   {
@@ -391,10 +411,293 @@ auto can_read_file_for_edit_snapshot(ToolContext const& context, std::filesystem
 
 namespace {
 
+void apply_native_command_policy(ToolContext const& context, auto const& make_command_prompt, ava::permissions::PermissionDecision& decision,
+                                 ava::permissions::CommandPolicySnapshot& command_policy,
+                                 std::optional<ava::permissions::PermissionResolutionDecision>& native_resolution,
+                                 ava::permissions::CommandAutonomyMode autonomy_mode)
+{
+  using namespace ava::permissions;
+
+    // Absolute Deny precedes every mode, including already-known inspection.
+  if (context.command_policy_reader)
+  {
+    auto policy = context.command_policy_reader(make_command_prompt());
+    if (!policy || (policy->rule && policy->rule->resolution == PermissionResolution::Deny))
+    {
+      decision = {.action = PermissionAction::Deny, .reason = "command denied by current persistent policy", .risk = PermissionRisk::Critical};
+      if (policy && policy->rule && policy->rule->resolution == PermissionResolution::Deny)
+      {
+        // Keep the authoritative rule that caused this deterministic deny so the
+        // policy audit event in ensure_permission_impl can attribute it exactly.
+        command_policy = std::move(*policy);
+      }
+    }
+    else
+    {
+      command_policy = std::move(*policy);
+    }
+  }
+  if (decision.action != PermissionAction::Deny && context.auto_allow_deny_preflight)
+  {
+    auto preflight = context.auto_allow_deny_preflight(make_command_prompt());
+    if (!preflight || preflight->resolution != PermissionResolution::Allow)
+    {
+      decision = {.action = PermissionAction::Deny, .reason = "command deny preflight failed", .risk = PermissionRisk::Critical};
+    }
+  }
+  if (decision.action != PermissionAction::Deny)
+  {
+      // Keep one policy Ask and a separately sourced resolution in the journal.
+    decision.action = PermissionAction::Ask;
+    auto const prompt = make_command_prompt();
+    if (decision.risk != PermissionRisk::Critical && command_policy.rule && command_prompt_allows_persistent_allow(prompt))
+    {
+      native_resolution = command_policy.rule;
+    }
+    else if (command_deterministic_auto(prompt, autonomy_mode))
+    {
+      native_resolution.emplace(PermissionResolution::Allow, "exact deterministic command effect profile");
+      native_resolution->resolution_source = "deterministic_command_auto";
+    }
+  }
+}
+
+auto admit_command_review(ToolContext const& context, ava::permissions::PermissionPrompt& prompt, ava::command::CommandPlan const& sealed_plan,
+                          ava::permissions::CommandPolicySnapshot const& command_policy, std::uint64_t autonomy_snapshot,
+                          std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata) -> ava::core::VoidResult
+{
+  using namespace ava::permissions;
+
+  if (!command_metadata)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "command metadata is missing before review admission"));
+  }
+
+  auto fresh = ava::command::plan_is_fresh(sealed_plan);
+  if (!fresh || !*fresh)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "command is stale before reviewer admission"));
+  }
+  auto transaction = std::make_shared<CommandReviewTransaction>();
+  transaction->nonce = ava::core::make_id("command-review");
+  transaction->plan_fingerprint = sealed_plan.fingerprint();
+  transaction->contract_digest = command_contract_digest(prompt);
+  transaction->policy_revision = command_policy.revision;
+  transaction->autonomy_snapshot = autonomy_snapshot;
+  transaction->input = command_review_input(*command_metadata);
+  transaction->input_digest = command_autonomy_digest(transaction->input);
+  transaction->admission_check = [&context, &sealed_plan, admitted_prompt = prompt, revision = command_policy.revision, autonomy_snapshot]() -> bool {
+    if ((context.cancel_requested && context.cancel_requested()) || !context.command_autonomy || context.command_autonomy->snapshot() != autonomy_snapshot)
+    {
+      return false;
+    }
+    auto current = context.command_policy_reader(admitted_prompt);
+    auto current_plan = ava::command::plan_is_fresh(sealed_plan);
+    return current && current_plan && *current_plan && current->revision == revision &&
+           (!current->rule || current->rule->resolution != PermissionResolution::Deny);
+  };
+  prompt.command_review = std::move(transaction);
+
+  return {};
+}
+
+void recheck_deterministic_command(ToolContext const& context, ava::permissions::PermissionPrompt const& prompt,
+                                   ava::permissions::CommandPolicySnapshot const& command_policy,
+                                   ava::core::Result<ava::permissions::PermissionResolutionDecision>& resolution)
+{
+  using namespace ava::permissions;
+
+    // A frontend callback may have waited while policy changed. Auto authority
+    // must still be below current Deny at the backend acceptance point.
+  auto current = context.command_policy_reader ? context.command_policy_reader(prompt) : ava::core::Result<CommandPolicySnapshot>{command_policy};
+  bool denied = !current || (current->rule && current->rule->resolution == PermissionResolution::Deny);
+  if (!denied && context.auto_allow_deny_preflight)
+  {
+    auto preflight = context.auto_allow_deny_preflight(prompt);
+    denied = !preflight || preflight->resolution != PermissionResolution::Allow;
+  }
+  if (denied || (context.cancel_requested && context.cancel_requested()))
+  {
+    resolution = PermissionResolutionDecision{PermissionResolution::Deny, "automatic command authority denied by current policy"};
+  }
+}
+
+void recheck_reviewed_command(ToolContext const& context, ava::permissions::PermissionPrompt const& prompt, ava::command::CommandPlan const* sealed_plan,
+                              ava::permissions::CommandPolicySnapshot const& command_policy, std::uint64_t autonomy_snapshot,
+                              ava::core::Result<ava::permissions::PermissionResolutionDecision>& resolution,
+                              std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata)
+{
+  using namespace ava::permissions;
+
+    // A frontend's Allow is not reviewer authority. Re-evaluate the native
+    // contract and current rules using this backend's exact sealed plan.
+  auto receipt = prompt.command_review;
+  auto current_policy =
+      context.command_policy_reader
+          ? context.command_policy_reader(prompt)
+          : ava::core::Result<CommandPolicySnapshot>{std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "no command policy reader"))};
+  bool const policy_denied = !current_policy || (current_policy->rule && current_policy->rule->resolution == PermissionResolution::Deny);
+  auto fresh = (sealed_plan != nullptr) ? ava::command::plan_is_fresh(*sealed_plan) : ava::core::Result<bool>{false};
+  bool const canceled = context.cancel_requested && context.cancel_requested();
+  bool const valid = !policy_denied && !canceled && fresh && *fresh && receipt && resolution->resolution == PermissionResolution::Allow &&
+                     resolution->command_review == receipt && receipt->status == "validated" && receipt->recommendation == "approve" &&
+                     (receipt->risk == "low" || receipt->risk == "medium") && command_reviewer_eligible(prompt) &&
+                     receipt->plan_fingerprint == sealed_plan->fingerprint() && receipt->contract_digest == command_contract_digest(prompt) &&
+                     context.command_autonomy && context.command_autonomy->snapshot() == receipt->autonomy_snapshot &&
+                     command_review_mode(context.command_autonomy->mode()) && receipt->autonomy_snapshot == autonomy_snapshot &&
+                     receipt->policy_revision == command_policy.revision && current_policy->revision == command_policy.revision && command_metadata &&
+                     receipt->input == command_review_input(*command_metadata) && receipt->input_digest == command_autonomy_digest(receipt->input);
+  if (receipt)
+  {
+    receipt->policy_recheck = valid ? "passed" : "failed";
+  }
+  if (!valid)
+  {
+    if (policy_denied || canceled || !fresh || !*fresh)
+    {
+      resolution = PermissionResolutionDecision{PermissionResolution::Deny, "review authorization precondition failed"};
+      resolution->resolution_source = "review_precondition_failed";
+    }
+    else
+    {
+        // No automatic retry and no reuse of the stale receipt. Ordinary human
+        // fallback is still behind the persistent-rule resolver.
+      auto human_prompt = prompt;
+      human_prompt.command_review.reset();
+      human_prompt.reason = "Command review became stale; a fresh human decision is required";
+      resolution = context.permission_resolver ? context.permission_resolver(human_prompt)
+                                               : ava::core::Result<PermissionResolutionDecision>{PermissionResolutionDecision{PermissionResolution::Deny}};
+      if (resolution && resolution->resolution_source == "qwen_command_review")
+      {
+        resolution = PermissionResolutionDecision{PermissionResolution::Deny, "review receipt cannot be retried"};
+      }
+    }
+  }
+}
+
+auto resolve_and_recheck_command_permission(ToolContext const& context, ava::permissions::PermissionPrompt& prompt,
+                                            ava::command::CommandPlan const* sealed_plan, ava::permissions::CommandPolicySnapshot const& command_policy,
+                                            std::uint64_t autonomy_snapshot,
+                                            std::optional<ava::permissions::PermissionResolutionDecision> const& native_resolution, bool native_command,
+                                            std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata)
+    -> ava::core::Result<ava::permissions::PermissionResolutionDecision>
+{
+  using namespace ava::permissions;
+  prompt.deterministic_auto_candidate = native_resolution && native_resolution->resolution_source == "deterministic_command_auto";
+  // TUI sessions consult their legal scoped grant before the automatic tier.
+  // A frontend without shared autonomy state retains backend-only auto-Allow.
+  bool const consult_frontend = prompt.deterministic_auto_candidate && context.command_autonomy && context.permission_resolver;
+  auto resolution =
+      native_resolution && !consult_frontend ? ava::core::Result<PermissionResolutionDecision>{*native_resolution} : context.permission_resolver(prompt);
+  if (resolution && resolution->resolution_source == "deterministic_command_auto" &&
+      (!native_command || !command_deterministic_auto(prompt, context.command_autonomy ? context.command_autonomy->mode() : CommandAutonomyMode::Safe)))
+  {
+    resolution = PermissionResolutionDecision{PermissionResolution::Deny, "deterministic command authority changed"};
+  }
+  if (resolution && resolution->resolution_source == "deterministic_command_auto")
+  {
+    recheck_deterministic_command(context, prompt, command_policy, resolution);
+  }
+  if (resolution && resolution->resolution_source == "qwen_command_review")
+  {
+    recheck_reviewed_command(context, prompt, sealed_plan, command_policy, autonomy_snapshot, resolution, command_metadata);
+  }
+  if (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant && command_metadata &&
+      (prompt.risk == PermissionRisk::Critical || !ava::permissions::command_permission_allows_reusable_grant(*command_metadata)))
+  {
+    ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny,
+                                                          "the sealed command backend permits only one-shot approval");
+    denied.resolution_source = "review_precondition_failed";
+    resolution = std::move(denied);
+  }
+
+  return resolution;
+}
+
+auto maybe_admit_command_review(ToolContext const& context, ava::permissions::PermissionPrompt& prompt, ava::command::CommandPlan const* sealed_plan,
+                                ava::permissions::CommandPolicySnapshot const& command_policy, std::uint64_t autonomy_snapshot,
+                                std::optional<ava::permissions::PermissionResolutionDecision> const& native_resolution, bool native_command,
+                                std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata) -> ava::core::VoidResult
+{
+  using namespace ava::permissions;
+  auto const autonomy_mode = CommandAutonomyState::mode_of(autonomy_snapshot);
+  if (native_command && !native_resolution && context.command_policy_reader && context.command_autonomy && command_review_mode(autonomy_mode) &&
+      command_reviewer_eligible(prompt))
+  {
+    if (auto admitted = admit_command_review(context, prompt, *sealed_plan, command_policy, autonomy_snapshot, command_metadata); !admitted)
+    {
+      return admitted;
+    }
+  }
+  return {};
+}
+
+auto command_review_audit_prefix(PermissionAuditEvent const& event) -> std::string
+{
+  std::string data = "{";
+  if (!event.autonomy_mode.empty())
+  {
+    data += R"("autonomy_mode":")" + ava::core::json::escape(event.autonomy_mode) + "\",";
+  }
+  if (!event.command_review_json.empty())
+  {
+    data += "\"command_review\":" + event.command_review_json + ',';
+  }
+  return data;
+}
+
+auto record_permission_resolution(ToolContext const& context, ava::permissions::PermissionPrompt const& prompt, PermissionAuditEvent const& policy_event,
+                                  ava::core::Result<ava::permissions::PermissionResolutionDecision> const& resolution,
+                                  std::optional<ava::permissions::CommandPermissionMetadata> const& command_metadata) -> ava::core::VoidResult
+{
+  auto outcome_event = policy_event;
+  if (prompt.command_review && command_metadata)
+  {
+    outcome_event.command_review_json = command_review_audit_json(*prompt.command_review, *command_metadata);
+    // Drop the backend-scoped callback before any copied receipt can outlive
+    // this invocation. The worker has already been joined by the resolver.
+    prompt.command_review->admission_check = nullptr;
+  }
+  if (resolution && !resolution->resolution_source.empty())
+  {
+    outcome_event.resolution_source = resolution->resolution_source;
+  }
+  else
+  {
+    outcome_event.resolution_source = resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant ? "session_grant" : "resolver";
+  }
+  if (!resolution)
+  {
+    outcome_event.resolution_source = "resolver_failed";
+  }
+  outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
+  if (policy_event.operation != ava::permissions::Operation::RunCommand)
+  {
+    if (resolution)
+    {
+      outcome_event.resolution_reason = resolution->reason;
+    }
+    else
+    {
+      outcome_event.resolution_reason = resolution.error().format();
+    }
+  }
+  if (resolution)
+  {
+    outcome_event.rule_id = resolution->rule_id;
+  }
+  if (auto audited = record_permission_audit(context, outcome_event); !audited)
+  {
+    return std::unexpected(std::move(audited.error()));
+  }
+  return {};
+}
+
 ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::permissions::Operation operation, std::filesystem::path const& target_path,
                                              std::string_view command, std::string_view tool_name, std::string_view error_message,
                                              std::string_view diff_preview, bool diff_truncated,
-                                             std::optional<ava::permissions::CommandPermissionMetadata> command_metadata, bool omit_policy_allow_audit)
+                                             std::optional<ava::permissions::CommandPermissionMetadata> command_metadata, bool omit_policy_allow_audit,
+                                             ava::command::CommandPlan const* sealed_plan = nullptr)
 {
   auto permission_target = target_path;
   if (context.secure_workspace && (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile ||
@@ -428,6 +731,29 @@ ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::pe
       .command = std::string(command),
       .command_metadata = command_metadata,
   });
+  using namespace ava::permissions;
+  auto make_command_prompt = [&] -> PermissionPrompt {
+    return PermissionPrompt{.permission_request_id = permission_request_id,
+                            .tool_call_id = context.current_call_id,
+                            .operation = operation,
+                            .mode = context.mode,
+                            .workspace_dir = context.workspace_dir,
+                            .target_path = permission_target,
+                            .command = std::string(command),
+                            .tool_name = request_tool_name,
+                            .reason = decision.reason,
+                            .risk = decision.risk,
+                            .command_metadata = command_metadata};
+  };
+  CommandPolicySnapshot command_policy{.revision = "unconfigured"};
+  auto const autonomy_snapshot = context.command_autonomy ? context.command_autonomy->snapshot() : std::uint64_t{5};
+  auto const autonomy_mode = CommandAutonomyState::mode_of(autonomy_snapshot);
+  bool const native_command = (sealed_plan != nullptr) && operation == Operation::RunCommand && command_metadata;
+  std::optional<PermissionResolutionDecision> native_resolution;
+  if (native_command && decision.action != PermissionAction::Deny)
+  {
+    apply_native_command_policy(context, make_command_prompt, decision, command_policy, native_resolution, autonomy_mode);
+  }
   bool const backend_policy_allowed = decision.action == ava::permissions::PermissionAction::Allow;
   if (context.require_explicit_file_permissions && decision.action == ava::permissions::PermissionAction::Allow &&
       (operation == ava::permissions::Operation::ReadFile || operation == ava::permissions::Operation::EditFile))
@@ -469,12 +795,25 @@ ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::pe
   }
 
   auto policy_event = audit_event(context, permission_request_id, operation, request_tool_name, decision, permission_target, command, command_metadata);
+  if (native_command)
+  {
+    policy_event.autonomy_mode = to_string(autonomy_mode);
+  }
   if (!preflight_source.empty())
   {
     policy_event.resolution_source = std::move(preflight_source);
     if (operation != ava::permissions::Operation::RunCommand)
       policy_event.resolution_reason = std::move(preflight_reason);
     policy_event.rule_id = std::move(preflight_rule_id);
+  }
+  else if (decision.action == ava::permissions::PermissionAction::Deny && command_policy.rule &&
+           command_policy.rule->resolution == ava::permissions::PermissionResolution::Deny && !command_policy.rule->resolution_source.empty())
+  {
+    // The native persistent policy reader denied before any resolver or reviewer
+    // ran; attribute the record to the exact rule, as the auto-allow preflight
+    // path does, instead of the anonymous built-in "policy" default.
+    policy_event.resolution_source = command_policy.rule->resolution_source;
+    policy_event.rule_id = command_policy.rule->rule_id;
   }
   if (decision.action == ava::permissions::PermissionAction::Allow || decision.action == ava::permissions::PermissionAction::Deny)
   {
@@ -497,7 +836,7 @@ ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::pe
         permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, "policy", "", permission_request_id));
   }
 
-  if (!context.permission_resolver)
+  if (!context.permission_resolver && !native_resolution)
   {
     auto outcome_event = policy_event;
     outcome_event.resolution = "deny";
@@ -510,7 +849,7 @@ ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::pe
         permission_denied_error(error_message, operation, decision, permission_target, command, command_metadata, "no_resolver", "", permission_request_id));
   }
 
-  auto resolution = context.permission_resolver(ava::permissions::PermissionPrompt{
+  auto prompt = ava::permissions::PermissionPrompt{
       .permission_request_id = permission_request_id,
       .tool_call_id = context.current_call_id,
       .operation = operation,
@@ -524,36 +863,20 @@ ava::core::VoidResult ensure_permission_impl(ToolContext const& context, ava::pe
       .diff_preview = std::string(diff_preview),
       .diff_truncated = diff_truncated,
       .command_metadata = command_metadata,
-  });
-  if (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant && command_metadata &&
-      !ava::permissions::command_permission_allows_reusable_grant(*command_metadata))
+  };
+  if (auto admitted =
+          maybe_admit_command_review(context, prompt, sealed_plan, command_policy, autonomy_snapshot, native_resolution, native_command, command_metadata);
+      !admitted)
   {
-    ava::permissions::PermissionResolutionDecision denied(ava::permissions::PermissionResolution::Deny,
-                                                          "the sealed command backend permits only one-shot approval");
-    denied.resolution_source = "backend_scope";
-    resolution = std::move(denied);
+    return admitted;
   }
+  CommandReviewLease review_lease{prompt.command_review};
+  auto resolution = resolve_and_recheck_command_permission(context, prompt, sealed_plan, command_policy, autonomy_snapshot, native_resolution, native_command,
+                                                           command_metadata);
 
-  auto outcome_event = policy_event;
-  outcome_event.resolution_source =
-      resolution && !resolution->resolution_source.empty()
-          ? resolution->resolution_source
-          : (resolution && *resolution == ava::permissions::PermissionResolution::AllowSessionGrant ? "session_grant" : "resolver");
-  if (!resolution)
-    outcome_event.resolution_source = "resolver_failed";
-  outcome_event.resolution = resolution ? ava::permissions::to_string(*resolution) : "deny";
-  if (operation != ava::permissions::Operation::RunCommand)
+  if (auto audited = record_permission_resolution(context, prompt, policy_event, resolution, command_metadata); !audited)
   {
-    if (resolution)
-      outcome_event.resolution_reason = resolution->reason;
-    else
-      outcome_event.resolution_reason = resolution.error().format();
-  }
-  if (resolution)
-    outcome_event.rule_id = resolution->rule_id;
-  if (auto audited = record_permission_audit(context, outcome_event); !audited)
-  {
-    return std::unexpected(std::move(audited.error()));
+    return audited;
   }
   if (resolution && (*resolution == ava::permissions::PermissionResolution::Allow || *resolution == ava::permissions::PermissionResolution::AllowSessionGrant))
   {
@@ -595,8 +918,8 @@ ava::core::VoidResult ensure_command_permission(ToolContext const& context, std:
                                                 bool unverified_delegated_executor, std::string_view tool_name, std::string_view error_message)
 {
   auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), unverified_delegated_executor);
-  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
-                           std::move(metadata));
+  return ensure_permission_impl(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                                std::move(metadata), false, &preparation.plan());
 }
 
 ava::core::VoidResult ensure_command_permission(ToolContext const& context, std::string_view command, ava::command::CommandPreparation const& preparation,
@@ -604,13 +927,13 @@ ava::core::VoidResult ensure_command_permission(ToolContext const& context, std:
                                                 std::string_view tool_name, std::string_view error_message)
 {
   auto metadata = ava::permissions::command_permission_metadata(preparation.plan(), containment, unverified_delegated_executor);
-  return ensure_permission(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
-                           std::move(metadata));
+  return ensure_permission_impl(context, ava::permissions::Operation::RunCommand, preparation.plan().cwd(), command, tool_name, error_message, {}, false,
+                                std::move(metadata), false, &preparation.plan());
 }
 
 std::string permission_audit_data_json(PermissionAuditEvent const& event)
 {
-  std::string data = "{";
+  auto data = command_review_audit_prefix(event);
   if (!event.permission_request_id.empty())
   {
     data += "\"permission_request_id\":\"" + ava::core::json::escape(event.permission_request_id) + "\",";
@@ -672,6 +995,7 @@ std::string permission_audit_data_json(PermissionAuditEvent const& event)
             ava::core::json::escape(ava::command::to_string(metadata.backend_maximum_scope)) + "\",\"recipe_payload_version\":\"" +
             ava::core::json::escape(metadata.recipe_payload_version) + "\",\"global_recipe_key\":\"" + ava::core::json::escape(metadata.global_recipe_key) +
             "\",\"workspace_recipe_key\":\"" + ava::core::json::escape(metadata.workspace_recipe_key) + "\"";
+    data += R"(,"effect_profile":")" + ava::core::json::escape(metadata.effect_profile) + "\"";
     if (!event.command_arguments_redacted)
     {
       data += ",\"recipe_display\":\"" + ava::core::json::escape(metadata.recipe_display) + "\"";

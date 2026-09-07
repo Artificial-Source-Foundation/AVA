@@ -123,8 +123,7 @@ bool wait_for_process_group_exit(pid_t pgid)
   return true;
 }
 
-ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolContext context, std::string_view command,
-                                                            ava::tools::BashOptions options = {})
+ava::core::Result<ava::tools::BashResult> run_bash_for_test(ava::tools::ToolContext context, std::string_view command, ava::tools::BashOptions options = {})
 {
   if (!context.anchor_set)
   {
@@ -235,9 +234,6 @@ void test_bash_tool()
   }
 
   ava::tools::ToolContext const context{.workspace_dir = root, .mode = ava::agent::Mode::Build};
-  bool const development_containment_available =
-      ava::containment::probe_landlock_abi_version() >= ava::containment::kRequiredLandlockAbiVersion && ava::containment::seccomp_network_filter_supported();
-
   auto pwd = run_bash_for_test(context, "ls", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   expect(pwd.has_value(), "run_bash auto-allows a sealed standard inspection command");
   if (pwd)
@@ -357,14 +353,12 @@ void test_bash_tool()
     test_file << "add_test(NAME repository_controlled_code COMMAND /usr/bin/touch " << repository_test_marker.generic_string() << ")\n";
   }
   auto repository_build = run_bash_for_test(context, "cmake --build " + repository_test_dir.generic_string());
-  expect(development_containment_available ? repository_build && repository_build->exit_code == 0 && !std::filesystem::exists(repository_test_marker)
-                                           : !repository_build && repository_build.error().format().find("no_resolver") != std::string::npos,
-         "repository builds auto-allow only when verified development containment is available; otherwise they ask and fail closed without a resolver");
+  expect(!repository_build && repository_build.error().format().find("no_resolver") != std::string::npos && !std::filesystem::exists(repository_test_marker),
+         "Safe autonomy requires permission for repository builds even when containment is available");
 
   auto repository_test = run_bash_for_test(context, "ctest --test-dir " + repository_test_dir.generic_string());
-  expect(development_containment_available ? repository_test && repository_test->exit_code == 0 && !std::filesystem::exists(repository_test_marker)
-                                           : !repository_test && repository_test.error().format().find("no_resolver") != std::string::npos,
-         "repository tests auto-allow only when verified development containment is available; otherwise they ask and fail closed without a resolver");
+  expect(!repository_test && repository_test.error().format().contains("no_resolver") && !std::filesystem::exists(repository_test_marker),
+         "Safe autonomy requires permission for repository tests even when containment is available");
 
   ava::tools::ToolContext const timeout_context{
       .workspace_dir = root,
@@ -611,8 +605,9 @@ void test_bash_runtime_and_invocation_contract()
              model_git.error().format().find("resolution: no_resolver") != std::string::npos,
          "Enabled is the ToolContext default and only executable runtime mode; macOS git status fails closed when containment is unavailable");
 #else
-  expect(common_runtime_contract && model_git && model_metadata->level == ava::command::CommandLevel::Standard,
-         "Enabled is the ToolContext default and only executable runtime mode; model git status remains a Standard direct-argv recipe");
+  expect(common_runtime_contract && !model_git && model_metadata->level == ava::command::CommandLevel::Standard &&
+             model_git.error().format().find("no_resolver") != std::string::npos,
+         "Enabled remains the only executable runtime; Safe autonomy requires permission for Standard git inspection");
 #endif
   expect(!user_git && user_prompt && user_prompt->command_metadata && user_prompt->command_metadata->level == ava::command::CommandLevel::Critical &&
              user_prompt->command_metadata->family == ava::command::CommandFamily::RawShell &&
@@ -727,8 +722,6 @@ void test_sealed_local_bash_contract()
          "sealed local bash fixture creates executable identities");
 
   ScopedEnvVar const path_guard("PATH", first_bin.string() + ":/usr/bin:/bin");
-  bool const development_containment_available =
-      ava::containment::probe_landlock_abi_version() >= ava::containment::kRequiredLandlockAbiVersion && ava::containment::seccomp_network_filter_supported();
   ScopedEnvVar const sentinel_guard("AVA_BASH_SECRET_SENTINEL", "must-not-reach-child");
   std::vector<ava::permissions::PermissionPrompt> prompts;
   std::vector<ava::tools::PermissionAuditEvent> audits;
@@ -840,12 +833,11 @@ void test_sealed_local_bash_contract()
                               return prompt.command_metadata && prompt.command_metadata->level == ava::command::CommandLevel::Critical &&
                                      prompt.command_metadata->backend_maximum_scope == ava::command::InteractiveScope::Once;
                             });
-  bool const npm_behavior = development_containment_available ? npm && npm->exit_code == 0 && npm->output.find("npm-ran") != std::string::npos
-                                                              : !npm && npm.error().format().find("no_resolver") != std::string::npos;
+  bool const npm_behavior = !npm && npm.error().format().find("no_resolver") != std::string::npos;
   expect(npm_behavior && !python_bare && !python_absolute && !bash_inline && !destructive && !raw && all_critical &&
              critical_prompts[0].command_metadata->family == critical_prompts[1].command_metadata->family &&
              critical_prompts[0].command_metadata->resolved_executable == critical_prompts[1].command_metadata->resolved_executable,
-         "npm project code auto-allows under verified development containment, while bare/absolute Python, bash, destructive, and raw-shell commands remain "
+         "npm project code requires permission under Safe autonomy, while bare/absolute Python, bash, destructive, and raw-shell commands remain "
          "critical one-shot prompts");
 
   auto const binary_path = first_bin / "descriptor-binary";
@@ -885,11 +877,10 @@ void test_sealed_local_bash_contract()
   std::filesystem::copy_file(system_binary_for_test("false"), replacement_interpreter, std::filesystem::copy_options::overwrite_existing,
                              replacement_copy_error);
   bool interpreter_swapped_after_binding = false;
-  bool const interpreter_fixture_written = !interpreter_copy_error && !replacement_copy_error &&
-                                           ::chmod(bound_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
-                                           ::chmod(replacement_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
-                                           write_executable(interpreter_script,
-                                                            "#!" + bound_interpreter.string() + "\nprintf approved-interpreter-descriptor\n");
+  bool const interpreter_fixture_written =
+      !interpreter_copy_error && !replacement_copy_error && ::chmod(bound_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
+      ::chmod(replacement_interpreter.c_str(), S_IRUSR | S_IWUSR | S_IXUSR) == 0 &&
+      write_executable(interpreter_script, "#!" + bound_interpreter.string() + "\nprintf approved-interpreter-descriptor\n");
   ava::tools::ToolContext interpreter_context = context;
   interpreter_context.announce_execution_after_permission = true;
   interpreter_context.execution_started = std::make_shared<std::atomic_bool>(false);
@@ -921,12 +912,12 @@ void test_sealed_local_bash_contract()
       run_bash_for_test(failure_context, "descriptor-exec-failure", ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
 
   expect(!copy_error && binary && binary->exit_code == 0, "a regular binary executes from its approved descriptor");
-  expect(race_script_written && swapped_after_binding && bound_script_result && bound_script_result->exit_code == 0 &&
-             bound_script_result->output == "approved-descriptor",
-         bound_script_result ? "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: output=" +
-                                   bound_script_result->output
-                             : "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: " +
-                                   bound_script_result.error().format());
+  expect(
+      race_script_written && swapped_after_binding && bound_script_result && bound_script_result->exit_code == 0 &&
+          bound_script_result->output == "approved-descriptor",
+      bound_script_result
+          ? "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: output=" + bound_script_result->output
+          : "a shebang script executes from its approved descriptor after a post-binding canonical-path replacement: " + bound_script_result.error().format());
 #ifdef __APPLE__
   expect(interpreter_fixture_written && interpreter_swapped_after_binding && !bound_interpreter_result &&
              bound_interpreter_result.error().message().find("bound descriptor") != std::string::npos,
@@ -951,7 +942,7 @@ void test_sealed_local_bash_contract()
         return ava::permissions::PermissionResolution::Allow;
       }};
   auto normal_group = run_bash_for_test(group_context, "sleep 30 & printf $$ > " + normal_group_file.string(),
-                                           ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
+                                        ava::tools::BashOptions{.timeout = std::chrono::milliseconds(1000)});
   auto const normal_pgid = read_pid_file_for_test(normal_group_file);
   expect(normal_group && normal_group->exit_code == 0 && normal_pgid && wait_for_process_group_exit(*normal_pgid),
          "normal leader completion cleans verified background children before returning");
@@ -1462,7 +1453,8 @@ void test_payload_command_audits_persist_no_markers_or_recipes()
     {
       if (entry.type != ava::session::EntryType::PermissionDecision)
         continue;
-      for (auto const& test_case : cases) markers_absent = markers_absent && entry.data_json.find(test_case.marker) == std::string::npos;
+      for (auto const& test_case : cases)
+        markers_absent = markers_absent && entry.data_json.find(test_case.marker) == std::string::npos;
       stable_recipe_keys_absent = stable_recipe_keys_absent && entry.data_json.find("\"global_recipe_key\":\"\"") != std::string::npos &&
                                   entry.data_json.find("\"workspace_recipe_key\":\"\"") != std::string::npos;
       recipe_displays_empty = recipe_displays_empty && entry.data_json.find("\"recipe_display\":\"\"") != std::string::npos;
@@ -1490,12 +1482,11 @@ void test_command_permission_user_guidance_propagation()
   ava::tools::ToolContext guided_context{
       .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
-            denied.user_guidance = "use the sealed workspace recipe instead";
-            return denied;
-          },
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny, "not approved"};
+        denied.user_guidance = "use the sealed workspace recipe instead";
+        return denied;
+      },
       .permission_audit_sink = audit_sink,
       .permission_denial_guidance_capture = guided_capture};
   auto guided = ava::tools::ensure_permission(guided_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");
@@ -1509,11 +1500,10 @@ void test_command_permission_user_guidance_propagation()
   for (auto const& event : audits)
   {
     auto const json = ava::tools::permission_audit_data_json(event);
-    audits_free_of_guidance = audits_free_of_guidance && json.find("user_guidance") == std::string::npos &&
-                              json.find("provider_user_guidance") == std::string::npos &&
-                              json.find("use the sealed workspace recipe instead") == std::string::npos &&
-                              event.reason.find("sealed workspace recipe") == std::string::npos &&
-                              event.resolution_reason.find("sealed workspace recipe") == std::string::npos;
+    audits_free_of_guidance =
+        audits_free_of_guidance && json.find("user_guidance") == std::string::npos && json.find("provider_user_guidance") == std::string::npos &&
+        json.find("use the sealed workspace recipe instead") == std::string::npos && event.reason.find("sealed workspace recipe") == std::string::npos &&
+        event.resolution_reason.find("sealed workspace recipe") == std::string::npos;
   }
   expect(audits_free_of_guidance, "RunCommand permission audits never serialize one-shot user_guidance");
 
@@ -1522,12 +1512,11 @@ void test_command_permission_user_guidance_propagation()
   ava::tools::ToolContext forged_context{
       .workspace_dir = root,
       .mode = ava::agent::Mode::Build,
-      .permission_resolver =
-          [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
-            ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
-            denied.user_guidance = "no\nwire\x7fleak";
-            return denied;
-          },
+      .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+        ava::permissions::PermissionResolutionDecision denied{ava::permissions::PermissionResolution::Deny};
+        denied.user_guidance = "no\nwire\x7fleak";
+        return denied;
+      },
       .permission_audit_sink = audit_sink,
       .permission_denial_guidance_capture = forged_capture};
   auto forged = ava::tools::ensure_permission(forged_context, ava::permissions::Operation::RunCommand, root, "true", "bash", "command requires permission");

@@ -44,6 +44,7 @@ target_include_directories(ava_terminal
 # Set link dependencies.
 target_link_libraries(ava_terminal
   PUBLIC
+    AVA::core           # ava::core::Application::instance()
     ${CURSES_LIBRARIES}
     ${AICXX_OBJECTS_LIST}
 )

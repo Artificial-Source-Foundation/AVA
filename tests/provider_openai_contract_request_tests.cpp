@@ -10,6 +10,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace ava::tests::provider_openai_suite {
 
@@ -406,6 +407,60 @@ std::optional<ava::http::HttpRequest> exercise_contract_request_serialization(av
       "oauth-token");
   expect(!invalid_base64_image_request && invalid_base64_image_request.error().message().find("verified attachment bytes") != std::string::npos,
          "OpenAI request rejects invalid image base64 payloads");
+
+  auto const image_error_context = [](ava::core::Error const& error, std::string_view key) {
+    for (auto const& item : error.context())
+    {
+      if (item.key == key)
+        return item.value;
+    }
+    return std::string{};
+  };
+  auto const indexed_image_request = [&provider](std::string role, std::string mime_type, std::string data_base64) {
+    return provider.build_request(
+        ava::provider::ProviderRequest{
+            .provider_id = "openai",
+            .model_id = "gpt-5.5",
+            .system_prompt = "system",
+            .messages = {ava::provider::ChatMessage{.role = "user", .content = "first message"},
+                         ava::provider::ChatMessage{
+                             .role = std::move(role),
+                             .content = "fallback image metadata",
+                             .content_parts = {ava::provider::ContentPart{.type = ava::provider::ContentPartType::Text, .text = "describe this"},
+                                               ava::provider::ContentPart{.type = ava::provider::ContentPartType::Image,
+                                                                          .attachment_id = "img_indexed",
+                                                                          .mime_type = std::move(mime_type),
+                                                                          .storage_path = "attachments/img_indexed.png",
+                                                                          .sha256 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+                                                                          .byte_size = 3,
+                                                                          .data_base64 = std::move(data_base64)}}}},
+            .tools_json = {},
+            .stream = false},
+        "oauth-token");
+  };
+  auto const non_user_image = indexed_image_request("assistant", "image/tiff", "not base64");
+  expect(!non_user_image && non_user_image.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             non_user_image.error().message() == "OpenAI image content requires user role" &&
+             image_error_context(non_user_image.error(), "message_index") == "1" && image_error_context(non_user_image.error(), "content_part_index") == "1",
+         "OpenAI image validation rejects non-user roles first with the provider prefix and nonzero part indexes");
+  auto const unsupported_mime_image = indexed_image_request("user", "image/tiff", "not base64");
+  expect(!unsupported_mime_image && unsupported_mime_image.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             unsupported_mime_image.error().message() == "OpenAI image MIME type is not supported" &&
+             image_error_context(unsupported_mime_image.error(), "message_index") == "1" &&
+             image_error_context(unsupported_mime_image.error(), "content_part_index") == "1",
+         "OpenAI image validation rejects unsupported MIME types before base64 checks with nonzero part indexes");
+  auto const empty_bytes_image = indexed_image_request("user", "image/png", "");
+  expect(!empty_bytes_image && empty_bytes_image.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             empty_bytes_image.error().message() == "OpenAI image content requires verified attachment bytes" &&
+             image_error_context(empty_bytes_image.error(), "message_index") == "1" &&
+             image_error_context(empty_bytes_image.error(), "content_part_index") == "1",
+         "OpenAI image validation rejects empty base64 payloads with the provider prefix and nonzero part indexes");
+  auto const invalid_bytes_image = indexed_image_request("user", "image/png", "not base64");
+  expect(!invalid_bytes_image && invalid_bytes_image.error().category() == ava::core::ErrorCategory::InvalidArgument &&
+             invalid_bytes_image.error().message() == "OpenAI image content requires verified attachment bytes" &&
+             image_error_context(invalid_bytes_image.error(), "message_index") == "1" &&
+             image_error_context(invalid_bytes_image.error(), "content_part_index") == "1",
+         "OpenAI image validation rejects invalid base64 payloads with the provider prefix and nonzero part indexes");
 
   auto const expired_credential_request = provider.build_request(
       ava::provider::ProviderRequest{.provider_id = "openai", .model_id = "gpt-5.5", .system_prompt = "system", .messages = {}, .tools_json = {}},

@@ -427,7 +427,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, picker_session, "alpha earlier unique user turn")
     wait_for(tmux_exe, picker_session, r"alpha earlier unique user turn", "user-turn picker first draft")
     send_keys(tmux_exe, picker_session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "user-turn picker first provider request")
+    _wait_for_normal_turn_request_count(provider, 1, "user-turn picker first provider request")
     wait_for(
         tmux_exe,
         picker_session,
@@ -440,7 +440,7 @@ def scenario_main_session_mgmt(ctx: SmokeContext) -> None:
     send_literal(tmux_exe, picker_session, "beta later unique user turn")
     wait_for(tmux_exe, picker_session, r"beta later unique user turn", "user-turn picker second draft")
     send_keys(tmux_exe, picker_session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 2, "user-turn picker second provider request")
+    _wait_for_normal_turn_request_count(provider, 2, "user-turn picker second provider request")
     both_turns = wait_for(
         tmux_exe,
         picker_session,

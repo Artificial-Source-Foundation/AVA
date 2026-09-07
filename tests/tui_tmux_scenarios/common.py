@@ -9,6 +9,7 @@ import time
 
 from test_timing_trace import timed_operation, timing_poll
 
+from fake_provider import FakeProvider
 from tui_smoke_helpers import (
     POLL_INTERVAL,
     SmokeContext,
@@ -60,17 +61,34 @@ def _request_count_diagnostic(request_log: str) -> str:
 
 
 @timed_operation("provider_wait", label_argument="label")
-def _wait_for_normal_turn_request_count(path: pathlib.Path, expected_count: int, label: str, timeout: float = 8.0) -> str:
+def _wait_for_normal_turn_request_count(provider: FakeProvider, expected_count: int, label: str, timeout: float = 8.0) -> str:
+    """Advance through real provider request gates until ``expected_count`` normal turns.
+
+    Each iteration waits for the next zero-based request gate and only then
+    classifies title-generation requests from the logged bytes, so request
+    observation never depends on positive request-log polling.
+    """
+
     deadline = time.monotonic() + timeout
+    next_index = 0
     last = ""
     while time.monotonic() < deadline:
-        timing_poll()
-        if path.exists():
-            last = path.read_text(encoding="utf-8", errors="replace")
-            turns, _ = _request_counts(last)
-            if turns >= expected_count:
-                return last
-        time.sleep(POLL_INTERVAL)
+        try:
+            provider.wait_for_request(
+                next_index,
+                f"{label} provider request {next_index}",
+                timeout=max(0.05, deadline - time.monotonic()),
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            raise RuntimeError(
+                f"timed out waiting for {label}; expected at least {expected_count} normal conversation turns; "
+                f"{_request_count_diagnostic(last)} ({exc})\nrequest log:\n{last}"
+            ) from exc
+        next_index += 1
+        last = provider.request_log.read_text(encoding="utf-8", errors="replace")
+        turns, _ = _request_counts(last)
+        if turns >= expected_count:
+            return last
     raise RuntimeError(
         f"timed out waiting for {label}; expected at least {expected_count} normal conversation turns; "
         f"{_request_count_diagnostic(last)}\nrequest log:\n{last}"

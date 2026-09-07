@@ -57,7 +57,7 @@ def scenario_mermaid(ctx: SmokeContext) -> None:
 
     send_literal(ctx.tmux, session, "render the private Mermaid fixture")
     send_keys(ctx.tmux, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "Mermaid provider request")
+    _wait_for_normal_turn_request_count(provider, 1, "Mermaid provider request")
     disabled = wait_for(ctx.tmux, session, r"TMUX_MERMAID_SOURCE_A-->B", "disabled raw Mermaid fence")
     if count_file.exists():
         raise RuntimeError(f"disabled Mermaid unexpectedly launched the helper\nscreen:\n{disabled}")

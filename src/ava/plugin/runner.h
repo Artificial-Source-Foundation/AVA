@@ -1,6 +1,8 @@
 #pragma once
 
 #include "ava/debug/print_members_on.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/plugin/manifest.h"
 #include "ava/plugin/ui_protocol.h"
 #include "ava/core/result.h"
@@ -10,6 +12,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,6 +23,10 @@ using CancelCallback = std::function<bool()>;
 
 inline constexpr std::size_t kPluginResourceContentMaxBytes = 64 * 1024;
 inline constexpr std::size_t kPluginDynamicResourceNameMaxBytes = 96;
+inline constexpr std::size_t kPluginRunnerMaxRecordBytes = 1024 * 1024;
+inline constexpr std::size_t kPluginRunnerMaxStderrBytes = 1024 * 1024;
+inline constexpr std::size_t kPluginRunnerQueuedRecordCap = 64;
+inline constexpr std::size_t kPluginRunnerQueuedByteMultiplier = 4;
 
 enum class PluginDynamicResourceKind
 {
@@ -38,8 +45,12 @@ struct PluginRunnerOptions
   std::chrono::milliseconds request_timeout{5000};
   std::size_t max_record_bytes = 64 * 1024;
   std::size_t max_stderr_bytes = 64 * 1024;
+  // Required at start(). The runner derives exactly one operation owner before
+  // reserving a Plugin record and retains only that derived authority.
+  std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Includes process-launch authority and must not enter generated output.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
 
 struct PluginInitialization
@@ -150,8 +161,9 @@ struct PluginUiHandler
 class PluginProcess final
 {
  public:
-  PluginProcess(PluginManifest manifest, PluginRunnerOptions options);
-  ~PluginProcess();
+  PluginProcess(PluginManifest manifest, PluginRunnerOptions options, ava::process::ProcessScopeV1 operation_scope,
+                std::chrono::steady_clock::time_point startup_deadline = {});
+  ~PluginProcess() noexcept;
 
   PluginProcess(PluginProcess const&) = delete;
   PluginProcess& operator=(PluginProcess const&) = delete;
@@ -181,10 +193,11 @@ class PluginProcess final
                                                                                  PluginProxyHandler proxy_handler = nullptr);
   [[nodiscard]] ava::core::VoidResult shutdown(std::chrono::milliseconds grace = std::chrono::milliseconds(250));
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Protocol buffers and process authority must never enter debug output.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
-  [[nodiscard]] ava::core::VoidResult launch();
+  [[nodiscard]] ava::core::VoidResult launch(CancelCallback const& cancel_requested);
   [[nodiscard]] ava::core::VoidResult initialize(CancelCallback cancel_requested = nullptr);
   [[nodiscard]] ava::core::VoidResult write_record(std::string_view record, std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
                                                    std::string_view timeout_message, CancelCallback cancel_requested = nullptr);
@@ -202,25 +215,33 @@ class PluginProcess final
   [[nodiscard]] ava::core::VoidResult write_proxy_response(std::string_view request_id, PluginProxyResponse const& response,
                                                            std::chrono::steady_clock::time_point deadline, std::chrono::milliseconds timeout,
                                                            CancelCallback cancel_requested = nullptr);
-  [[nodiscard]] ava::core::VoidResult drain_stdout();
+  [[nodiscard]] ava::core::VoidResult drain_stdout(bool enforce_record_limit);
   [[nodiscard]] ava::core::VoidResult drain_stderr();
-  [[nodiscard]] ava::core::VoidResult reap_child();
-  [[nodiscard]] ava::core::VoidResult set_pipe_nonblocking(int fd);
+  [[nodiscard]] ava::core::VoidResult drain_for_cleanup(std::chrono::steady_clock::time_point deadline) noexcept;
+  [[nodiscard]] ava::core::VoidResult settle_failure(ava::process::TerminationReasonV1 reason);
+  [[nodiscard]] ava::core::Error fail_process(ava::process::TerminationReasonV1 reason, ava::core::Error error);
+  [[nodiscard]] ava::core::VoidResult settle_until(ava::process::TerminationReasonV1 reason, std::chrono::steady_clock::time_point cleanup_deadline,
+                                                   std::chrono::steady_clock::time_point observation_deadline);
+  [[nodiscard]] ava::core::VoidResult settled_cleanup_result() const;
+  [[nodiscard]] std::optional<ava::process::ExitStatusV1> observe_settlement() const;
+  void append_stdout_tail(std::string_view chunk);
   void append_stderr(std::string_view chunk);
-  void close_fds() noexcept;
-  void terminate_child() noexcept;
-  void drain_available_noexcept() noexcept;
+  void close_endpoints() noexcept;
 
   PluginManifest manifest_;
   PluginRunnerOptions options_;
   PluginInitialization initialization_;
-  int stdin_fd_ = -1;
-  int stdout_fd_ = -1;
-  int stderr_fd_ = -1;
-  int pid_ = -1;
-  int child_status_ = 0;
-  bool child_exited_ = false;
-  bool can_signal_group_ = false;
+  std::chrono::steady_clock::time_point startup_deadline_{};
+  ava::process::ProcessScopeV1 operation_scope_;
+  ava::process::ProcessHandle process_handle_;
+  ava::process::PipeEndpoint standard_input_;
+  ava::process::PipeEndpoint standard_output_;
+  ava::process::PipeEndpoint standard_error_;
+  std::optional<ava::process::ExitStatusV1> settlement_ = std::nullopt;
+  std::optional<ava::core::Error> settlement_error_ = std::nullopt;
+  std::optional<std::chrono::steady_clock::time_point> cleanup_deadline_ = std::nullopt;
+  std::optional<std::chrono::steady_clock::time_point> observation_deadline_ = std::nullopt;
+  bool stop_requested_ = false;
   bool stderr_truncated_ = false;
   std::size_t next_request_id_ = 2;
   std::string stdout_buffer_;

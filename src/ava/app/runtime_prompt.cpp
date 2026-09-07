@@ -27,6 +27,7 @@
 #include "ava/core/error.h"
 #include "ava/core/ids.h"
 
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -144,18 +145,29 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
 #endif
   AVA_ASSERT_SESSION_UNLOCKED(unlocked_session, "calling run_admitted_prompt");
 
-  CRITICAL_AREA_BEGIN_R(session);
-
-  std::optional<std::string_view> launch_reasoning_level = std::nullopt;
-  if (session_r->reasoning())
-    launch_reasoning_level = session_r->reasoning()->level;
-  // Normalize immutable private presentation before parent/coordinator locks.
-  // Model/provider ids and provider-specific reasoning fields never enter it.
-  auto const subagent_launch_display =
-      ava::agent::SubagentLaunchDisplay::normalized(ava::config::proven_configured_model_display_name(session_r->model()), launch_reasoning_level);
-
-  auto const run_controller_copy = session_r->run_controller();
-  auto const diagnostics_copy = session_r->diagnostics();
+  std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics_copy;
+  std::optional<ava::process::ProcessScopeV1> session_process_scope_copy;
+  std::optional<ava::process::ProcessScopeV1> run_process_scope;
+  std::optional<ava::core::Error> run_process_scope_error;
+  {
+    SCOPED_CRITICAL_AREA_R(admitted_session_r, unlocked_session);
+    diagnostics_copy = admitted_session_r->diagnostics();
+    session_process_scope_copy = admitted_session_r->session_process_scope();
+    if (session_process_scope_copy)
+    {
+      auto derived = session_process_scope_copy->run();
+      if (derived)
+      {
+        run_process_scope = std::move(*derived);
+      }
+      else
+      {
+        auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive runtime tool process authority");
+        error.with_context("cause", derived.error().message());
+        run_process_scope_error = std::move(error);
+      }
+    }
+  }
 
   // Record a terminal error through stable run resources without retaining or
   // reacquiring Session while controller completion may wait for queued appends.
@@ -172,6 +184,26 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
     }
     return std::unexpected(std::move(error));
   };
+
+  if (run_process_scope_error)
+    return fail_run(std::move(*run_process_scope_error));
+
+  std::function<bool()> const caller_cancel_requested = options.cancel_requested;
+  std::function<bool()> const run_cancel_requested = [guard_token = guard.stop_token(), caller_cancel_requested] {
+    return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());
+  };
+
+  CRITICAL_AREA_BEGIN_R(session);
+
+  std::optional<std::string_view> launch_reasoning_level = std::nullopt;
+  if (session_r->reasoning())
+    launch_reasoning_level = session_r->reasoning()->level;
+  // Normalize immutable private presentation before parent/coordinator locks.
+  // Model/provider ids and provider-specific reasoning fields never enter it.
+  auto const subagent_launch_display =
+      ava::agent::SubagentLaunchDisplay::normalized(ava::config::proven_configured_model_display_name(session_r->model()), launch_reasoning_level);
+
+  auto const run_controller_copy = session_r->run_controller();
 
   std::string const session_id_copy = session_r->store.session_id();
   std::string const provider_id_copy = session_r->model().provider_id;
@@ -225,16 +257,6 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   ava::agent::SessionAppendSink const append_route = guard.append_route();
   ava::agent::SessionAppendBatchSink const append_batch_route = guard.append_batch_route();
   ava::session::SessionCompactionAppendSink const compaction_append_route = guard.compaction_append_route();
-  ava::event::RuntimeEventSink event_sink = options.event_sink;
-  if (!options.isolate_ambient_extensions)
-  {
-    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver);
-    plugin_observer_options.permission_audit_sink = [&append_route](ava::tools::PermissionAuditEvent const& event) {
-      return ava::agent::append_permission_decision(append_route, event);
-    };
-    plugin_observer_options.cancel_requested = options.cancel_requested;
-    event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
-  }
   auto runtime_options = options;
   if (diagnostics_copy)
   {
@@ -245,10 +267,19 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   runtime_options.active_append_route = append_route;
   runtime_options.active_append_batch_route = append_batch_route;
   runtime_options.active_compaction_append_route = compaction_append_route;
-  std::function<bool()> const caller_cancel_requested_copy = runtime_options.cancel_requested;
-  runtime_options.cancel_requested = [guard_token = guard.stop_token(), &caller_cancel_requested = caller_cancel_requested_copy] {
-    return guard_token.stop_requested() || (caller_cancel_requested && caller_cancel_requested());
-  };
+  runtime_options.cancel_requested = run_cancel_requested;
+
+  ava::event::RuntimeEventSink event_sink = options.event_sink;
+  if (!options.isolate_ambient_extensions)
+  {
+    auto plugin_observer_options = plugin_event_observer_options(unlocked_session, options.permission_resolver);
+    plugin_observer_options.permission_audit_sink = [&append_route](ava::tools::PermissionAuditEvent const& event) {
+      return ava::agent::append_permission_decision(append_route, event);
+    };
+    plugin_observer_options.cancel_requested = run_cancel_requested;
+    plugin_observer_options.process_scope = run_process_scope;
+    event_sink = make_plugin_event_observer_sink(std::move(plugin_observer_options), options.event_sink);
+  }
   runtime_options.event_sink = event_sink;
   // Steering belongs to the controller that admitted this run, even if the
   // frontend later replaces its visible Session object.
@@ -383,6 +414,15 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
   auto const provider_catalog_copy = session_r->provider_catalog();
   CRITICAL_AREA_END_R(session);
 
+  ava::http::TransportFactory session_transport_factory;
+  if (session_process_scope_copy)
+  {
+    session_transport_factory = [scope = *session_process_scope_copy]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+      std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>(scope);
+      return transport;
+    };
+  }
+
   std::optional<ava::agent::AgentLoop> loop;
   {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
@@ -438,6 +478,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
                 .ava_authority_roots = session_r->ava_authority_roots_1(),
                 .exact_file_access = runtime_options.exact_file_access,
                 .command_executor = runtime_options.command_executor,
+                .cancel_requested = run_cancel_requested,
+                .process_scope = run_process_scope,
             },
         .subagents = std::move(subagents),
         .tool_visibility = session_r->tool_visibility(),
@@ -498,10 +540,8 @@ ava::core::Result<ava::agent::AgentLoopResult> run_admitted_prompt(runtime::sess
             return std::unexpected(std::move(ensured.error()));
           return (*ensured)->create(provider_id);
         },
-        .background_transport_factory = []() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
-          std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
-          return transport;
-        },
+        .transport_factory = session_transport_factory,
+        .background_transport_factory = session_transport_factory,
         .subagent_coordinator = session_r->subagent_coordinator(),
         .append_entry = append_route,
         .append_batch = std::move(append_batch_route),

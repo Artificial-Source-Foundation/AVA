@@ -63,6 +63,10 @@ class Transport
   AVA_DEBUG_PURE_VIRTUAL_PRINT_MEMBERS
 };
 
+// Neutral construction seam. Production factories capture explicit process
+// authority; tests may return in-process transports that spawn nothing.
+using TransportFactory = std::function<ava::core::Result<std::unique_ptr<Transport>>()>;
+
 enum class ResponseRetryDecision
 {
   NoRetry,

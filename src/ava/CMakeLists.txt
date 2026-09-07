@@ -13,6 +13,7 @@ set(AVA_BACKEND_LIBRARIES
   ava_observability
   ava_permissions
   ava_plugin
+  ava_process
   ava_provider
   ava_session
   ava_tools
@@ -24,6 +25,7 @@ add_subdirectory(agent)
 add_subdirectory(config)
 add_subdirectory(context)
 add_subdirectory(core)
+add_subdirectory(process)
 add_subdirectory(event)
 add_subdirectory(http)
 add_subdirectory(diagnostics)

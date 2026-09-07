@@ -56,6 +56,9 @@
 #include <vector>
 #include <fcntl.h>
 #include <sys/resource.h>
+#ifdef __linux__
+#include <sys/prctl.h>
+#endif
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -98,6 +101,7 @@ class TestApplication final : public ava::core::Application
 };
 
 constexpr int lifecycle_child_setup_failed = 125;
+constexpr int lifecycle_child_still_dumpable = 126;
 
 struct ChildWaitResult
 {
@@ -135,6 +139,13 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
     rlimit const core_limit{.rlim_cur = 0, .rlim_max = 0};
     if (::setrlimit(RLIMIT_CORE, &core_limit) != 0)
       _exit(lifecycle_child_setup_failed);
+#ifdef __linux__
+    // Linux ignores RLIMIT_CORE for piped core handlers. Disable dumpability
+    // so these intentional aborts cannot invoke external dump collection and
+    // delay reaping; retain the file-size limit as defense-in-depth.
+    if (::prctl(PR_SET_DUMPABLE, 0L, 0L, 0L, 0L) != 0)
+      _exit(lifecycle_child_setup_failed);
+#endif
 
     // The child is expected to abort; nothing it writes is part of any test
     // assertion (the parent only checks WTERMSIG == SIGABRT). In particular
@@ -170,6 +181,11 @@ void expect_lifecycle_death(void (*child_action)(), std::string_view description
   if (WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_setup_failed)
   {
     expect(false, "Application lifecycle death test child could not disable core dumps: " + std::string(description));
+    return;
+  }
+  if (WIFEXITED(result.status) && WEXITSTATUS(result.status) == lifecycle_child_still_dumpable)
+  {
+    expect(false, "Application lifecycle death test allowed external core handling (child remained dumpable): " + std::string(description));
     return;
   }
 
@@ -214,6 +230,12 @@ void child_repeated_initialize()
 
 void child_invalid_main_arguments()
 {
+#ifdef __linux__
+  // Check isolation independently of setup: removing PR_SET_DUMPABLE must
+  // fail even on hosts without a piped core handler. A query error also fails.
+  if (::prctl(PR_GET_DUMPABLE, 0L, 0L, 0L, 0L) != 0)
+    _exit(lifecycle_child_still_dumpable);
+#endif
   TestApplication application;
   application.initialize(0, nullptr);
 }

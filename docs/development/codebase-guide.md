@@ -65,7 +65,9 @@ print mode, and protocol adapters.
 `runtime/OpenOptions.h`, `runtime/RunOptions.h`, `session_run_controller.h`,
 `commands.h`, `command_registry.h`, `print_mode.h`, `rpc_mode.h`, `acp_mode.h`,
 `interactive_tui.cpp`, and `line_shell.h`. Protocol implementations live under
-`app/rpc/` and `app/acp/`.
+`app/rpc/` and `app/acp/`. `Application.h` currently constructs the
+application-scoped memory page pool and node resource, but no production
+allocation path uses that pool yet.
 
 **Belongs here:** composition and lifecycle policy involving several lower
 modules; translation between shared runtime behavior and a frontend contract.

@@ -7,6 +7,7 @@ from pathlib import Path
 import socket
 import subprocess
 import tempfile
+import textwrap
 
 
 ZED_COMMIT = "0" * 40
@@ -126,6 +127,10 @@ import sys
 port = Path(sys.argv[1])
 port.write_text("12345\\n", encoding="utf-8")
 port.with_name("provider-pid").write_text(f"{os.getpid()}\\n", encoding="utf-8")
+if len(sys.argv) > 4 and sys.argv[4] == "text-delayed":
+    import time
+    time.sleep(0.2)
+    raise SystemExit(42)
 signal.pause()
 """,
     )
@@ -227,6 +232,135 @@ time.sleep(30)
     assert capped_logs and all(log.stat().st_size <= 16 * 1024 * 1024 for log in capped_logs)
 
 
+def assert_cancellation_waits_for_provider_gate(script, root):
+    preflight = root / "preflight.txt"
+    preflight.write_text("reviewed test boundary\n", encoding="utf-8")
+    provider = root / "gated-provider.py"
+    write_executable(
+        provider,
+        textwrap.dedent(
+            """\
+            #!/usr/bin/python3
+            import os
+            from pathlib import Path
+            import signal
+            import socket
+            import sys
+
+            server = socket.socket()
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            Path(sys.argv[1]).write_text(f"{server.getsockname()[1]}\\n", encoding="utf-8")
+            if sys.argv[4] != "text-delayed":
+                signal.pause()
+            connection, _ = server.accept()
+            connection.recv(4096)
+            gate = socket.socket(fileno=int(os.environ["AVA_TEST_CONTROL_FD"]))
+            gate.sendall(bytes((0,)))
+            gate.recv(1)
+            connection.close()
+            """
+        ),
+    )
+    zed = root / "requesting-zed.py"
+    write_executable(
+        zed,
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/python3
+            import json
+            import os
+            from pathlib import Path
+            import signal
+            import socket
+            import sys
+            from urllib.parse import urlparse
+
+            if len(sys.argv) > 1 and sys.argv[1] == "--version":
+                print("Zed 1.9.0 {ZED_COMMIT}")
+                raise SystemExit(0)
+            if Path(os.environ["AVA_ZED_DOGFOOD_PHASE_ROOT"]).name == "cancellation":
+                settings = json.loads((Path(os.environ["XDG_CONFIG_HOME"]) / "zed/settings.json").read_text(encoding="utf-8"))
+                endpoint = settings["agent_servers"]["AVA M6 dogfood (cancellation)"]["env"]["MOONSHOT_BASE_URL"]
+                port = urlparse(endpoint).port
+                connection = socket.create_connection(("127.0.0.1", port))
+                connection.sendall(b"POST / HTTP/1.1\\r\\nHost: 127.0.0.1\\r\\nContent-Length: 2\\r\\n\\r\\n{{}}")
+            signal.pause()
+            """
+        ),
+    )
+    success_root = root / "gated-success"
+    success_root.mkdir()
+    completed = run_launcher(
+        script,
+        [*common_arguments(Path("/bin/true"), provider, zed, success_root, preflight), "--display", ":98"],
+        root,
+        stdin="fail\nlifecycle intentionally skipped\npass\ncancellation observed after provider gate\n",
+    )
+    submission = completed.stderr.index("Send exactly: cancel this delayed deterministic M6 turn")
+    confirmation = completed.stderr.index("PROVIDER REQUEST 0 CONFIRMED")
+    cancellation = completed.stderr.index("Cancel the in-flight turn from Zed")
+    outcome = completed.stderr.index("Record cancellation phase outcome")
+    assert submission < confirmation < cancellation < outcome, completed.stderr
+    reports = list(success_root.glob("ava-zed-dogfood.*/operator-observations.tsv"))
+    assert len(reports) == 1
+    assert "cancellation\tpass\tcancellation observed after provider gate" in reports[0].read_text(encoding="utf-8")
+
+    no_request_provider = root / "no-request-provider.py"
+    write_executable(
+        no_request_provider,
+        textwrap.dedent(
+            """\
+            #!/usr/bin/python3
+            from pathlib import Path
+            import signal
+            import socket
+            import sys
+            import time
+
+            server = socket.socket()
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            Path(sys.argv[1]).write_text(f"{server.getsockname()[1]}\\n", encoding="utf-8")
+            if sys.argv[4] == "text-delayed":
+                time.sleep(0.2)
+                raise SystemExit(24)
+            signal.pause()
+            """
+        ),
+    )
+    idle_zed = root / "idle-zed.py"
+    write_executable(
+        idle_zed,
+        textwrap.dedent(
+            f"""\
+            #!/usr/bin/python3
+            import signal
+            import sys
+            if len(sys.argv) > 1 and sys.argv[1] == "--version":
+                print("Zed 1.9.0 {ZED_COMMIT}")
+                raise SystemExit(0)
+            signal.pause()
+            """
+        ),
+    )
+    missing_root = root / "missing-request"
+    missing_root.mkdir()
+    missing = run_launcher(
+        script,
+        [*common_arguments(Path("/bin/true"), no_request_provider, idle_zed, missing_root, preflight), "--display", ":98"],
+        root,
+        stdin="fail\nlifecycle intentionally skipped\npass\nthis pass must not be recorded\n",
+    )
+    assert missing.returncode != 0
+    assert "no cancellation outcome was requested" in missing.stderr
+    assert "PROVIDER REQUEST 0 CONFIRMED" not in missing.stderr
+    assert "Record cancellation phase outcome" not in missing.stderr
+    reports = list(missing_root.glob("ava-zed-dogfood.*/operator-observations.tsv"))
+    assert len(reports) == 1
+    assert "cancellation\tpass" not in reports[0].read_text(encoding="utf-8")
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", required=True)
@@ -243,8 +377,11 @@ def main():
         startup_root = root / "startup"
         startup_root.mkdir()
         assert_startup_and_file_limit(script, startup_root)
+        cancellation_root = root / "cancellation"
+        cancellation_root.mkdir()
+        assert_cancellation_waits_for_provider_gate(script, cancellation_root)
 
-    print("live ACP dogfood launcher display, startup, and file-limit tests passed")
+    print("live ACP dogfood launcher display, startup, file-limit, and cancellation-gate tests passed")
     return 0
 
 

@@ -16,7 +16,7 @@ import sys
 import tempfile
 import unittest
 
-SCANNED_MODULES = ("config", "http", "provider", "session", "agent", "tools", "permissions", "mcp", "plugin", "event", "app")
+SCANNED_MODULES = ("process", "config", "http", "provider", "session", "agent", "tools", "permissions", "mcp", "plugin", "lsp", "event", "app")
 SCANNED_MODULE_SET = frozenset(SCANNED_MODULES)
 RECOGNIZED_FIRST_PARTY_ROOTS = frozenset(
     {
@@ -37,6 +37,7 @@ RECOGNIZED_FIRST_PARTY_ROOTS = frozenset(
         "observability",
         "permissions",
         "plugin",
+        "process",
         "provider",
         "session",
         "tools",
@@ -45,16 +46,18 @@ RECOGNIZED_FIRST_PARTY_ROOTS = frozenset(
 )
 ALLOWED = {
     "app": SCANNED_MODULE_SET - {"app"},
-    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin"}),
+    "agent": frozenset({"config", "http", "provider", "session", "tools", "permissions", "mcp", "plugin", "process"}),
     "provider": frozenset({"config", "http"}),
     "session": frozenset({"config"}),
-    "tools": frozenset({"http", "permissions"}),
+    "tools": frozenset({"http", "lsp", "permissions", "process"}),
     "config": frozenset({"http"}),
-    "http": frozenset(),
+    "http": frozenset({"process"}),
     "permissions": frozenset(),
-    "mcp": frozenset({"config", "tools", "permissions"}),
-    "plugin": frozenset({"config", "tools", "permissions"}),
+    "mcp": frozenset({"config", "tools", "permissions", "process"}),
+    "plugin": frozenset({"config", "tools", "permissions", "process"}),
+    "lsp": frozenset({"permissions", "process"}),
     "event": frozenset({"core", "debug"}),
+    "process": frozenset({"core", "debug"}),
 }
 SOURCE_SUFFIXES = frozenset({".h", ".hpp", ".cpp"})
 IGNORED_TREE_NAMES = frozenset({"build", "generated", "reference", "tests", "vendor"})
@@ -91,7 +94,7 @@ def include_target(source: Path, including_path: Path, literal: str) -> str | No
 def is_policy_target(module: str, target: str) -> bool:
     if target == "<noncanonical>":
         return True
-    if module == "event":
+    if module in {"event", "process"}:
         return target in RECOGNIZED_FIRST_PARTY_ROOTS
     return target in SCANNED_MODULE_SET
 
@@ -222,6 +225,9 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
         self.assertEqual(self.run_check('#include "ava/mcp/tool_broker.h"\n', [], module="agent"), [])
         self.assertEqual(self.run_check('#include "ava/plugin/tool_broker.h"\n', [], module="agent"), [])
 
+    def test_agent_may_propagate_process_authority(self) -> None:
+        self.assertEqual(self.run_check('#include "ava/process/scope.h"\n', [], module="agent"), [])
+
     def test_external_tool_brokers_may_depend_only_on_lower_tool_layers(self) -> None:
         for module in ("mcp", "plugin"):
             for target in ("config", "tools", "permissions"):
@@ -241,6 +247,23 @@ class ModuleDependencyRulesSelfTest(unittest.TestCase):
 
     def test_event_may_depend_on_core_and_debug(self) -> None:
         self.assertEqual(self.run_check('#include "ava/core/result.h"\n#include "ava/debug/print_members_on.h"\n', [], module="event"), [])
+
+    def test_process_may_depend_only_on_core_and_debug_marker_plumbing(self) -> None:
+        self.assertEqual(
+            self.run_check('#include "ava/core/result.h"\n#include "ava/debug/print_members_on.h"\n', [], module="process"),
+            [],
+        )
+        for target in ("app", "agent", "tools", "plugin", "mcp", "lsp", "diagnostics"):
+            with self.subTest(target=target):
+                self.assertEqual(
+                    self.run_check(f'#include "ava/{target}/fixture.h"\n', [], module="process"),
+                    [f"src/ava/process/fixture.cpp:1: implementation process -> {target} (ava/{target}/fixture.h)"],
+                )
+
+    def test_spawning_modules_may_depend_downward_on_process(self) -> None:
+        for module in ("app", "http", "tools", "plugin", "mcp", "lsp"):
+            with self.subTest(module=module):
+                self.assertEqual(self.run_check('#include "ava/process/supervisor.h"\n', [], module=module), [])
 
     def test_event_cannot_depend_on_tui(self) -> None:
         self.assertEqual(

@@ -17,7 +17,8 @@ void clear_sensitive_string(std::string& value) noexcept
 {
   auto* cursor = static_cast<unsigned char volatile*>(static_cast<void*>(value.data()));
   auto size = value.size();
-  while (size-- > 0) *cursor++ = 0;
+  while (size-- > 0)
+    *cursor++ = 0;
   value.clear();
 }
 
@@ -128,8 +129,13 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
                                                                                std::string_view purpose)
 {
   ScopeCleanup wipe_options([&]() noexcept { clear_runtime_credential_fields(options); });
-  auto auth_transport = std::make_unique<ava::http::CurlCliTransport>();
   CRITICAL_AREA_BEGIN_CR(session);
+  if (!session_r->session_process_scope())
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Configuration, "runtime provider process authority is unavailable"));
+  }
+  auto const session_process_scope = *session_r->session_process_scope();
+  auto auth_transport = std::make_unique<ava::http::CurlCliTransport>(session_process_scope);
   auto catalog = session_r->provider_catalog();
   if (!catalog)
   {
@@ -151,7 +157,7 @@ ava::core::Result<RuntimeProviderRunBundle> create_runtime_provider_run_bundle(r
     return std::unexpected(std::move(provider.error()));
   CRITICAL_AREA_END_R(session);
 
-  std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>();
+  std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>(session_process_scope);
   return RuntimeProviderRunBundle{
       .provider = std::move(*provider), .transport = std::move(transport), .auth_transport = std::move(auth_transport), .options = std::move(*prepared)};
 }

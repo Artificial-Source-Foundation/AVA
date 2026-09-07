@@ -3,6 +3,8 @@
 #include "tests/support/fake_transport.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/curl_transport.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/provider/openai_response_parser.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
@@ -11,6 +13,7 @@
 #include <deque>
 #include <expected>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -140,7 +143,12 @@ void exercise_contract_http_retry(ava::provider::OpenAIProvider const&)
                formatted.find("provider_message") == std::string::npos,
            "OpenAI HTML error bodies remain opaque and use only generic diagnostics");
   }
-  ava::http::CurlCliTransport curl_transport;
+  auto curl_supervisor = std::make_shared<ava::process::Supervisor>();
+  auto curl_scope = ava::process::ProcessScopeV1::application(curl_supervisor);
+  expect(static_cast<bool>(curl_scope), "curl contract test creates explicit process authority");
+  if (!curl_scope)
+    return;
+  ava::http::CurlCliTransport curl_transport(*curl_scope);
   ava::http::HttpRequest curl_failure_request{};
   curl_failure_request.method = "GET";
   curl_failure_request.url = "unsupported-provider-scheme://CURL_DIAGNOSTIC_PAYLOAD_CANARY";

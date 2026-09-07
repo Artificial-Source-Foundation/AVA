@@ -14,7 +14,6 @@ from tui_smoke_helpers import (
     tmux,
     wait_for,
     wait_for_absent,
-    wait_for_request_count,
     wait_for_session_exit,
 )
 
@@ -76,8 +75,15 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
 
     send_literal(tmux_exe, session, "start the live delegated workspace fixture")
     send_keys(tmux_exe, session, "Enter")
-    wait_for_request_count(provider.request_log, 2, "background task and parent continuation requests", timeout=12.0)
-    active_parent = wait_for(tmux_exe, session, r"Esc stop.*type a follow-up|type a follow-up", "active parent run before /jobs")
+    provider.wait_for_request(1, "background task and parent continuation requests", timeout=12.0)
+    # Provider arrival precedes the TUI redraw: require the task card and active
+    # composer in the same frame, not the earlier composer-only running frame.
+    active_parent = wait_for(
+        tmux_exe,
+        session,
+        r"(?s)launch: AVA TUI Fake · thinking default.*type a follow-up",
+        "active parent task card before /jobs",
+    )
     if "launch: AVA TUI Fake · thinking default" not in active_parent:
         raise RuntimeError(f"live task card omitted launch configuration\nscreen:\n{active_parent}")
     _assert_workspace_safe(active_parent, "active parent task card", parent_card=True)
@@ -122,15 +128,24 @@ def scenario_subagent_workspace(ctx: SmokeContext) -> None:
         "committed child assistant update and terminal freeze",
         timeout=12.0,
     )
+    # Gate-driven increment through the real request indexes; the parent's
+    # model job-list poll is classified from logged bytes after each gate.
     deadline = time.monotonic() + 12.0
     requests = ""
-    while time.monotonic() < deadline:
+    next_index = 2
+    while "Tool call (job): arguments_json=" not in requests:
+        if time.monotonic() >= deadline:
+            raise RuntimeError(f"parent did not issue the expected model job-list poll\nrequests:\n{requests}")
+        try:
+            provider.wait_for_request(
+                next_index,
+                f"parent model job-list poll request {next_index}",
+                timeout=max(0.05, deadline - time.monotonic()),
+            )
+        except (TimeoutError, RuntimeError) as exc:
+            raise RuntimeError(f"parent did not issue the expected model job-list poll ({exc})\nrequests:\n{requests}") from exc
+        next_index += 1
         requests = provider.request_log.read_text(encoding="utf-8", errors="replace")
-        if "Tool call (job): arguments_json=" in requests:
-            break
-        time.sleep(0.05)
-    else:
-        raise RuntimeError(f"parent did not issue the expected model job-list poll\nrequests:\n{requests}")
     if "Completed" not in terminal or "Parent continued after background start" in terminal:
         raise RuntimeError(f"terminal child workspace was not frozen independently of parent output\nscreen:\n{terminal}")
     _assert_workspace_safe(terminal, "terminal child workspace")

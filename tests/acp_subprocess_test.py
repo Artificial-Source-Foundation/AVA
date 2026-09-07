@@ -11,12 +11,12 @@ import subprocess
 import tempfile
 import time
 
-from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
+from fake_provider import FakeProvider, launch_fake_provider
 from timeout_support import test_timeout
 
 
 OWNED_PROCESSES = set()
-PROVIDER_GATES: dict[subprocess.Popen, ProcessGateSet] = {}
+OWNED_PROVIDERS: list[FakeProvider] = []
 
 
 def environment(root):
@@ -100,9 +100,9 @@ def cleanup_owned_processes():
             if stream is not None and not stream.closed:
                 stream.close()
     OWNED_PROCESSES.clear()
-    for gates in PROVIDER_GATES.values():
-        gates.close()
-    PROVIDER_GATES.clear()
+    for provider in reversed(OWNED_PROVIDERS):
+        provider.stop()
+    OWNED_PROVIDERS.clear()
 
 
 def signal_cleanup(signum, _frame):
@@ -127,40 +127,18 @@ def start(ava, root, cwd=None, extra_env=None):
 
 
 def start_fake_provider(executable, root, delay_ms=0, scenario="text-three", target="unused"):
-    root.mkdir(parents=True, exist_ok=True)
-    port_file = root / "port"
-    request_log = root / "requests.log"
-    port_file.unlink(missing_ok=True)
-    request_log.unlink(missing_ok=True)
-    gate_pair = create_process_gate_pair()
-    provider_environment = environment(root / "environment")
-    provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
-    try:
-        server = owned_popen(
-            [executable, str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=provider_environment,
-            pass_fds=(gate_pair.child_fd,),
-        )
-    except BaseException:
-        gate_pair.close()
-        raise
-    gate_pair.close_child_endpoint()
-    PROVIDER_GATES[server] = gate_pair.gates
-    deadline = time.monotonic() + test_timeout(10)
-    while time.monotonic() < deadline:
-        assert server.poll() is None, server.stderr.read().decode(errors="replace")
-        try:
-            port = int(port_file.read_text().strip())
-        except (OSError, ValueError):
-            pass
-        else:
-            if 1 <= port <= 65535:
-                return server, port, request_log
-        time.sleep(0.01)
-    assert server.poll() is None, server.stderr.read().decode(errors="replace")
-    raise AssertionError("fake provider did not publish a nonempty valid loopback port")
+    provider = launch_fake_provider(
+        executable,
+        root,
+        prefix="provider",
+        delay_ms=delay_ms,
+        scenario=scenario,
+        target=target,
+        environment=environment(root / "environment"),
+        startup_timeout=test_timeout(10),
+    )
+    OWNED_PROVIDERS.append(provider)
+    return provider
 
 
 def configure_fake_model(root, supports_tools=False, input_modalities=None):
@@ -370,10 +348,10 @@ def main():
     os.chmod(root, 0o700)
     os.chmod(workspace, 0o700)
     configure_fake_model(lifecycle_root)
-    server, port, request_log = start_fake_provider(args.fake_provider, root / "provider", scenario="text-three-delayed-first")
+    provider = start_fake_provider(args.fake_provider, root / "provider", scenario="text-three-delayed-first")
     lifecycle = start(
         args.ava, lifecycle_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(lifecycle, json.dumps({"jsonrpc": "2.0", "id": "i", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
     lifecycle_init = read_line(lifecycle, operation="lifecycle initialize response")["result"]
@@ -440,11 +418,11 @@ def main():
         "params": {"sessionId": sid, "prompt": [{"type": "text", "text": text}]},
     }).encode())
     prompt("p1", session_a, "first")
-    PROVIDER_GATES[server].wait(0, test_timeout(10))
+    provider.wait_for_request(0, "active prompt provider request", timeout=test_timeout(10))
     prompt("same-active", session_a, "must reject")
     active_rejection = read_line(lifecycle)
     assert active_rejection["id"] == "same-active" and active_rejection["error"]["code"] == -32600
-    PROVIDER_GATES[server].open(0)
+    provider.release_request(0)
     first_records = read_until_id(lifecycle, "p1", operation="first session prompt completion")
     assert first_records[-1]["result"]["stopReason"] == "end_turn"
     assert first_records[-2]["method"] == "session/update"
@@ -482,7 +460,7 @@ def main():
     send(lifecycle, json.dumps({"jsonrpc": "2.0", "id": "close-resumed", "method": "session/close", "params": {"sessionId": session_a}}).encode())
     assert read_line(lifecycle)["result"] == {}
     stop_cleanly(lifecycle)
-    assert server.wait(timeout=test_timeout(10)) == 0, server.stderr.read().decode(errors="replace")
+    provider.finish(timeout=test_timeout(10))
 
     # A real bidirectional client must be able to answer a permission request
     # while session/prompt is still in flight. Tool updates remain ordered
@@ -491,12 +469,12 @@ def main():
     configure_fake_model(permission_root, supports_tools=True)
     permission_target = workspace / "permission-read.txt"
     permission_target.write_text("ACP_PERMISSION_CONTENT")
-    permission_server, permission_port, permission_log = start_fake_provider(
+    permission_provider = start_fake_provider(
         args.fake_provider, root / "permission-provider", scenario="read-tool", target=permission_target
     )
     permission_process = start(
         args.ava, permission_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{permission_port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{permission_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(permission_process, json.dumps({"jsonrpc": "2.0", "id": "pi", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
     permission_init = read_line(permission_process)["result"]["agentCapabilities"]
@@ -546,8 +524,8 @@ def main():
     assert update_kinds[-1] == "agent_message_chunk"
     assert permission_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(permission_process)
-    assert permission_server.wait(timeout=test_timeout(10)) == 0, permission_server.stderr.read().decode(errors="replace")
-    assert "ACP_PERMISSION_CONTENT" in permission_log.read_text(errors="replace")
+    permission_provider.finish(timeout=test_timeout(10))
+    assert "ACP_PERMISSION_CONTENT" in permission_provider.request_log.read_text(errors="replace")
 
     # M5 client filesystem routing is exercised through the real stdio peer,
     # including permission-before-read and the exact outbound DTO.
@@ -555,12 +533,12 @@ def main():
     configure_fake_model(client_fs_root, supports_tools=True)
     client_fs_target = workspace / "client-fs.txt"
     client_fs_target.write_text("LOCAL_CONTENT_MUST_NOT_WIN")
-    client_fs_server, client_fs_port, client_fs_log = start_fake_provider(
+    client_fs_provider = start_fake_provider(
         args.fake_provider, root / "client-fs-provider", scenario="read-tool", target=client_fs_target
     )
     client_fs = start(
         args.ava, client_fs_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{client_fs_port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{client_fs_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(client_fs, json.dumps({
         "jsonrpc": "2.0", "id": "fsi", "method": "initialize",
@@ -601,20 +579,20 @@ def main():
             break
     assert client_fs_methods == ["session/request_permission", "fs/read_text_file"]
     stop_cleanly(client_fs)
-    assert client_fs_server.wait(timeout=test_timeout(10)) == 0, client_fs_server.stderr.read().decode(errors="replace")
-    client_fs_requests = client_fs_log.read_text(errors="replace")
+    client_fs_provider.finish(timeout=test_timeout(10))
+    client_fs_requests = client_fs_provider.request_log.read_text(errors="replace")
     assert "REMOTE_CLIENT_FS_CONTENT" in client_fs_requests and "LOCAL_CONTENT_MUST_NOT_WIN" not in client_fs_requests
 
     # A negotiated terminal follows the complete remote lifecycle and never
     # starts a local process in the real ava --acp process.
     terminal_root = root / "terminal-env"
     configure_fake_model(terminal_root, supports_tools=True)
-    terminal_server, terminal_port, terminal_log = start_fake_provider(
+    terminal_provider = start_fake_provider(
         args.fake_provider, root / "terminal-provider", scenario="terminal-tool"
     )
     terminal_process = start(
         args.ava, terminal_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{terminal_port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{terminal_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(terminal_process, json.dumps({
         "jsonrpc": "2.0", "id": "ti", "method": "initialize",
@@ -661,16 +639,16 @@ def main():
         "session/request_permission", "terminal/create", "terminal/wait_for_exit", "terminal/output", "terminal/release"
     ]
     stop_cleanly(terminal_process)
-    assert terminal_server.wait(timeout=test_timeout(10)) == 0, terminal_server.stderr.read().decode(errors="replace")
-    assert "SUBPROCESS_TERMINAL_OUTPUT" in terminal_log.read_text(errors="replace")
+    terminal_provider.finish(timeout=test_timeout(10))
+    assert "SUBPROCESS_TERMINAL_OUTPUT" in terminal_provider.request_log.read_text(errors="replace")
     assert not (workspace / "terminal-e2e-marker").exists()
 
     image_root = root / "image-env"
     configure_fake_model(image_root, input_modalities=["text", "image"])
-    image_server, image_port, image_log = start_fake_provider(args.fake_provider, root / "image-provider", scenario="text")
+    image_provider = start_fake_provider(args.fake_provider, root / "image-provider", scenario="text")
     image_process = start(
         args.ava, image_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{image_port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{image_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(image_process, json.dumps({"jsonrpc": "2.0", "id": "ii", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
     image_init = read_line(image_process)["result"]["agentCapabilities"]
@@ -690,16 +668,16 @@ def main():
     image_records = read_until_id(image_process, "image-prompt", operation="image session prompt completion")
     assert image_records[-1]["result"]["stopReason"] == "end_turn"
     stop_cleanly(image_process)
-    assert image_server.wait(timeout=test_timeout(10)) == 0, image_server.stderr.read().decode(errors="replace")
-    image_requests = image_log.read_text(errors="replace")
+    image_provider.finish(timeout=test_timeout(10))
+    image_requests = image_provider.request_log.read_text(errors="replace")
     assert "iVBORw0KGgo=" in image_requests and "image/png" in image_requests
 
     cancel_root = root / "cancel-env"
     configure_fake_model(cancel_root)
-    cancel_server, cancel_port, cancel_log = start_fake_provider(args.fake_provider, root / "cancel-provider", scenario="text")
+    cancel_provider = start_fake_provider(args.fake_provider, root / "cancel-provider", scenario="text")
     cancel_process = start(
         args.ava, cancel_root, cwd=workspace,
-        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{cancel_port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{cancel_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
     )
     send(cancel_process, json.dumps({"jsonrpc": "2.0", "id": "ci", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
     assert read_line(cancel_process)["result"]
@@ -717,18 +695,40 @@ def main():
     idle_records = read_until_id(cancel_process, "idle-survives", operation="idle cancellation session prompt completion")
     assert idle_records[-1]["result"]["stopReason"] == "end_turn"
 
-    prompt_payload = {
-        "jsonrpc": "2.0", "id": "cancel-prompt", "method": "session/prompt",
-        "params": {"sessionId": cancel_session, "prompt": [{"type": "text", "text": "cancel me immediately"}]},
-    }
-    send(cancel_process, json.dumps(prompt_payload).encode())
-    send(cancel_process, json.dumps({
-        "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": cancel_session},
-    }).encode())
-    canceled_records = read_until_id(cancel_process, "cancel-prompt", operation="active session cancellation completion")
-    assert canceled_records[-1]["result"]["stopReason"] == "cancelled"
     stop_cleanly(cancel_process)
-    assert cancel_server.wait(timeout=test_timeout(10)) == 0, cancel_server.stderr.read().decode(errors="replace")
+    cancel_provider.finish(timeout=test_timeout(10))
+
+    # Active cancellation is gated: the delayed provider holds the prompt's HTTP
+    # request behind gate 0, so session/cancel provably lands while the request
+    # is in flight instead of racing a time-based delay.
+    cancel_active_root = root / "cancel-active-env"
+    configure_fake_model(cancel_active_root)
+    active_provider = start_fake_provider(args.fake_provider, root / "cancel-active-provider", scenario="text-delayed")
+    active_process = start(
+        args.ava, cancel_active_root, cwd=workspace,
+        extra_env={"MOONSHOT_BASE_URL": f"http://127.0.0.1:{active_provider.port}", "MOONSHOT_API_KEY": "fake-acp-key"},
+    )
+    send(active_process, json.dumps({"jsonrpc": "2.0", "id": "ci", "method": "initialize", "params": {"protocolVersion": 1}}).encode())
+    assert read_line(active_process)["result"]
+    send(active_process, json.dumps({
+        "jsonrpc": "2.0", "id": "cn", "method": "session/new", "params": {"cwd": str(workspace), "mcpServers": []},
+    }).encode())
+    active_session = read_line(active_process)["result"]["sessionId"]
+    send(active_process, json.dumps({
+        "jsonrpc": "2.0", "id": "cancel-prompt", "method": "session/prompt",
+        "params": {"sessionId": active_session, "prompt": [{"type": "text", "text": "cancel the in-flight request"}]},
+    }).encode())
+    active_provider.wait_for_request(0, "active cancellation provider request", timeout=test_timeout(10))
+    send(active_process, json.dumps({
+        "jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": active_session},
+    }).encode())
+    canceled_records = read_until_id(active_process, "cancel-prompt", operation="active session cancellation completion")
+    assert canceled_records[-1]["result"]["stopReason"] == "cancelled"
+    active_provider.release_request(0)
+    stop_cleanly(active_process)
+    # Cancellation closed the provider HTTP connection, so the delayed response
+    # write may fail after the gate release; only prove the process is gone.
+    active_provider.stop()
 
     auth_root = root / "auth-env"
     configure_fake_model(auth_root)

@@ -5,6 +5,8 @@
 #include "tests/support/test_harness.h"
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/app/commands.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
@@ -21,6 +23,7 @@
 #include <algorithm>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
@@ -726,6 +729,57 @@ void test_app_manual_compaction_uses_only_active_context()
          "manual /compact shares active-boundary input and recent-tail selection without re-summarizing replaced physical history");
 }
 
+void test_app_cross_provider_compaction_requires_process_scope()
+{
+  auto const root = temp_root() / "app-compact-cross-provider-no-scope";
+  std::error_code remove_error;
+  std::filesystem::remove_all(root, remove_error);
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+
+  auto const* prior_key = std::getenv("ANTHROPIC_API_KEY");
+  auto const saved_key = prior_key ? std::optional<std::string>(prior_key) : std::nullopt;
+  setenv("ANTHROPIC_API_KEY", "test-anthropic-key", 1);
+
+  ava::app::runtime::OpenContext options;
+  options.workspace_dir = workspace;
+  options.current_dir = workspace;
+  options.paths = paths;
+  auto unlocked_session_result = ava::app::runtime::Session::open(options);
+  expect(unlocked_session_result.has_value(), "cross-provider missing-scope test opens runtime session");
+  if (!unlocked_session_result)
+  {
+    if (saved_key)
+      setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
+    else
+      unsetenv("ANTHROPIC_API_KEY");
+    return;
+  }
+
+  ava::app::runtime::session_ts& unlocked_session = *unlocked_session_result;
+  CRITICAL_AREA_BEGIN_W(session);
+  auto entries = session_w->store.load();
+  auto config = ava::session::parse_compaction_config(R"({"provider":"anthropic","model":"claude-sonnet-4-5"})");
+  ava::provider::OpenAIProvider const active_provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
+      .status_code = 200, .headers = {}, .body = R"({"content":[{"type":"text","text":"MUST NOT DISPATCH"}],"stop_reason":"end_turn"})"}});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "active-openai-token";
+  CRITICAL_AREA_END_W(session);
+
+  auto generated = entries && config
+                       ? ava::app::generate_compaction_summary(unlocked_session, *entries, *config, "", 1, active_provider, transport, run_options)
+                       : ava::core::Result<std::string>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "invalid test setup")));
+  if (saved_key)
+    setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
+  else
+    unsetenv("ANTHROPIC_API_KEY");
+
+  expect(!generated && generated.error().message() == "compaction process authority is unavailable" && transport.requests().empty(),
+         "cross-provider compaction without captured session process authority fails before auth or provider transport dispatch");
+}
+
 void test_app_compact_honors_cross_provider_selection()
 {
   auto const root = temp_root() / "app-compact-cross-provider";
@@ -743,10 +797,23 @@ void test_app_compact_honors_cross_provider_selection()
   auto const saved_key = prior_key ? std::optional<std::string>(prior_key) : std::nullopt;
   setenv("ANTHROPIC_API_KEY", "test-anthropic-key", 1);
 
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto process_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(process_scope.has_value(), "cross-provider /compact test creates explicit process authority");
+  if (!process_scope)
+  {
+    if (saved_key)
+      setenv("ANTHROPIC_API_KEY", saved_key->c_str(), 1);
+    else
+      unsetenv("ANTHROPIC_API_KEY");
+    return;
+  }
+
   ava::app::runtime::OpenContext options;
   options.workspace_dir = workspace;
   options.current_dir = workspace;
   options.paths = paths;
+  options.application_process_scope = *process_scope;
   auto unlocked_session_result = ava::app::runtime::Session::open(options);
   expect(unlocked_session_result.has_value(), "cross-provider /compact test opens runtime session");
   if (!unlocked_session_result)
@@ -789,11 +856,12 @@ void test_app_compact_honors_cross_provider_selection()
   CRITICAL_AREA_CONTINUE_W(session);
   auto entries = session_w->store.load();
   auto const compaction = entries ? latest_compaction_entry(*entries) : std::nullopt;
-  expect(compact && !transport.requests().empty() && transport.requests().front().url.find("anthropic.com") != std::string::npos &&
-             transport.requests().front().body.find("claude-sonnet-4-5") != std::string::npos && compaction &&
+  auto const process_snapshot = supervisor->snapshot();
+  expect(compact && transport.requests().size() == 1 && transport.requests().front().url.find("anthropic.com") != std::string::npos &&
+             transport.requests().front().body.find("claude-sonnet-4-5") != std::string::npos && compaction && process_snapshot.records.empty() &&
              ava::core::json::string_field(compaction->data_json, "provider") == "anthropic" &&
              ava::core::json::string_field(compaction->data_json, "model") == "claude-sonnet-4-5",
-         "/compact resolves credentials and dispatches the exact configured cross-provider summary model without fallback");
+         "/compact isolates credential transport and dispatches only the exact configured cross-provider summary model");
 }
 
 void test_app_auto_compaction_appends_summary_and_rebuilds_context()
@@ -1499,6 +1567,7 @@ void run_app_compaction_tests()
   test_app_compaction_recent_tail_budget_never_orphans_tools();
   test_app_compaction_oversized_turn_retains_latest_user_anchor();
   test_app_manual_compaction_uses_only_active_context();
+  test_app_cross_provider_compaction_requires_process_scope();
   test_app_compact_honors_cross_provider_selection();
   test_app_auto_compaction_appends_summary_and_rebuilds_context();
   test_app_auto_compaction_recent_context_respects_token_budget();

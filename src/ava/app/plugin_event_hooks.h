@@ -10,6 +10,7 @@
 #include <filesystem>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 
@@ -32,6 +33,7 @@ struct PluginEventObserverOptions
   ava::permissions::PermissionResolver permission_resolver = nullptr;
   ava::tools::PermissionAuditSink permission_audit_sink = nullptr;
   std::function<bool()> cancel_requested = nullptr;
+  std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt;
   PluginEventHookFailureSink hook_failure_sink = nullptr;
   std::string session_id;
   std::string provider_id;

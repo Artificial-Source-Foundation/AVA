@@ -14,7 +14,7 @@ class Application
   using Vec8Alloc = memory::VectorAllocator<char>;
 
  private:
-  memory::MemoryPagePool mpp_;
+  memory::MemoryPagePool mpp_;          // Pool using the default block size (32 KiB); its first growth allocates at least two blocks (64 KiB).
   Vec8Alloc vec8alloc_;                 // A geometric allocator for sizes 8, 16, 32, 64, ...
 
  public:

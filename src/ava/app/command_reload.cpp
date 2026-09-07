@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "ava/app/command_format.h"
 #include "ava/app/command_reload.h"
+#include "ava/app/command_trust.h"
 #include "ava/app/commands.h"
 #include "ava/app/display_settings.h"
 #include "ava/app/project_trust.h"
@@ -13,6 +14,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -24,6 +26,7 @@ struct ReloadReportRow
   std::string name;
   std::string status;
   std::vector<std::pair<std::string, std::string>> details;
+  bool blocks_following_prompt_reload = false;
 
   AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 };
@@ -163,40 +166,37 @@ ReloadReportRow reload_prompt_settings(runtime::session_ts& unlocked_session)
 
 ReloadReportRow reload_trust_settings(runtime::session_ts& unlocked_session)
 {
-  auto snapshot = [&] {
+  auto const trust_source = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->paths(),
-                      session_r->model(),
-                      session_r->mode(),
-                      session_r->workspace_dir(),
-                      session_r->current_dir(),
-                      session_r->prompt_overrides(),
-                      session_r->selected_primary_agent()};
+    return std::pair{session_r->paths(), session_r->workspace_dir()};
   }();
-  auto& [paths, model, mode, workspace_dir, current_dir, prompt_overrides, selected_primary_agent] = snapshot;
-  auto next_trust = load_project_trust_state(paths, workspace_dir);
-  auto prompt_state = runtime::load_runtime_prompt_state(paths, model, mode, workspace_dir, current_dir, project_resources_trusted(next_trust),
-                                                         prompt_overrides, selected_primary_agent);
-  if (!prompt_state)
+  auto const disk_snapshot = load_project_trust_state(trust_source.first, trust_source.second);
+  bool const disk_is_untrusted = !project_resources_trusted(disk_snapshot);
+
+  auto applied = apply_project_trust_operation(unlocked_session, ProjectTrustOperation::Reload);
+  if (!applied)
   {
-    auto row = reload_error_row("trust", prompt_state.error());
-    append_reload_detail(row, "trust_file", next_trust.trust_file.string());
+    auto row = reload_error_row("trust", applied.error());
+    row.blocks_following_prompt_reload = disk_is_untrusted;
+    if (disk_is_untrusted)
+      append_reload_detail(row, "authority_state", "reopen required; stale prompt reload skipped");
     return row;
   }
-  ProjectTrustState applied_trust;
+  if (applied->prompt_warning)
   {
-    SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-    session_w->trust_state().project_trust = std::move(next_trust);
+    auto row = reload_error_row("trust", *applied->prompt_warning);
+    row.blocks_following_prompt_reload = true;
+    append_reload_detail(row, "trust_file", applied->state.trust_file.string());
+    append_reload_detail(row, "authority_state", "project authority removed with fail-closed empty prompt");
+    return row;
   }
-  if (auto refreshed = runtime::Session::apply_prompt_state_and_refresh(unlocked_session, std::move(*prompt_state)); !refreshed)
-    return reload_error_row("trust", refreshed.error());
-  applied_trust = runtime::session_ts::rat(unlocked_session)->project_trust();
-  ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}};
-  append_reload_detail(row, "trust_file", applied_trust.trust_file.string());
-  append_reload_detail(row, "decision", std::string(to_string(applied_trust.decision)));
-  append_reload_detail(row, "project_resources", project_resources_trusted(applied_trust) ? "enabled" : "skipped");
-  if (!applied_trust.diagnostic.empty())
-    append_reload_detail(row, "diagnostic", applied_trust.diagnostic);
+
+  ReloadReportRow row{.name = "trust", .status = "loaded", .details = {}, .blocks_following_prompt_reload = !project_resources_trusted(applied->state)};
+  append_reload_detail(row, "trust_file", applied->state.trust_file.string());
+  append_reload_detail(row, "decision", std::string(to_string(applied->state.decision)));
+  append_reload_detail(row, "project_resources", project_resources_trusted(applied->state) ? "enabled" : "skipped");
+  if (!applied->state.diagnostic.empty())
+    append_reload_detail(row, "diagnostic", applied->state.diagnostic);
   return row;
 }
 
@@ -295,8 +295,32 @@ std::vector<ReloadReportRow> reload_report_rows_for_target(runtime::session_ts& 
 
   if (target != "all")
     return {one(target)};
-  return {one("display"), one("models"),      one("trust"), one("prompts"), one("compaction"), one("keybindings"),
-          one("auth"),    one("providers"), one("permissions"), one("lsp"),   one("mcp"),     one("plugins")};
+
+  std::vector<ReloadReportRow> rows;
+  rows.push_back(one("display"));
+  rows.push_back(one("models"));
+  auto trust = one("trust");
+  bool const skip_prompt_reload = trust.blocks_following_prompt_reload;
+  rows.push_back(std::move(trust));
+  if (skip_prompt_reload)
+  {
+    ReloadReportRow prompt_row{.name = "prompts", .status = "included-with-trust", .details = {}};
+    append_reload_detail(prompt_row, "authority_state", "no later prompt reload was attempted");
+    rows.push_back(std::move(prompt_row));
+  }
+  else
+  {
+    rows.push_back(one("prompts"));
+  }
+  rows.push_back(one("compaction"));
+  rows.push_back(one("keybindings"));
+  rows.push_back(one("auth"));
+  rows.push_back(one("providers"));
+  rows.push_back(one("permissions"));
+  rows.push_back(one("lsp"));
+  rows.push_back(one("mcp"));
+  rows.push_back(one("plugins"));
+  return rows;
 }
 
 }  // namespace

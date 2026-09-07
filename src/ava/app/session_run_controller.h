@@ -54,6 +54,7 @@ enum class AdmissionDisposition
   RejectMaintenanceReservation,
   RejectClosing,
   RejectPersistenceFailure,
+  RejectRetiredAuthority,
 };
 
 struct RunCommand
@@ -82,6 +83,7 @@ struct RunSnapshot
 {
   bool active = false;
   bool maintenance_reserved = false;
+  bool authority_retired = false;
   std::string run_id;
   RunPhase phase = RunPhase::Admitted;
   bool stop_requested = false;
@@ -185,6 +187,12 @@ class SessionRunController
   // before controller state, so an already queued or in-flight append rejects
   // atomically rather than being waited out and missed.
   [[nodiscard]] ava::core::Result<SessionMaintenanceReservation> reserve_maintenance();
+  // Permanently retire this controller's provider and append authority. The
+  // caller must own the supplied maintenance reservation. Retirement is
+  // irreversible; releasing maintenance cannot reactivate this controller or
+  // any copied generation/owner route. Callers must publish a fresh controller.
+  [[nodiscard]] ava::core::VoidResult retire_authority(SessionMaintenanceReservation const& reservation);
+  [[nodiscard]] bool authority_retired() const noexcept;
   // Wait only joins the currently active request (or returns its most recent
   // terminal result). It never admits work or waits for a different request.
   [[nodiscard]] ava::core::Result<RunOutcome> wait_outcome(std::string_view correlation_id);

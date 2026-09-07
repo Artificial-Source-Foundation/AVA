@@ -1,0 +1,2162 @@
+{
+  "artifacts": {
+    "ava": {
+      "executable": true,
+      "mtime_ns": 1788120462751173671,
+      "path": "/home/xn3/Projects/Personal/ASF/AVA/build-release/ava",
+      "sha256": "9f22ae812dd8fc2dd578d596d6d553e429b7941b6f22983abd06c1b3e1b3fe8d",
+      "size_bytes": 19996328,
+      "version_probe": {
+        "exact_command": [
+          "/home/xn3/Projects/Personal/ASF/AVA/build-release/ava",
+          "--version"
+        ],
+        "return_code": 0,
+        "status": "recorded",
+        "stderr": "",
+        "stdout": "ava 1.0.0"
+      }
+    },
+    "benchmark_helper": {
+      "executable": true,
+      "mtime_ns": 1788123155240308883,
+      "path": "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+      "sha256": "4d7c8fe1214e422cd3cbcb5b054401cbbdbd237fad97cccdc0a9994a1b51865a",
+      "size_bytes": 6344120
+    },
+    "benchmark_script": {
+      "executable": true,
+      "mtime_ns": 1788123145922263902,
+      "path": "/home/xn3/Projects/Personal/ASF/AVA/scripts/benchmark-backend.py",
+      "sha256": "7f1bb58dea9c9f112cd934f7e2bae6d384eea5a786f78cc16db1720656f24d3a",
+      "size_bytes": 49674
+    },
+    "fake_provider": {
+      "executable": true,
+      "mtime_ns": 1788118475718067179,
+      "path": "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_fake_provider_server",
+      "sha256": "df11221c7d3750e93b490b87c02c96ef590adb9e28354511e0264da7aacc1ca7",
+      "size_bytes": 114480
+    },
+    "memory_helper": {
+      "executable": true,
+      "mtime_ns": 1785881954734269934,
+      "path": "/home/xn3/Projects/Personal/ASF/AVA/scripts/benchmark-memory.py",
+      "sha256": "6770b31d02d7e07d6ec89fa40e33531b74cc79c2421d30b0163274811488e067",
+      "size_bytes": 20199
+    },
+    "sample_plugin": {
+      "entrypoint": {
+        "executable": false,
+        "mtime_ns": 1785881954733269961,
+        "path": "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo/plugin.sh",
+        "sha256": "fb487517820a1259338ad6d5031ac382832c66c6db55e5eadb494df32a01a8d6",
+        "size_bytes": 1864
+      },
+      "manifest": {
+        "executable": false,
+        "mtime_ns": 1785881954733269961,
+        "path": "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo/plugin.json",
+        "sha256": "f3bef9c21b786328655a37eaed2821d12896ce001e73f3fc24a7bddd44f2eaa3",
+        "size_bytes": 1426
+      },
+      "manifest_identity": {
+        "api_version": "ava.plugin.v1",
+        "entrypoint_args": [
+          "plugin.sh"
+        ],
+        "entrypoint_command": "/bin/sh",
+        "id": "com.example.todo",
+        "name": "Todo Sample Plugin",
+        "schema_version": 1,
+        "version": "0.1.0"
+      },
+      "root": "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo"
+    }
+  },
+  "build": {
+    "build_type": "Release",
+    "cmake_cache": "/home/xn3/Projects/Personal/ASF/AVA/build-release/CMakeCache.txt",
+    "cmake_flags": {
+      "AVA_ENABLE_SANITIZERS": "OFF",
+      "AVA_ENABLE_TSAN": "OFF",
+      "EnableAvaSanitizers": "DEFAULT",
+      "EnableLibcwd": "OFF",
+      "OptionEnableAvaSanitizers": "OFF",
+      "OptionEnableDebug": "OFF",
+      "OptionEnableLibcwd": "OFF"
+    },
+    "cmake_source_root": "/home/xn3/Projects/Personal/ASF/AVA",
+    "compiler": {
+      "configured_version": "13.3.0",
+      "id": "GNU",
+      "path": "/usr/bin/c++",
+      "version_output": "c++ (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0"
+    },
+    "cxx_flags": {
+      "CMAKE_CXX_FLAGS": "",
+      "CMAKE_CXX_FLAGS_DEBUG": "-g",
+      "CMAKE_CXX_FLAGS_MINSIZEREL": "-Os -DNDEBUG",
+      "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG",
+      "CMAKE_CXX_FLAGS_RELWITHDEBINFO": "-O2 -g -DNDEBUG"
+    },
+    "features": {
+      "debug": false,
+      "libcwd": false,
+      "sanitizers": false,
+      "tsan": false
+    },
+    "provenance": {
+      "assessment": "best_effort_unverified",
+      "binary_is_within_cmake_build_tree": true,
+      "binary_mtime_ns": 1788120462751173671,
+      "binary_not_older_than_cmake_cache": true,
+      "cmake_cache_mtime_ns": 1786902731367163245,
+      "cmake_source_root_matches_recorded_source": true,
+      "git_commit_embedding_verified": false,
+      "statement": "The nearest CMake cache, source-root match, and mtimes are recorded as best-effort provenance only. They do not verify build freshness or claim that the executable embeds or was produced from the recorded Git commit."
+    }
+  },
+  "checks": [],
+  "generated_at_utc": "2026-08-30T20:53:16.694084+00:00",
+  "git": {
+    "commit": "971327fb66fc372f5828c5f5967e118d9374f9da",
+    "commit_with_state": "971327fb66fc372f5828c5f5967e118d9374f9da",
+    "dirty": false,
+    "repository": "/home/xn3/Projects/Personal/ASF/AVA",
+    "tree": "80006e97c46767768532fd9f3941d110ec7941d7"
+  },
+  "host": {
+    "cpu": "Intel(R) Core(TM) i9-10850K CPU @ 3.60GHz",
+    "cpu_count": 20,
+    "kernel": "7.0.0-29-generic",
+    "machine": "x86_64",
+    "os": "Linux",
+    "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.39",
+    "python": "3.12.3",
+    "ram_bytes": 33533427712
+  },
+  "parameters": {
+    "benchmark_helper": "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+    "clock": "time.monotonic_ns / C++ steady_clock",
+    "environment": "fixed allowlist: trusted PATH, C.UTF-8 locale, isolated HOME/XDG/TMPDIR, dumb terminal/no color, offline/debug/session-title controls; no host variables inherited",
+    "exact_command": [
+      "scripts/benchmark-backend.py",
+      "--ava",
+      "build-release/ava",
+      "--benchmark-helper",
+      "build-release/tests/ava_backend_benchmark_helper",
+      "--fake-provider",
+      "build-release/tests/ava_fake_provider_server",
+      "--suite",
+      "baseline",
+      "--runs",
+      "5",
+      "--output",
+      "/tmp/ava-backend-m0-baseline-2026-08-30-v2.json",
+      "--report",
+      "/tmp/ava-backend-m0-baseline-2026-08-30-v2.md"
+    ],
+    "fake_provider": "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_fake_provider_server",
+    "memory_helper": "/home/xn3/Projects/Personal/ASF/AVA/scripts/benchmark-memory.py",
+    "runs": 5,
+    "sample_plugin": "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo",
+    "suite": "baseline"
+  },
+  "results": [
+    {
+      "closest_current_result": "warm_startup",
+      "family": "startup",
+      "id": "cold_startup",
+      "reason": "A reproducible cold start requires privileged filesystem/page-cache controls; the harness does not mislabel a fresh HOME as a cold machine.",
+      "reason_code": "cold_cache_control_unavailable",
+      "repetitions": 0,
+      "samples": [],
+      "statistics": null,
+      "status": "unsupported"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/ava",
+        "--rpc",
+        "--offline",
+        "--no-session"
+      ],
+      "family": "startup",
+      "id": "warm_startup",
+      "note": "Full offline RPC initialization and clean EOF shutdown after one warm-up; it performs no provider request.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "return_code": 0,
+          "run": 1,
+          "value": 2093553.0
+        },
+        {
+          "return_code": 0,
+          "run": 2,
+          "value": 2044890.0
+        },
+        {
+          "return_code": 0,
+          "run": 3,
+          "value": 1936267.0
+        },
+        {
+          "return_code": 0,
+          "run": 4,
+          "value": 1937659.0
+        },
+        {
+          "return_code": 0,
+          "run": 5,
+          "value": 2023234.0
+        }
+      ],
+      "statistics": {
+        "maximum": 2093553.0,
+        "median": 2023234.0,
+        "p95": 2093553.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "details": {
+        "per_run_value": "maximum rss_kib across that run's raw /proc snapshots",
+        "raw_memory_helper_output": {
+          "apps": {
+            "ava": {
+              "aggregate_median": {
+                "processes": 1.0,
+                "pss_kib": 11323.0,
+                "rss_kib": 15580.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 11092.0
+              },
+              "resolved_command": [
+                "/home/xn3/Projects/Personal/ASF/AVA/build-release/ava",
+                "--offline",
+                "--no-session"
+              ],
+              "runs": [
+                {
+                  "captured_output_bytes": 268,
+                  "captured_output_truncated": false,
+                  "elapsed_seconds": 2.056,
+                  "run_index": 1,
+                  "samples": [
+                    {
+                      "elapsed_seconds": 1.018,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11558,
+                      "rss_kib": 15756,
+                      "sample_index": 1,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11340
+                    },
+                    {
+                      "elapsed_seconds": 1.538,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11558,
+                      "rss_kib": 15756,
+                      "sample_index": 2,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11340
+                    },
+                    {
+                      "elapsed_seconds": 2.056,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11558,
+                      "rss_kib": 15756,
+                      "sample_index": 3,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11340
+                    }
+                  ],
+                  "summary": {
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1.0,
+                    "pss_kib": 11558.0,
+                    "rss_kib": 15756.0,
+                    "swap_kib": 0.0,
+                    "threads": 4.0,
+                    "uss_kib": 11340.0
+                  }
+                },
+                {
+                  "captured_output_bytes": 268,
+                  "captured_output_truncated": false,
+                  "elapsed_seconds": 2.055,
+                  "run_index": 2,
+                  "samples": [
+                    {
+                      "elapsed_seconds": 1.019,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11143,
+                      "rss_kib": 15400,
+                      "sample_index": 1,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10912
+                    },
+                    {
+                      "elapsed_seconds": 1.537,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11143,
+                      "rss_kib": 15400,
+                      "sample_index": 2,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10912
+                    },
+                    {
+                      "elapsed_seconds": 2.055,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11143,
+                      "rss_kib": 15400,
+                      "sample_index": 3,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10912
+                    }
+                  ],
+                  "summary": {
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1.0,
+                    "pss_kib": 11143.0,
+                    "rss_kib": 15400.0,
+                    "swap_kib": 0.0,
+                    "threads": 4.0,
+                    "uss_kib": 10912.0
+                  }
+                },
+                {
+                  "captured_output_bytes": 268,
+                  "captured_output_truncated": false,
+                  "elapsed_seconds": 2.057,
+                  "run_index": 3,
+                  "samples": [
+                    {
+                      "elapsed_seconds": 1.019,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11370,
+                      "rss_kib": 15620,
+                      "sample_index": 1,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11144
+                    },
+                    {
+                      "elapsed_seconds": 1.538,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11370,
+                      "rss_kib": 15620,
+                      "sample_index": 2,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11144
+                    },
+                    {
+                      "elapsed_seconds": 2.057,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11370,
+                      "rss_kib": 15620,
+                      "sample_index": 3,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11144
+                    }
+                  ],
+                  "summary": {
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1.0,
+                    "pss_kib": 11370.0,
+                    "rss_kib": 15620.0,
+                    "swap_kib": 0.0,
+                    "threads": 4.0,
+                    "uss_kib": 11144.0
+                  }
+                },
+                {
+                  "captured_output_bytes": 268,
+                  "captured_output_truncated": false,
+                  "elapsed_seconds": 2.055,
+                  "run_index": 4,
+                  "samples": [
+                    {
+                      "elapsed_seconds": 1.019,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11147,
+                      "rss_kib": 15404,
+                      "sample_index": 1,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10916
+                    },
+                    {
+                      "elapsed_seconds": 1.537,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11147,
+                      "rss_kib": 15404,
+                      "sample_index": 2,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10916
+                    },
+                    {
+                      "elapsed_seconds": 2.055,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11147,
+                      "rss_kib": 15404,
+                      "sample_index": 3,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 10916
+                    }
+                  ],
+                  "summary": {
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1.0,
+                    "pss_kib": 11147.0,
+                    "rss_kib": 15404.0,
+                    "swap_kib": 0.0,
+                    "threads": 4.0,
+                    "uss_kib": 10916.0
+                  }
+                },
+                {
+                  "captured_output_bytes": 268,
+                  "captured_output_truncated": false,
+                  "elapsed_seconds": 2.055,
+                  "run_index": 5,
+                  "samples": [
+                    {
+                      "elapsed_seconds": 1.019,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11323,
+                      "rss_kib": 15580,
+                      "sample_index": 1,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11092
+                    },
+                    {
+                      "elapsed_seconds": 1.537,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11323,
+                      "rss_kib": 15580,
+                      "sample_index": 2,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11092
+                    },
+                    {
+                      "elapsed_seconds": 2.055,
+                      "process_names": [
+                        "ava"
+                      ],
+                      "processes": 1,
+                      "pss_kib": 11323,
+                      "rss_kib": 15580,
+                      "sample_index": 3,
+                      "swap_kib": 0,
+                      "threads": 4,
+                      "uss_kib": 11092
+                    }
+                  ],
+                  "summary": {
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1.0,
+                    "pss_kib": 11323.0,
+                    "rss_kib": 15580.0,
+                    "swap_kib": 0.0,
+                    "threads": 4.0,
+                    "uss_kib": 11092.0
+                  }
+                }
+              ],
+              "version": {
+                "output": "ava 1.0.0",
+                "return_code": 0
+              },
+              "warmup": {
+                "captured_output_bytes": 268,
+                "captured_output_truncated": false,
+                "elapsed_seconds": 1.019,
+                "samples": [
+                  {
+                    "elapsed_seconds": 1.019,
+                    "process_names": [
+                      "ava"
+                    ],
+                    "processes": 1,
+                    "pss_kib": 11370,
+                    "rss_kib": 15592,
+                    "sample_index": 1,
+                    "swap_kib": 0,
+                    "threads": 4,
+                    "uss_kib": 11140
+                  }
+                ],
+                "summary": {
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1.0,
+                  "pss_kib": 11370.0,
+                  "rss_kib": 15592.0,
+                  "swap_kib": 0.0,
+                  "threads": 4.0,
+                  "uss_kib": 11140.0
+                }
+              }
+            }
+          },
+          "generated_at_utc": "2026-08-30T20:52:46.973644+00:00",
+          "host": {
+            "cpu_count": 20,
+            "machine": "x86_64",
+            "platform": "Linux-7.0.0-29-generic-x86_64-with-glibc2.39",
+            "python": "3.12.3",
+            "release": "7.0.0-29-generic",
+            "system": "Linux"
+          },
+          "parameters": {
+            "environment": "isolated HOME/XDG/TMPDIR; credential-like variables removed; offline flags",
+            "measured_runs": 5,
+            "project": "empty isolated temporary directory",
+            "pty_columns": 120,
+            "pty_rows": 30,
+            "sample_interval_seconds": 0.5,
+            "samples_per_run": 3,
+            "settle_seconds": 1.0,
+            "warmup_runs": 1
+          },
+          "schema_version": 1
+        }
+      },
+      "exact_command": [
+        "/usr/bin/python3",
+        "/home/xn3/Projects/Personal/ASF/AVA/scripts/benchmark-memory.py",
+        "--apps",
+        "ava",
+        "--ava",
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/ava",
+        "--runs",
+        "5",
+        "--settle",
+        "1.0",
+        "--samples",
+        "3",
+        "--output",
+        "/tmp/ava-backend-benchmark-hi3n3tqy/idle-memory.json"
+      ],
+      "family": "memory",
+      "id": "idle_rss",
+      "note": "Maximum observed Linux process-tree RSS snapshot per run from the procfs/PTY seam; includes AVA descendants.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "raw_memory_helper_run": {
+              "captured_output_bytes": 268,
+              "captured_output_truncated": false,
+              "elapsed_seconds": 2.056,
+              "run_index": 1,
+              "samples": [
+                {
+                  "elapsed_seconds": 1.018,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11558,
+                  "rss_kib": 15756,
+                  "sample_index": 1,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11340
+                },
+                {
+                  "elapsed_seconds": 1.538,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11558,
+                  "rss_kib": 15756,
+                  "sample_index": 2,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11340
+                },
+                {
+                  "elapsed_seconds": 2.056,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11558,
+                  "rss_kib": 15756,
+                  "sample_index": 3,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11340
+                }
+              ],
+              "summary": {
+                "process_names": [
+                  "ava"
+                ],
+                "processes": 1.0,
+                "pss_kib": 11558.0,
+                "rss_kib": 15756.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 11340.0
+              }
+            },
+            "rss_aggregation": "maximum_observed_snapshot"
+          },
+          "run": 1,
+          "value": 15756.0
+        },
+        {
+          "details": {
+            "raw_memory_helper_run": {
+              "captured_output_bytes": 268,
+              "captured_output_truncated": false,
+              "elapsed_seconds": 2.055,
+              "run_index": 2,
+              "samples": [
+                {
+                  "elapsed_seconds": 1.019,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11143,
+                  "rss_kib": 15400,
+                  "sample_index": 1,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10912
+                },
+                {
+                  "elapsed_seconds": 1.537,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11143,
+                  "rss_kib": 15400,
+                  "sample_index": 2,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10912
+                },
+                {
+                  "elapsed_seconds": 2.055,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11143,
+                  "rss_kib": 15400,
+                  "sample_index": 3,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10912
+                }
+              ],
+              "summary": {
+                "process_names": [
+                  "ava"
+                ],
+                "processes": 1.0,
+                "pss_kib": 11143.0,
+                "rss_kib": 15400.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 10912.0
+              }
+            },
+            "rss_aggregation": "maximum_observed_snapshot"
+          },
+          "run": 2,
+          "value": 15400.0
+        },
+        {
+          "details": {
+            "raw_memory_helper_run": {
+              "captured_output_bytes": 268,
+              "captured_output_truncated": false,
+              "elapsed_seconds": 2.057,
+              "run_index": 3,
+              "samples": [
+                {
+                  "elapsed_seconds": 1.019,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11370,
+                  "rss_kib": 15620,
+                  "sample_index": 1,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11144
+                },
+                {
+                  "elapsed_seconds": 1.538,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11370,
+                  "rss_kib": 15620,
+                  "sample_index": 2,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11144
+                },
+                {
+                  "elapsed_seconds": 2.057,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11370,
+                  "rss_kib": 15620,
+                  "sample_index": 3,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11144
+                }
+              ],
+              "summary": {
+                "process_names": [
+                  "ava"
+                ],
+                "processes": 1.0,
+                "pss_kib": 11370.0,
+                "rss_kib": 15620.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 11144.0
+              }
+            },
+            "rss_aggregation": "maximum_observed_snapshot"
+          },
+          "run": 3,
+          "value": 15620.0
+        },
+        {
+          "details": {
+            "raw_memory_helper_run": {
+              "captured_output_bytes": 268,
+              "captured_output_truncated": false,
+              "elapsed_seconds": 2.055,
+              "run_index": 4,
+              "samples": [
+                {
+                  "elapsed_seconds": 1.019,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11147,
+                  "rss_kib": 15404,
+                  "sample_index": 1,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10916
+                },
+                {
+                  "elapsed_seconds": 1.537,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11147,
+                  "rss_kib": 15404,
+                  "sample_index": 2,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10916
+                },
+                {
+                  "elapsed_seconds": 2.055,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11147,
+                  "rss_kib": 15404,
+                  "sample_index": 3,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 10916
+                }
+              ],
+              "summary": {
+                "process_names": [
+                  "ava"
+                ],
+                "processes": 1.0,
+                "pss_kib": 11147.0,
+                "rss_kib": 15404.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 10916.0
+              }
+            },
+            "rss_aggregation": "maximum_observed_snapshot"
+          },
+          "run": 4,
+          "value": 15404.0
+        },
+        {
+          "details": {
+            "raw_memory_helper_run": {
+              "captured_output_bytes": 268,
+              "captured_output_truncated": false,
+              "elapsed_seconds": 2.055,
+              "run_index": 5,
+              "samples": [
+                {
+                  "elapsed_seconds": 1.019,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11323,
+                  "rss_kib": 15580,
+                  "sample_index": 1,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11092
+                },
+                {
+                  "elapsed_seconds": 1.537,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11323,
+                  "rss_kib": 15580,
+                  "sample_index": 2,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11092
+                },
+                {
+                  "elapsed_seconds": 2.055,
+                  "process_names": [
+                    "ava"
+                  ],
+                  "processes": 1,
+                  "pss_kib": 11323,
+                  "rss_kib": 15580,
+                  "sample_index": 3,
+                  "swap_kib": 0,
+                  "threads": 4,
+                  "uss_kib": 11092
+                }
+              ],
+              "summary": {
+                "process_names": [
+                  "ava"
+                ],
+                "processes": 1.0,
+                "pss_kib": 11323.0,
+                "rss_kib": 15580.0,
+                "swap_kib": 0.0,
+                "threads": 4.0,
+                "uss_kib": 11092.0
+              }
+            },
+            "rss_aggregation": "maximum_observed_snapshot"
+          },
+          "run": 5,
+          "value": 15580.0
+        }
+      ],
+      "statistics": {
+        "maximum": 15756.0,
+        "median": 15580.0,
+        "p95": 15756.0
+      },
+      "status": "measured",
+      "unit": "KiB"
+    },
+    {
+      "closest_current_result": "short_calls_10000",
+      "family": "dispatch",
+      "id": "builtin_noop_dispatch",
+      "reason": "The pre-modernization built-in registry has no no-op tool. The closest test-only no-op path is recorded by short_calls_10000.",
+      "reason_code": "no_builtin_noop",
+      "repetitions": 0,
+      "samples": [],
+      "statistics": null,
+      "status": "unsupported"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "file-dispatch",
+        "--iterations",
+        "1000"
+      ],
+      "family": "dispatch",
+      "id": "native_file_read_dispatch",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 1000,
+            "canceled": false
+          },
+          "run": 1,
+          "value": 29255.4,
+          "wall_time_ns": 30627953.0
+        },
+        {
+          "details": {
+            "calls": 1000,
+            "canceled": false
+          },
+          "run": 2,
+          "value": 30985.1,
+          "wall_time_ns": 32445612.0
+        },
+        {
+          "details": {
+            "calls": 1000,
+            "canceled": false
+          },
+          "run": 3,
+          "value": 30648.1,
+          "wall_time_ns": 32015258.0
+        },
+        {
+          "details": {
+            "calls": 1000,
+            "canceled": false
+          },
+          "run": 4,
+          "value": 29574.7,
+          "wall_time_ns": 30934906.0
+        },
+        {
+          "details": {
+            "calls": 1000,
+            "canceled": false
+          },
+          "run": 5,
+          "value": 28512.5,
+          "wall_time_ns": 29841994.0
+        }
+      ],
+      "statistics": {
+        "maximum": 30985.1,
+        "median": 29574.7,
+        "p95": 30985.1
+      },
+      "status": "measured",
+      "unit": "ns_per_call"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "native-registry",
+        "--iterations",
+        "1000"
+      ],
+      "family": "registry",
+      "id": "native_registry_lookup",
+      "note": "Exact lookup of the final current built-in registry entry; registry construction is outside the timed interval.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "entry_count": 20,
+            "lookups": 1000,
+            "target": "todowrite"
+          },
+          "run": 1,
+          "value": 14.786,
+          "wall_time_ns": 1014227.0
+        },
+        {
+          "details": {
+            "entry_count": 20,
+            "lookups": 1000,
+            "target": "todowrite"
+          },
+          "run": 2,
+          "value": 16.765,
+          "wall_time_ns": 895133.0
+        },
+        {
+          "details": {
+            "entry_count": 20,
+            "lookups": 1000,
+            "target": "todowrite"
+          },
+          "run": 3,
+          "value": 14.209,
+          "wall_time_ns": 831036.0
+        },
+        {
+          "details": {
+            "entry_count": 20,
+            "lookups": 1000,
+            "target": "todowrite"
+          },
+          "run": 4,
+          "value": 14.301,
+          "wall_time_ns": 872267.0
+        },
+        {
+          "details": {
+            "entry_count": 20,
+            "lookups": 1000,
+            "target": "todowrite"
+          },
+          "run": 5,
+          "value": 14.238,
+          "wall_time_ns": 825686.0
+        }
+      ],
+      "statistics": {
+        "maximum": 16.765,
+        "median": 14.301,
+        "p95": 16.765
+      },
+      "status": "measured",
+      "unit": "ns_per_lookup"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "plugin-call",
+        "--iterations",
+        "1",
+        "--sample-plugin",
+        "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo"
+      ],
+      "family": "plugin",
+      "id": "plugin_first_call",
+      "note": "The current application path starts and shuts down a plugin process for each call; this is not persistent warm-worker performance.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 1,
+            "children_after": 0
+          },
+          "run": 1,
+          "value": 11270400.0,
+          "wall_time_ns": 12179953.0
+        },
+        {
+          "details": {
+            "calls": 1,
+            "children_after": 0
+          },
+          "run": 2,
+          "value": 11259500.0,
+          "wall_time_ns": 12246035.0
+        },
+        {
+          "details": {
+            "calls": 1,
+            "children_after": 0
+          },
+          "run": 3,
+          "value": 11320700.0,
+          "wall_time_ns": 12270942.0
+        },
+        {
+          "details": {
+            "calls": 1,
+            "children_after": 0
+          },
+          "run": 4,
+          "value": 11356300.0,
+          "wall_time_ns": 12423662.0
+        },
+        {
+          "details": {
+            "calls": 1,
+            "children_after": 0
+          },
+          "run": 5,
+          "value": 11268800.0,
+          "wall_time_ns": 12306091.0
+        }
+      ],
+      "statistics": {
+        "maximum": 11356300.0,
+        "median": 11270400.0,
+        "p95": 11356300.0
+      },
+      "status": "current_one_shot",
+      "unit": "ns_per_one_shot_call"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "plugin-call",
+        "--iterations",
+        "10",
+        "--sample-plugin",
+        "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo"
+      ],
+      "family": "plugin",
+      "id": "plugin_repeated_calls",
+      "note": "The current application path starts and shuts down a plugin process for each call; this is not persistent warm-worker performance.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 10,
+            "children_after": 0
+          },
+          "run": 1,
+          "value": 11278800.0,
+          "wall_time_ns": 113808468.0
+        },
+        {
+          "details": {
+            "calls": 10,
+            "children_after": 0
+          },
+          "run": 2,
+          "value": 11246100.0,
+          "wall_time_ns": 113623435.0
+        },
+        {
+          "details": {
+            "calls": 10,
+            "children_after": 0
+          },
+          "run": 3,
+          "value": 11246100.0,
+          "wall_time_ns": 113642739.0
+        },
+        {
+          "details": {
+            "calls": 10,
+            "children_after": 0
+          },
+          "run": 4,
+          "value": 11257900.0,
+          "wall_time_ns": 113762841.0
+        },
+        {
+          "details": {
+            "calls": 10,
+            "children_after": 0
+          },
+          "run": 5,
+          "value": 11281100.0,
+          "wall_time_ns": 114157934.0
+        }
+      ],
+      "statistics": {
+        "maximum": 11281100.0,
+        "median": 11257900.0,
+        "p95": 11281100.0
+      },
+      "status": "current_one_shot",
+      "unit": "ns_per_one_shot_call"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "manifest-discovery",
+        "--entries",
+        "100",
+        "--sample-plugin",
+        "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo"
+      ],
+      "family": "plugin",
+      "id": "unused_plugin_manifests_100",
+      "note": "Manifest parsing only, with a zero-waitable-child assertion before and after discovery.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "children_after": 0,
+            "children_before": 0,
+            "manifests": 100
+          },
+          "run": 1,
+          "value": 2853170.0,
+          "wall_time_ns": 9536195.0
+        },
+        {
+          "details": {
+            "children_after": 0,
+            "children_before": 0,
+            "manifests": 100
+          },
+          "run": 2,
+          "value": 2885200.0,
+          "wall_time_ns": 9545936.0
+        },
+        {
+          "details": {
+            "children_after": 0,
+            "children_before": 0,
+            "manifests": 100
+          },
+          "run": 3,
+          "value": 2944410.0,
+          "wall_time_ns": 9478330.0
+        },
+        {
+          "details": {
+            "children_after": 0,
+            "children_before": 0,
+            "manifests": 100
+          },
+          "run": 4,
+          "value": 2909580.0,
+          "wall_time_ns": 9709273.0
+        },
+        {
+          "details": {
+            "children_after": 0,
+            "children_before": 0,
+            "manifests": 100
+          },
+          "run": 5,
+          "value": 2905610.0,
+          "wall_time_ns": 9680953.0
+        }
+      ],
+      "statistics": {
+        "maximum": 2944410.0,
+        "median": 2905610.0,
+        "p95": 2944410.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "catalog",
+        "--entries",
+        "100"
+      ],
+      "family": "catalog",
+      "id": "catalog_entries_100",
+      "note": "Composite timed boundary: synthetic registry construction, full schema materialization, and final-entry linear lookup; not a selective router.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "entries": 100,
+            "lookup_target": "bench_99",
+            "schemas": 100,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 1,
+          "value": 92866.0,
+          "wall_time_ns": 1001146.0
+        },
+        {
+          "details": {
+            "entries": 100,
+            "lookup_target": "bench_99",
+            "schemas": 100,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 2,
+          "value": 94399.0,
+          "wall_time_ns": 918619.0
+        },
+        {
+          "details": {
+            "entries": 100,
+            "lookup_target": "bench_99",
+            "schemas": 100,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 3,
+          "value": 96625.0,
+          "wall_time_ns": 977031.0
+        },
+        {
+          "details": {
+            "entries": 100,
+            "lookup_target": "bench_99",
+            "schemas": 100,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 4,
+          "value": 92798.0,
+          "wall_time_ns": 895981.0
+        },
+        {
+          "details": {
+            "entries": 100,
+            "lookup_target": "bench_99",
+            "schemas": 100,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 5,
+          "value": 97961.0,
+          "wall_time_ns": 975742.0
+        }
+      ],
+      "statistics": {
+        "maximum": 97961.0,
+        "median": 94399.0,
+        "p95": 97961.0
+      },
+      "status": "measured",
+      "unit": "ns_per_composite"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "catalog",
+        "--entries",
+        "500"
+      ],
+      "family": "catalog",
+      "id": "catalog_entries_500",
+      "note": "Composite timed boundary: synthetic registry construction, full schema materialization, and final-entry linear lookup; not a selective router.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "entries": 500,
+            "lookup_target": "bench_499",
+            "schemas": 500,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 1,
+          "value": 586228.0,
+          "wall_time_ns": 1390920.0
+        },
+        {
+          "details": {
+            "entries": 500,
+            "lookup_target": "bench_499",
+            "schemas": 500,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 2,
+          "value": 593892.0,
+          "wall_time_ns": 1463117.0
+        },
+        {
+          "details": {
+            "entries": 500,
+            "lookup_target": "bench_499",
+            "schemas": 500,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 3,
+          "value": 581943.0,
+          "wall_time_ns": 1388077.0
+        },
+        {
+          "details": {
+            "entries": 500,
+            "lookup_target": "bench_499",
+            "schemas": 500,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 4,
+          "value": 586865.0,
+          "wall_time_ns": 1435426.0
+        },
+        {
+          "details": {
+            "entries": 500,
+            "lookup_target": "bench_499",
+            "schemas": 500,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 5,
+          "value": 570214.0,
+          "wall_time_ns": 1376547.0
+        }
+      ],
+      "statistics": {
+        "maximum": 593892.0,
+        "median": 586228.0,
+        "p95": 593892.0
+      },
+      "status": "measured",
+      "unit": "ns_per_composite"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "catalog",
+        "--entries",
+        "1000"
+      ],
+      "family": "catalog",
+      "id": "catalog_entries_1000",
+      "note": "Composite timed boundary: synthetic registry construction, full schema materialization, and final-entry linear lookup; not a selective router.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "entries": 1000,
+            "lookup_target": "bench_999",
+            "schemas": 1000,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 1,
+          "value": 1895990.0,
+          "wall_time_ns": 2712887.0
+        },
+        {
+          "details": {
+            "entries": 1000,
+            "lookup_target": "bench_999",
+            "schemas": 1000,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 2,
+          "value": 1828720.0,
+          "wall_time_ns": 3714148.0
+        },
+        {
+          "details": {
+            "entries": 1000,
+            "lookup_target": "bench_999",
+            "schemas": 1000,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 3,
+          "value": 2052160.0,
+          "wall_time_ns": 2885982.0
+        },
+        {
+          "details": {
+            "entries": 1000,
+            "lookup_target": "bench_999",
+            "schemas": 1000,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 4,
+          "value": 1901940.0,
+          "wall_time_ns": 3873104.0
+        },
+        {
+          "details": {
+            "entries": 1000,
+            "lookup_target": "bench_999",
+            "schemas": 1000,
+            "timed_boundary": "registry_construction_plus_full_schema_materialization_plus_last_entry_lookup"
+          },
+          "run": 5,
+          "value": 2012240.0,
+          "wall_time_ns": 2877876.0
+        }
+      ],
+      "statistics": {
+        "maximum": 2052160.0,
+        "median": 1901940.0,
+        "p95": 2052160.0
+      },
+      "status": "measured",
+      "unit": "ns_per_composite"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "short-calls",
+        "--iterations",
+        "10000"
+      ],
+      "family": "dispatch",
+      "id": "short_calls_10000",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 10000
+          },
+          "run": 1,
+          "value": 30.0657,
+          "wall_time_ns": 1173531.0
+        },
+        {
+          "details": {
+            "calls": 10000
+          },
+          "run": 2,
+          "value": 30.5522,
+          "wall_time_ns": 1084559.0
+        },
+        {
+          "details": {
+            "calls": 10000
+          },
+          "run": 3,
+          "value": 29.9825,
+          "wall_time_ns": 2192058.0
+        },
+        {
+          "details": {
+            "calls": 10000
+          },
+          "run": 4,
+          "value": 30.4282,
+          "wall_time_ns": 1070252.0
+        },
+        {
+          "details": {
+            "calls": 10000
+          },
+          "run": 5,
+          "value": 30.5004,
+          "wall_time_ns": 1119079.0
+        }
+      ],
+      "statistics": {
+        "maximum": 30.5522,
+        "median": 30.4282,
+        "p95": 30.5522
+      },
+      "status": "measured",
+      "unit": "ns_per_call"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "canceled-calls",
+        "--iterations",
+        "10000"
+      ],
+      "family": "cancellation",
+      "id": "canceled_calls_10000",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 10000,
+            "canceled": true
+          },
+          "run": 1,
+          "value": 7939.73,
+          "wall_time_ns": 80640930.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "canceled": true
+          },
+          "run": 2,
+          "value": 8269.09,
+          "wall_time_ns": 84213469.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "canceled": true
+          },
+          "run": 3,
+          "value": 8294.68,
+          "wall_time_ns": 84547338.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "canceled": true
+          },
+          "run": 4,
+          "value": 7889.22,
+          "wall_time_ns": 80446002.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "canceled": true
+          },
+          "run": 5,
+          "value": 8141.56,
+          "wall_time_ns": 82996765.0
+        }
+      ],
+      "statistics": {
+        "maximum": 8294.68,
+        "median": 8141.56,
+        "p95": 8294.68
+      },
+      "status": "measured",
+      "unit": "ns_per_call"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "session-open",
+        "--records",
+        "1000"
+      ],
+      "family": "session",
+      "id": "session_open_1000",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "records": 1000
+          },
+          "run": 1,
+          "value": 3708680.0,
+          "wall_time_ns": 33872638.0
+        },
+        {
+          "details": {
+            "records": 1000
+          },
+          "run": 2,
+          "value": 3622640.0,
+          "wall_time_ns": 32162584.0
+        },
+        {
+          "details": {
+            "records": 1000
+          },
+          "run": 3,
+          "value": 3587410.0,
+          "wall_time_ns": 31074887.0
+        },
+        {
+          "details": {
+            "records": 1000
+          },
+          "run": 4,
+          "value": 3643140.0,
+          "wall_time_ns": 31557742.0
+        },
+        {
+          "details": {
+            "records": 1000
+          },
+          "run": 5,
+          "value": 3562660.0,
+          "wall_time_ns": 31580333.0
+        }
+      ],
+      "statistics": {
+        "maximum": 3708680.0,
+        "median": 3622640.0,
+        "p95": 3708680.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "session-open",
+        "--records",
+        "10000"
+      ],
+      "family": "session",
+      "id": "session_open_10000",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "records": 10000
+          },
+          "run": 1,
+          "value": 35691100.0,
+          "wall_time_ns": 297695128.0
+        },
+        {
+          "details": {
+            "records": 10000
+          },
+          "run": 2,
+          "value": 36243700.0,
+          "wall_time_ns": 294809126.0
+        },
+        {
+          "details": {
+            "records": 10000
+          },
+          "run": 3,
+          "value": 35383700.0,
+          "wall_time_ns": 300440493.0
+        },
+        {
+          "details": {
+            "records": 10000
+          },
+          "run": 4,
+          "value": 35428400.0,
+          "wall_time_ns": 301929637.0
+        },
+        {
+          "details": {
+            "records": 10000
+          },
+          "run": 5,
+          "value": 36034800.0,
+          "wall_time_ns": 294253856.0
+        }
+      ],
+      "statistics": {
+        "maximum": 36243700.0,
+        "median": 35691100.0,
+        "p95": 36243700.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "session-open",
+        "--records",
+        "100000"
+      ],
+      "family": "session",
+      "id": "session_open_100000",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "records": 100000
+          },
+          "run": 1,
+          "value": 361526000.0,
+          "wall_time_ns": 3029722303.0
+        },
+        {
+          "details": {
+            "records": 100000
+          },
+          "run": 2,
+          "value": 360035000.0,
+          "wall_time_ns": 3009509125.0
+        },
+        {
+          "details": {
+            "records": 100000
+          },
+          "run": 3,
+          "value": 364322000.0,
+          "wall_time_ns": 3000993200.0
+        },
+        {
+          "details": {
+            "records": 100000
+          },
+          "run": 4,
+          "value": 363087000.0,
+          "wall_time_ns": 2985725454.0
+        },
+        {
+          "details": {
+            "records": 100000
+          },
+          "run": 5,
+          "value": 367658000.0,
+          "wall_time_ns": 3089665080.0
+        }
+      ],
+      "statistics": {
+        "maximum": 367658000.0,
+        "median": 363087000.0,
+        "p95": 367658000.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "metadata",
+        "--entries",
+        "100"
+      ],
+      "family": "session",
+      "id": "metadata_browsing",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "sessions": 100
+          },
+          "run": 1,
+          "value": 1988500.0,
+          "wall_time_ns": 12595611.0
+        },
+        {
+          "details": {
+            "sessions": 100
+          },
+          "run": 2,
+          "value": 1841310.0,
+          "wall_time_ns": 11937305.0
+        },
+        {
+          "details": {
+            "sessions": 100
+          },
+          "run": 3,
+          "value": 1811020.0,
+          "wall_time_ns": 12120912.0
+        },
+        {
+          "details": {
+            "sessions": 100
+          },
+          "run": 4,
+          "value": 1831220.0,
+          "wall_time_ns": 12116858.0
+        },
+        {
+          "details": {
+            "sessions": 100
+          },
+          "run": 5,
+          "value": 1826400.0,
+          "wall_time_ns": 12097673.0
+        }
+      ],
+      "statistics": {
+        "maximum": 1988500.0,
+        "median": 1831220.0,
+        "p95": 1988500.0
+      },
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "cancellation-ack",
+        "--iterations",
+        "10"
+      ],
+      "family": "cancellation",
+      "id": "cancellation_acknowledgement",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "attempts": 10
+          },
+          "run": 1,
+          "value": 10426.0,
+          "wall_time_ns": 29386898.0
+        },
+        {
+          "details": {
+            "attempts": 10
+          },
+          "run": 2,
+          "value": 10312.5,
+          "wall_time_ns": 27607093.0
+        },
+        {
+          "details": {
+            "attempts": 10
+          },
+          "run": 3,
+          "value": 10822.0,
+          "wall_time_ns": 27552900.0
+        },
+        {
+          "details": {
+            "attempts": 10
+          },
+          "run": 4,
+          "value": 10337.5,
+          "wall_time_ns": 27717783.0
+        },
+        {
+          "details": {
+            "attempts": 10
+          },
+          "run": 5,
+          "value": 10440.7,
+          "wall_time_ns": 27510489.0
+        }
+      ],
+      "statistics": {
+        "maximum": 10822.0,
+        "median": 10426.0,
+        "p95": 10822.0
+      },
+      "status": "measured",
+      "unit": "ns_per_acknowledgement"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "plugin-cleanup",
+        "--iterations",
+        "2",
+        "--sample-plugin",
+        "/home/xn3/Projects/Personal/ASF/AVA/examples/plugins/todo"
+      ],
+      "family": "process",
+      "id": "child_cleanup",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 2,
+            "children_after": 0
+          },
+          "run": 1,
+          "value": 10772000.0,
+          "wall_time_ns": 22576581.0
+        },
+        {
+          "details": {
+            "calls": 2,
+            "children_after": 0
+          },
+          "run": 2,
+          "value": 10718300.0,
+          "wall_time_ns": 22424337.0
+        },
+        {
+          "details": {
+            "calls": 2,
+            "children_after": 0
+          },
+          "run": 3,
+          "value": 10724200.0,
+          "wall_time_ns": 22483994.0
+        },
+        {
+          "details": {
+            "calls": 2,
+            "children_after": 0
+          },
+          "run": 4,
+          "value": 10741600.0,
+          "wall_time_ns": 22507523.0
+        },
+        {
+          "details": {
+            "calls": 2,
+            "children_after": 0
+          },
+          "run": 5,
+          "value": 10763400.0,
+          "wall_time_ns": 22522421.0
+        }
+      ],
+      "statistics": {
+        "maximum": 10772000.0,
+        "median": 10741600.0,
+        "p95": 10772000.0
+      },
+      "status": "measured",
+      "unit": "ns_per_cleanup"
+    },
+    {
+      "exact_command": [
+        "/home/xn3/Projects/Personal/ASF/AVA/build-release/tests/ava_backend_benchmark_helper",
+        "--case",
+        "repeated-memory",
+        "--iterations",
+        "10000"
+      ],
+      "family": "memory",
+      "id": "repeated_call_memory",
+      "note": "Narrow direct-call memory seam: Linux current-RSS delta with peak high-water details; macOS uses an explicitly labeled peak high-water fallback. This is not product-wide memory-stability evidence.",
+      "repetitions": 5,
+      "samples": [
+        {
+          "details": {
+            "calls": 10000,
+            "current_after_kib": 4248.0,
+            "current_before_kib": 4184.0,
+            "current_rss_source": "/proc/self/statm",
+            "measurement": "current_resident_rss_after_minus_before",
+            "page_size_bytes": 4096,
+            "peak_high_water_after_kib": 21784,
+            "peak_high_water_before_kib": 21784,
+            "peak_high_water_delta_kib": 0,
+            "platform_fallback": false
+          },
+          "run": 1,
+          "value": 64.0,
+          "wall_time_ns": 1334728.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "current_after_kib": 4252.0,
+            "current_before_kib": 4188.0,
+            "current_rss_source": "/proc/self/statm",
+            "measurement": "current_resident_rss_after_minus_before",
+            "page_size_bytes": 4096,
+            "peak_high_water_after_kib": 21784,
+            "peak_high_water_before_kib": 21784,
+            "peak_high_water_delta_kib": 0,
+            "platform_fallback": false
+          },
+          "run": 2,
+          "value": 64.0,
+          "wall_time_ns": 1219001.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "current_after_kib": 4196.0,
+            "current_before_kib": 4132.0,
+            "current_rss_source": "/proc/self/statm",
+            "measurement": "current_resident_rss_after_minus_before",
+            "page_size_bytes": 4096,
+            "peak_high_water_after_kib": 21784,
+            "peak_high_water_before_kib": 21784,
+            "peak_high_water_delta_kib": 0,
+            "platform_fallback": false
+          },
+          "run": 3,
+          "value": 64.0,
+          "wall_time_ns": 1204636.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "current_after_kib": 4240.0,
+            "current_before_kib": 4176.0,
+            "current_rss_source": "/proc/self/statm",
+            "measurement": "current_resident_rss_after_minus_before",
+            "page_size_bytes": 4096,
+            "peak_high_water_after_kib": 21784,
+            "peak_high_water_before_kib": 21784,
+            "peak_high_water_delta_kib": 0,
+            "platform_fallback": false
+          },
+          "run": 4,
+          "value": 64.0,
+          "wall_time_ns": 1183435.0
+        },
+        {
+          "details": {
+            "calls": 10000,
+            "current_after_kib": 4440.0,
+            "current_before_kib": 4376.0,
+            "current_rss_source": "/proc/self/statm",
+            "measurement": "current_resident_rss_after_minus_before",
+            "page_size_bytes": 4096,
+            "peak_high_water_after_kib": 21784,
+            "peak_high_water_before_kib": 21784,
+            "peak_high_water_delta_kib": 0,
+            "platform_fallback": false
+          },
+          "run": 5,
+          "value": 64.0,
+          "wall_time_ns": 1176942.0
+        }
+      ],
+      "statistics": {
+        "maximum": 64.0,
+        "median": 64.0,
+        "p95": 64.0
+      },
+      "status": "measured",
+      "unit": "current_rss_delta_kib"
+    },
+    {
+      "closest_current_result": "catalog_entries_1000",
+      "family": "catalog",
+      "id": "selective_router",
+      "reason": "The pre-modernization architecture materializes the full catalog and performs linear registry lookup; no selective router exists yet.",
+      "reason_code": "architecture_not_implemented",
+      "repetitions": 0,
+      "samples": [],
+      "statistics": null,
+      "status": "unsupported"
+    }
+  ],
+  "schema_version": "ava.backend-benchmark.v2"
+}

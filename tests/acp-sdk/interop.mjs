@@ -2,17 +2,20 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
+import readline from "node:readline";
 import { Readable, Writable } from "node:stream";
+import { fileURLToPath } from "node:url";
 
 const MAX_STDERR_BYTES = 16 * 1024;
 const OPERATION_TIMEOUT_MS = 5_000;
 const PROCESS_TIMEOUT_MS = 7_000;
 const FAKE_KEY = "AVA_ACP_INTEROP_FAKE_KEY_NOT_A_SECRET";
+const FAKE_PROVIDER_PY = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "fake_provider.py");
 const activeOwnedProcesses = new Set();
 let signalCleanupStarted = false;
 
@@ -28,13 +31,13 @@ function parseArgs(argv) {
       result.required = true;
       continue;
     }
-    if (!["--ava", "--fake-provider", "--root"].includes(argument) || index + 1 >= argv.length) {
+    if (!["--ava", "--fake-provider", "--python", "--root"].includes(argument) || index + 1 >= argv.length) {
       throw new Error(`unknown or incomplete argument: ${argument}`);
     }
     result[argument.slice(2).replace("fake-provider", "fakeProvider")] = argv[++index];
   }
   if (!result.ava || !result.fakeProvider) {
-    throw new Error("usage: interop.mjs --ava PATH --fake-provider PATH [--root PATH] [--required]");
+    throw new Error("usage: interop.mjs --ava PATH --fake-provider PATH [--python PATH] [--root PATH] [--required]");
   }
   return result;
 }
@@ -213,6 +216,9 @@ async function makeRoots(base, name) {
     workspace: path.join(scenario, "workspace"),
   };
   await Promise.all(Object.values(roots).map((entry) => mkdir(entry, { recursive: true })));
+  // Fixture state must stay owner-only even under a permissive host umask; the
+  // terminal fixture refuses directories other users can enter.
+  await Promise.all(Object.values(roots).map((entry) => chmod(entry, 0o700)));
   return roots;
 }
 
@@ -237,30 +243,25 @@ async function configureModel(roots, supportsTools = false) {
   })}\n`, { mode: 0o600 });
 }
 
-async function waitForPort(portFile, provider) {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    if (existsSync(portFile)) {
-      const value = Number((await readFile(portFile, "utf8")).trim());
-      if (Number.isInteger(value) && value > 0 && value <= 65535) return value;
-    }
-    const exited = await Promise.race([
-      provider.exited.then((result) => ({ result })),
-      new Promise((resolve) => setTimeout(() => resolve(null), 20)),
-    ]);
-    if (exited) throw new Error(`fake provider exited during startup: ${JSON.stringify(exited.result)}`);
-  }
-  throw new Error("fake provider did not publish its loopback port");
-}
-
-async function waitForLog(logFile, needle) {
-  const deadline = Date.now() + 3_000;
-  while (Date.now() < deadline) {
-    const content = await readFile(logFile, "utf8").catch(() => "");
-    if (content.includes(needle)) return content;
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-  throw new Error(`provider log did not contain ${needle}`);
+function brokerChannel(owned) {
+  const pending = [];
+  const queued = [];
+  readline.createInterface({ input: owned.child.stdout }).on("line", (line) => {
+    const waiter = pending.shift();
+    if (waiter) waiter(line);
+    else queued.push(line);
+  });
+  const nextLine = (label, timeoutMs = 15_000) => withDeadline(
+    queued.length ? Promise.resolve(queued.shift()) : new Promise((resolve) => pending.push(resolve)),
+    label,
+    timeoutMs,
+  );
+  const command = async (text, label) => {
+    owned.child.stdin.write(`${text}\n`);
+    const reply = await nextLine(label);
+    if (reply !== "ok") throw new Error(`${label}: fake provider broker replied '${reply}'`);
+  };
+  return { nextLine, command };
 }
 
 async function sdkRequest(ctx, acp, method, params, label = method) {
@@ -285,29 +286,47 @@ function initializeParams(acp, capabilities = {}) {
   };
 }
 
-async function runScenario({ acp, args, base, name, providerScenario, providerTarget = "unused", delayMs = 0, supportsTools = false, app, workflow }) {
+async function runScenario({ acp, args, base, name, providerScenario, providerTarget = "unused", delayMs = 0, supportsTools = false, app, providerEofOnly = false, workflow }) {
   const roots = await makeRoots(base, name);
   await configureModel(roots, supportsTools);
   const providerRoot = path.join(roots.scenario, "provider");
   await mkdir(providerRoot, { recursive: true });
-  const portFile = path.join(providerRoot, "port");
-  const requestLog = path.join(providerRoot, "requests.log");
-  const provider = spawnOwned(
-    path.resolve(args.fakeProvider),
-    [portFile, requestLog, String(delayMs), providerScenario, providerTarget],
-    { env: cleanEnvironment(roots), cwd: roots.workspace },
+  const requestLog = path.join(providerRoot, "provider-requests.log");
+  // The shared standard-library broker owns provider startup, gates, and
+  // cleanup; this harness only speaks its bounded line protocol.
+  const broker = spawnOwned(
+    args.python ?? "python3",
+    [
+      FAKE_PROVIDER_PY,
+      "broker",
+      "--provider", path.resolve(args.fakeProvider),
+      "--directory", providerRoot,
+      "--prefix", "provider",
+      "--delay-ms", String(delayMs),
+      "--scenario", providerScenario,
+      "--target", providerTarget,
+    ],
+    { env: cleanEnvironment(roots), cwd: roots.workspace, stdio: ["pipe", "pipe", "pipe"] },
   );
+  const channel = brokerChannel(broker);
   let ava;
   try {
-    const port = await waitForPort(portFile, provider);
+    const ready = await channel.nextLine(`${name} provider broker ready`);
+    const match = /^ready port=(\d+)$/.exec(ready);
+    if (!match) throw new Error(`${name} provider broker failed: ${ready}`);
+    const port = Number(match[1]);
     ava = spawnOwned(path.resolve(args.ava), ["--acp"], {
       env: cleanEnvironment(roots, port),
       cwd: roots.workspace,
       stdio: ["pipe", "pipe", "pipe"],
     });
+    const providerGate = {
+      waitForRequest: (index, label) => channel.command(`wait ${index} 15`, `${label} provider request ${index}`),
+      releaseRequest: (index, label) => channel.command(`release ${index}`, `${label} provider request ${index} release`),
+    };
     const stream = acp.ndJsonStream(Writable.toWeb(ava.child.stdin), Readable.toWeb(ava.child.stdout));
     const result = await withDeadline(
-      app.connectWith(stream, (ctx) => workflow(ctx, roots, requestLog)),
+      app.connectWith(stream, (ctx) => workflow(ctx, roots, requestLog, providerGate)),
       `${name} SDK connection`,
       18_000,
     );
@@ -319,12 +338,19 @@ async function runScenario({ acp, args, base, name, providerScenario, providerTa
     assert.equal(avaExit.code, 0, `${name} AVA exited ${JSON.stringify(avaExit)}: ${ava.stderr()}`);
     assert.equal(ava.stderr(), "", `${name} AVA stderr was not clean`);
 
-    const providerExit = await withDeadline(provider.exited, `${name} provider exit`, PROCESS_TIMEOUT_MS);
-    assert.equal(providerExit.error, null, `${name} provider spawn failed: ${providerExit.error}`);
-    assert.equal(providerExit.code, 0, `${name} provider exited ${JSON.stringify(providerExit)}: ${provider.stderr()}`);
-    assert.equal(provider.stderr(), "", `${name} provider stderr was not clean`);
+    if (providerEofOnly) {
+      // Cancellation may fail the delayed provider's response write; EOF asks
+      // the broker to reap the provider without asserting its exit status.
+      broker.child.stdin.end();
+    } else {
+      await channel.command("finish 7", `${name} provider broker finish`);
+    }
+    const brokerExit = await withDeadline(broker.exited, `${name} provider broker exit`, PROCESS_TIMEOUT_MS);
+    assert.equal(brokerExit.error, null, `${name} provider broker spawn failed: ${brokerExit.error}`);
+    assert.equal(brokerExit.code, 0, `${name} provider broker exited ${JSON.stringify(brokerExit)}: ${broker.stderr()}`);
+    assert.equal(broker.stderr(), "", `${name} provider broker stderr was not clean`);
     await assertGroupExited(ava.child.pid);
-    await assertGroupExited(provider.child.pid);
+    await assertGroupExited(broker.child.pid);
     return { result, roots, requestLog };
   } finally {
     if (ava) {
@@ -332,9 +358,10 @@ async function runScenario({ acp, args, base, name, providerScenario, providerTa
       await assertGroupExited(ava.child.pid);
       activeOwnedProcesses.delete(ava);
     }
-    await terminateOwned(provider);
-    await assertGroupExited(provider.child.pid);
-    activeOwnedProcesses.delete(provider);
+    broker.child.stdin.destroy();
+    await terminateOwned(broker);
+    await assertGroupExited(broker.child.pid);
+    activeOwnedProcesses.delete(broker);
   }
 }
 
@@ -521,19 +548,22 @@ async function cancellationScenario(acp, args, base) {
     args,
     base,
     name: "cancellation",
-    providerScenario: "text",
-    delayMs: 1_500,
+    providerScenario: "text-delayed",
+    providerEofOnly: true,
     app,
-    workflow: async (ctx, roots, requestLog) => {
+    workflow: async (ctx, roots, requestLog, providerGate) => {
       await sdkRequest(ctx, acp, acp.methods.agent.initialize, initializeParams(acp), "cancel initialize");
       const created = await sdkRequest(ctx, acp, acp.methods.agent.session.new, { cwd: roots.workspace, mcpServers: [] }, "cancel session/new");
       const prompt = sdkRequest(ctx, acp, acp.methods.agent.session.prompt, {
         sessionId: created.sessionId,
         prompt: [{ type: "text", text: "cancel this in-flight turn" }],
       }, "cancel session/prompt");
-      await waitForLog(requestLog, "--- request 1 ---");
+      // The broker gate proves the provider holds the in-flight HTTP request
+      // before session/cancel lands; no time-based delay is involved.
+      await providerGate.waitForRequest(0, "cancellation");
       await sdkNotify(ctx, acp.methods.agent.session.cancel, { sessionId: created.sessionId }, "session/cancel");
       assert.equal((await prompt).stopReason, "cancelled");
+      await providerGate.releaseRequest(0, "cancellation");
       const listed = await sdkRequest(ctx, acp, acp.methods.agent.session.list, {}, "post-cancel session/list");
       assert.ok(listed.sessions.some((entry) => entry.sessionId === created.sessionId), "connection was not usable after cancellation");
       await sdkRequest(ctx, acp, acp.methods.agent.session.close, { sessionId: created.sessionId }, "cancel session/close");

@@ -95,8 +95,10 @@ bool ascii_punctuation(unsigned char ch)
 
 void trim_ascii_punctuation(std::string& word)
 {
-  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.front()))) word.erase(word.begin());
-  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.back()))) word.pop_back();
+  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.front())))
+    word.erase(word.begin());
+  while (!word.empty() && ascii_punctuation(static_cast<unsigned char>(word.back())))
+    word.pop_back();
 }
 
 void remove_tagged_section(std::string& text, std::string_view tag)
@@ -177,9 +179,11 @@ std::string normalized_whitespace(std::string_view text)
 std::string trim_ascii(std::string_view text)
 {
   std::size_t begin = 0;
-  while (begin < text.size() && ascii_space(static_cast<unsigned char>(text[begin]))) ++begin;
+  while (begin < text.size() && ascii_space(static_cast<unsigned char>(text[begin])))
+    ++begin;
   std::size_t end = text.size();
-  while (end > begin && ascii_space(static_cast<unsigned char>(text[end - 1]))) --end;
+  while (end > begin && ascii_space(static_cast<unsigned char>(text[end - 1])))
+    --end;
   return std::string(text.substr(begin, end - begin));
 }
 
@@ -199,7 +203,8 @@ void strip_line_markup(std::string& line)
     trimmed.erase(trimmed.begin());
     trimmed = trim_ascii(trimmed);
   }
-  while (!trimmed.empty() && trimmed.back() == '`') trimmed.pop_back();
+  while (!trimmed.empty() && trimmed.back() == '`')
+    trimmed.pop_back();
   trimmed = trim_ascii(trimmed);
   if (trimmed.size() >= 2 && ((trimmed.front() == '"' && trimmed.back() == '"') || (trimmed.front() == '\'' && trimmed.back() == '\'') ||
                               (trimmed.front() == '`' && trimmed.back() == '`')))
@@ -303,7 +308,7 @@ ava::core::Result<ava::config::ModelInfo> title_model(SessionTitleGenerationRequ
 }
 
 ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequest& generation, std::stop_token stop_token,
-                                                      std::chrono::steady_clock::time_point deadline, SessionTitleTransportFactory const& transport_factory)
+                                                      std::chrono::steady_clock::time_point deadline)
 {
   if (generation.offline)
     return std::unexpected(offline_provider_error("session title generation"));
@@ -331,11 +336,14 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   }
   credentials.offline = generation.offline;
 
-  auto auth_inner = transport_factory();
-  if (!auth_inner)
+  if (!generation.transport_factory)
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport process authority is unavailable"));
+  auto auth_inner = generation.transport_factory();
+  if (!auth_inner || !*auth_inner)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
-  DeadlineTransport auth_transport(std::move(auth_inner), stop_token, deadline);
-  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation", generation.provider_catalog);
+  DeadlineTransport auth_transport(std::move(*auth_inner), stop_token, deadline);
+  auto prepared = prepare_runtime_credentials(generation.paths, model->provider_id, std::move(credentials), auth_transport, "session title generation",
+                                              generation.provider_catalog);
   if (!prepared)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title credentials are unavailable"));
 
@@ -370,10 +378,10 @@ ava::core::Result<std::string> default_generate_title(SessionTitleGenerationRequ
   if (!request)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title request could not be built"));
 
-  auto transport_inner = transport_factory();
-  if (!transport_inner)
+  auto transport_inner = generation.transport_factory();
+  if (!transport_inner || !*transport_inner)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "session title transport is unavailable"));
-  DeadlineTransport transport(std::move(transport_inner), stop_token, deadline);
+  DeadlineTransport transport(std::move(*transport_inner), stop_token, deadline);
   auto response = transport.send(*request, [&] { return stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline; });
   for (auto& [name, value] : request->headers)
   {
@@ -514,7 +522,8 @@ ava::core::Result<std::string> sanitize_generated_session_title(std::string_view
         std::size_t words = 0;
         while (cursor < candidate.size() && words < 10)
         {
-          while (cursor < candidate.size() && candidate[cursor] == ' ') ++cursor;
+          while (cursor < candidate.size() && candidate[cursor] == ' ')
+            ++cursor;
           if (cursor >= candidate.size())
             break;
           auto end_word = candidate.find(' ', cursor);
@@ -557,7 +566,8 @@ std::string fallback_session_title(std::string_view normalized_source)
   std::size_t cursor = 0;
   while (cursor < source.size() && title_words.size() < 10)
   {
-    while (cursor < source.size() && source[cursor] == ' ') ++cursor;
+    while (cursor < source.size() && source[cursor] == ' ')
+      ++cursor;
     auto end = source.find(' ', cursor);
     if (end == std::string::npos)
       end = source.size();
@@ -577,7 +587,8 @@ std::string fallback_session_title(std::string_view normalized_source)
     title_words = {"New", "Conversation"};
   constexpr std::array<std::string_view, 4> kFallbackWords = {"Overview", "and", "Next", "Steps"};
   std::size_t filler = 0;
-  while (title_words.size() < 5) title_words.emplace_back(kFallbackWords[filler++]);
+  while (title_words.size() < 5)
+    title_words.emplace_back(kFallbackWords[filler++]);
 
   std::string title;
   for (auto const& word : title_words)
@@ -594,14 +605,10 @@ std::string fallback_session_title(std::string_view normalized_source)
 
 SessionTitleCoordinator::SessionTitleCoordinator(SessionTitleCoordinatorOptions options) : options_(std::move(options))
 {
-  if (!options_.transport_factory)
-    options_.transport_factory = [] { return std::make_unique<ava::http::CurlCliTransport>(); };
   if (!options_.generator)
   {
-    auto transport_factory = options_.transport_factory;
-    options_.generator = [transport_factory = std::move(transport_factory)](SessionTitleGenerationRequest& request, std::stop_token stop_token,
-                                                                            std::chrono::steady_clock::time_point deadline) {
-      return default_generate_title(request, stop_token, deadline, transport_factory);
+    options_.generator = [](SessionTitleGenerationRequest& request, std::stop_token stop_token, std::chrono::steady_clock::time_point deadline) {
+      return default_generate_title(request, stop_token, deadline);
     };
   }
 }
@@ -638,7 +645,7 @@ void SessionTitleCoordinator::start()
 }
 
 void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_session, std::string_view original_user_text, std::string_view committed_turn_id,
-                                        runtime::RunOptions const& run_options) noexcept
+                                       runtime::RunOptions const& run_options) noexcept
 {
   if (!options_.config.enabled || committed_turn_id.empty())
     return;
@@ -648,25 +655,33 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
       SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
       if (session_r->sessionless() || !session_r->created || !session_r->run_controller() || !session_r->anchor_set())
       {
-        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
-                                        std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
-                                        std::shared_ptr<ava::core::AnchorSet>, std::shared_ptr<ava::provider::ProviderCatalog const>, bool>>{};
+        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink, std::shared_ptr<SessionRunController>, std::string,
+                                        ava::config::XdgPaths, ava::config::ModelInfo, std::shared_ptr<ava::core::AnchorSet>,
+                                        std::shared_ptr<ava::provider::ProviderCatalog const>, bool, ava::http::TransportFactory>>{};
       }
       auto read_authority = session_r->read_authority_1();
       auto append_route = session_r->owner_append_route_1();
       if (!read_authority || !append_route)
       {
-        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink,
-                                        std::shared_ptr<SessionRunController>, std::string, ava::config::XdgPaths, ava::config::ModelInfo,
-                                        std::shared_ptr<ava::core::AnchorSet>, std::shared_ptr<ava::provider::ProviderCatalog const>, bool>>{};
+        return std::optional<std::tuple<ava::session::SessionReadAuthority, ava::agent::SessionAppendSink, std::shared_ptr<SessionRunController>, std::string,
+                                        ava::config::XdgPaths, ava::config::ModelInfo, std::shared_ptr<ava::core::AnchorSet>,
+                                        std::shared_ptr<ava::provider::ProviderCatalog const>, bool, ava::http::TransportFactory>>{};
+      }
+      auto transport_factory = options_.transport_factory;
+      if (!transport_factory && session_r->session_process_scope())
+      {
+        transport_factory = [scope = *session_r->session_process_scope()]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+          std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>(scope);
+          return transport;
+        };
       }
       return std::optional{std::tuple{std::move(*read_authority), std::move(append_route), session_r->run_controller(),
                                       std::string(session_r->store.session_id()), session_r->paths(), session_r->model(), session_r->anchor_set(),
-                                      session_r->provider_catalog(), session_r->is_offline()}};
+                                      session_r->provider_catalog(), session_r->is_offline(), std::move(transport_factory)}};
     }();
     if (!session_snapshot)
       return;
-    auto [read_authority, append_route, run_controller, session_id, paths, active_model, anchor_set, provider_catalog, session_offline] =
+    auto [read_authority, append_route, run_controller, session_id, paths, active_model, anchor_set, provider_catalog, session_offline, transport_factory] =
         std::move(*session_snapshot);
     {
       std::lock_guard lock(mutex_);
@@ -697,7 +712,8 @@ void SessionTitleCoordinator::schedule(runtime::session_ts const& unlocked_sessi
                                                        .credential_type = run_options.credential_type,
                                                        .account_id = run_options.openai_account_id,
                                                        .openai_oauth = run_options.openai_oauth,
-                                                       .offline = session_offline || run_options.offline}};
+                                                       .offline = session_offline || run_options.offline,
+                                                       .transport_factory = std::move(transport_factory)}};
     std::lock_guard lock(mutex_);
     if (!accepting_ || queue_.size() >= options_.max_queued)
     {
@@ -826,8 +842,10 @@ void SessionTitleCoordinator::shutdown() noexcept
     if (!accepting_ && workers_.empty())
       return;
     accepting_ = false;
-    for (auto& worker : workers_) worker.request_stop();
-    for (auto& work : queue_) clear_secret(work.request.access_token);
+    for (auto& worker : workers_)
+      worker.request_stop();
+    for (auto& work : queue_)
+      clear_secret(work.request.access_token);
     queue_.clear();
     active_session_ids_.clear();
     workers.swap(workers_);

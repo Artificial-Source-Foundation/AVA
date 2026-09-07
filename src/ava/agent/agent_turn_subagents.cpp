@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -153,6 +154,26 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     return std::unexpected(std::move(error));
   }
 
+  std::optional<ava::process::ProcessScopeV1> child_run_process_scope;
+  if (options_.tool_execution.process_scope)
+  {
+    auto child_session_scope = options_.tool_execution.process_scope->application_scope().session();
+    if (!child_session_scope)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive task subagent session process authority");
+      error.with_context("cause", child_session_scope.error().message());
+      return std::unexpected(std::move(error));
+    }
+    auto child_run_scope = child_session_scope->run();
+    if (!child_run_scope)
+    {
+      auto error = ava::core::Error(ava::core::ErrorCategory::Configuration, "failed to derive task subagent run process authority");
+      error.with_context("cause", child_run_scope.error().message());
+      return std::unexpected(std::move(error));
+    }
+    child_run_process_scope = std::move(*child_run_scope);
+  }
+
   auto child_store_result = request.task_id ? ava::session::SessionStore::open(options_.workspace_dir, *request.task_id, session_root)
                                             : ava::session::SessionStore::create(options_.workspace_dir, session_root);
   if (!child_store_result)
@@ -191,6 +212,7 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
     return std::unexpected(std::move(child_read_authority.error()));
 
   auto child_options = options_;
+  child_options.tool_execution.process_scope = std::move(child_run_process_scope);
   // A child owns a distinct exact session namespace. Preserve the parent
   // roots and add the child directory before its AgentLoop constructs any
   // model ToolContext; duplicates remain bounded and harmless.
@@ -326,7 +348,9 @@ ava::core::Result<TaskSubagentResult> AgentTurnExecutor::run_task_subagent(TaskS
         std::shared_ptr<SubagentInteractionGate> gate;
         ~FinishInteractionGate() { gate->finish(); }
       } finish_gate{run_state->interaction_gate};
-      run_state->child_options.cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+      std::function<bool()> child_cancel_requested = [stop_token = context.stop_token] { return stop_token.stop_requested(); };
+      run_state->child_options.cancel_requested = child_cancel_requested;
+      run_state->child_options.tool_execution.cancel_requested = std::move(child_cancel_requested);
       AgentLoop child_loop(std::move(run_state->child_options));
       auto child_result = child_loop.run_turn(run_state->prompt, run_state->child_store, *run_state->provider_instance, *run_state->transport_instance);
       if (!child_result)

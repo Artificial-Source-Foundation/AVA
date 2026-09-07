@@ -5,13 +5,15 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/tui_test_support.h"
 #include "ava/http/transport.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/app/command_catalog.h"
 #include "ava/app/command_palette.h"
 #include "ava/app/commands.h"
 #include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
-#include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/OpenContext.h"
+#include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/agent/agent_loop.h"
 #include "ava/agent/tool_dispatcher.h"
@@ -25,10 +27,14 @@
 #include "ava/core/result.h"
 
 #include <algorithm>
+#include <chrono>
 #include <filesystem>
+#include <future>
+#include <memory>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 #ifndef AVA_FAKE_MCP_SERVER_PATH
@@ -38,6 +44,19 @@
 namespace ava::tests::app_runtime_tests {
 
 using namespace ava::tests;
+using namespace std::chrono_literals;
+
+bool wait_for_app_plugin_path(std::filesystem::path const& path, std::chrono::milliseconds timeout = 2s)
+{
+  auto const deadline = std::chrono::steady_clock::now() + timeout;
+  while (std::chrono::steady_clock::now() < deadline)
+  {
+    if (std::filesystem::exists(path))
+      return true;
+    std::this_thread::sleep_for(10ms);
+  }
+  return std::filesystem::exists(path);
+}
 
 std::string shell_single_quoted(std::string_view value)
 {
@@ -83,6 +102,21 @@ std::string app_plugin_resource_manifest_json(std::string_view id, std::string_v
          "\"}]\n"
          "  }\n"
          "}";
+}
+
+std::string app_plugin_event_cancel_manifest_json()
+{
+  return R"({
+  "schema_version": 1,
+  "id": "com.example.run-cancel-event",
+  "name": "Run cancellation event fixture",
+  "version": "0.1.0",
+  "api_version": "ava.plugin.v1",
+  "description": "runtime run cancellation fixture",
+  "entrypoint": {"command": "/bin/sh", "args": ["hook.sh"]},
+  "capabilities": ["event_hooks"],
+  "contributes": {"event_hooks": [{"event": "session.start"}]}
+})";
 }
 
 std::string app_plugin_install_manifest_json(std::string_view id, std::string_view name, std::filesystem::path const& marker_path)
@@ -578,6 +612,103 @@ void test_app_runtime_plugin_install_remove_commands()
                !has_install_staging_residue("com.example.symlinkparent") && !std::filesystem::exists(symlink_parent_marker),
            "plugin install rejects a plugin.json path whose parent is a symlink without creating destination or staging residue");
   }
+}
+
+void test_runtime_plugin_event_hook_uses_admitted_run_cancellation_scope()
+{
+  if (ava::process::platform_support_v1() != ava::process::PlatformSupportV1::Posix)
+  {
+    expect(true, "runtime plugin event cancellation is intentionally unsupported on this platform");
+    return;
+  }
+  auto const root = create_empty_root("app-runtime-plugin-event-run-cancel");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  auto const plugin_dir = workspace / ".ava" / "plugins" / "com.example.run-cancel-event";
+  auto const observed_marker = root / "event-observed";
+  auto const side_effect_marker = root / "post-cancel-side-effect";
+  std::filesystem::create_directories(workspace);
+
+  auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(trusted.has_value(), trusted ? "runtime event cancellation fixture trusts project plugins" : trusted.error().format());
+  write_app_test_file(plugin_dir / "plugin.json", app_plugin_event_cancel_manifest_json());
+  write_app_test_file(plugin_dir / "hook.sh",
+                      "#!/bin/sh\n"
+                      "IFS= read -r initialize || exit 2\n"
+                      "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava.plugin.v1\","
+                      "\"plugin_version\":\"1.0\",\"contributions\":{}}'\n"
+                      "IFS= read -r event || exit 3\n"
+                      "printf observed > " +
+                          shell_single_quoted(observed_marker.string()) +
+                          "\n"
+                          "sleep 1\n"
+                          "printf side-effect > " +
+                          shell_single_quoted(side_effect_marker.string()) +
+                          "\n"
+                          "printf '%s\\n' '{\"id\":\"ava_2\",\"type\":\"event.observed\",\"ok\":true}'\n"
+                          "while IFS= read -r line; do :; done\n");
+  auto enabled = ava::plugin::set_plugin_enabled(paths.ava_state_dir / "plugin-enablement.json", workspace, "com.example.run-cancel-event", true,
+                                                 ava::plugin::PluginScope::Project);
+  expect(enabled.has_value(), enabled ? "runtime event cancellation fixture enables its plugin" : enabled.error().format());
+
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto application_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(application_scope.has_value(),
+         application_scope ? "runtime event cancellation fixture creates application process scope" : application_scope.error().format());
+  if (!trusted || !enabled || !application_scope)
+    return;
+
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  open_context.application_process_scope = *application_scope;
+  auto session = ava::app::runtime::Session::open(open_context);
+  expect(session.has_value(), session ? "runtime event cancellation fixture opens a scoped session" : session.error().format());
+  if (!session)
+    return;
+
+  std::shared_ptr<ava::app::SessionRunController> controller;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *session);
+    controller = session_r->run_controller();
+  }
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({});
+  ava::app::runtime::RunOptions options;
+  options.access_token = "fake";
+  options.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
+    return ava::permissions::PermissionResolution::Allow;
+  };
+
+  auto run = std::async(std::launch::async, [&] { return ava::app::run_prompt(*session, "cancel the event hook", provider, transport, options); });
+  bool const hook_observed = wait_for_app_plugin_path(observed_marker);
+  auto stopped = controller ? controller->request_stop()
+                            : ava::core::Result<bool>(std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "missing run controller")));
+  bool const prompt_settlement = run.wait_for(2s) == std::future_status::ready;
+  if (!prompt_settlement)
+  {
+    static_cast<void>(supervisor->request_stop(application_scope->owner_prefix(), ava::process::TerminationReasonV1::ApplicationShutdown,
+                                               std::chrono::steady_clock::now() + 2s));
+  }
+  auto run_result = run.get();
+  std::this_thread::sleep_for(1100ms);
+
+  auto snapshot = supervisor->snapshot();
+  std::vector<ava::process::ProcessSnapshotRecordV1> plugin_records;
+  for (auto const& record : snapshot.records)
+    if (record.role == ava::process::ProcessRoleV1::Plugin)
+      plugin_records.push_back(record);
+  bool const canceled_once = plugin_records.size() == 1 && plugin_records.front().state == ava::process::ProcessStateV1::Finished &&
+                             plugin_records.front().reason == ava::process::TerminationReasonV1::Canceled &&
+                             plugin_records.front().cleanup == ava::process::CleanupStateV1::Complete && plugin_records.front().settlement_count == 1;
+  expect(hook_observed && stopped && *stopped && prompt_settlement && !run_result && canceled_once && snapshot.live_records == 0 &&
+             !std::filesystem::exists(side_effect_marker) && transport.requests().empty(),
+         "SessionRunController stop alone cancels a hanging event hook in the admitted run scope with one complete Plugin settlement and no later side effect");
+
+  supervisor->stop_accepting();
+  auto const shutdown = supervisor->shutdown(std::chrono::steady_clock::now() + 2s);
+  expect(shutdown.complete, "runtime event cancellation fixture leaves Supervisor cleanup complete");
 }
 
 void test_app_context_reports_lsp_config_load_errors()

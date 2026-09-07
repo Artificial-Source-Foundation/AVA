@@ -1,5 +1,4 @@
 #include "sys.h"
-#include "ava/http/curl_transport.h"
 #include "ava/tools/webfetch_tool.h"
 #include "ava/core/string_utils.h"
 
@@ -561,17 +560,31 @@ ava::core::Result<WebFetchResult> webfetch(ToolContext const& context, std::stri
     resolve_hosts.push_back(safe_url->host + ":" + safe_url->port + ":" + *resolved);
   }
 
-  ava::http::CurlCliTransport default_transport;
-  auto& transport = options.transport ? *options.transport : static_cast<ava::http::Transport&>(default_transport);
-  auto response = transport.send(ava::http::HttpRequest{.method = "GET",
-                                                        .url = safe_url->url,
-                                                        .headers = {{"Accept", accept_header(options.format)}, {"User-Agent", "AVA/1.0 webfetch"}},
-                                                        .body = "",
-                                                        .timeout_ms = timeout_ms,
-                                                        .follow_redirects = false,
-                                                        .include_response_headers = true,
-                                                        .resolve_hosts = std::move(resolve_hosts)},
-                                 context.cancel_requested);
+  std::unique_ptr<ava::http::Transport> owned_transport;
+  ava::http::Transport* transport = options.transport;
+  if (transport == nullptr)
+  {
+    if (!context.transport_factory)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Configuration, "webfetch transport process authority is unavailable"));
+    }
+    auto created = context.transport_factory();
+    if (!created)
+      return std::unexpected(std::move(created.error()));
+    if (!*created)
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Configuration, "webfetch transport is unavailable"));
+    owned_transport = std::move(*created);
+    transport = owned_transport.get();
+  }
+  auto response = transport->send(ava::http::HttpRequest{.method = "GET",
+                                                         .url = safe_url->url,
+                                                         .headers = {{"Accept", accept_header(options.format)}, {"User-Agent", "AVA/1.0 webfetch"}},
+                                                         .body = "",
+                                                         .timeout_ms = timeout_ms,
+                                                         .follow_redirects = false,
+                                                         .include_response_headers = true,
+                                                         .resolve_hosts = std::move(resolve_hosts)},
+                                  context.cancel_requested);
   if (!response)
     return std::unexpected(std::move(response.error()));
   if (context.cancel_requested && context.cancel_requested())

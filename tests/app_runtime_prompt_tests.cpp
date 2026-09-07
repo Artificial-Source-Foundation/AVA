@@ -7,14 +7,17 @@
 #include "ava/http/transport.h"
 #include "ava/observability/run_observer.h"
 #include "ava/app/clipboard_image.h"
+#include "ava/app/commands.h"
 #include "ava/app/interactive_run_queue.h"
 #include "ava/app/onboarding.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/rpc/serialization.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/OpenContext.h"
 #include "ava/app/runtime/RunOptions.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/runtime_retry.h"
+#include "ava/app/subagent_delivery_manager.h"
 #include "ava/agent/mode.h"
 #include "ava/plugin/diagnostics.h"
 #include "ava/plugin/enablement.h"
@@ -29,11 +32,13 @@
 #include "ava/provider/openai_provider.h"
 #include "ava/provider/provider.h"
 #include "ava/core/error.h"
+#include "ava/core/path.h"
 #include "ava/core/result.h"
 #include "ava/core/thread.h"
 
 #include <algorithm>
 #include <atomic>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <expected>
@@ -42,6 +47,7 @@
 #include <iterator>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -118,7 +124,8 @@ void test_debug_session_mutex_tracks_current_thread()
   std::atomic<bool> worker_finished = false;
   {
     auto worker = ava::core::JoinThread::create("join_thread_test", [&worker_finished](std::stop_token stop_token) {
-      while (!stop_token.stop_requested()) std::this_thread::yield();
+      while (!stop_token.stop_requested())
+        std::this_thread::yield();
       worker_finished.store(true, std::memory_order_release);
     });
   }
@@ -352,6 +359,740 @@ void test_app_run_prompt_isolates_ambient_extensions()
          "exact isolated composition allocates an empty immutable MCP config when the session config is null");
   expect(ava::app::runtime::session_ts::rat(unlocked_session)->system_prompt() == ordinary_prompt,
          "isolated runtime requests leave the ordinary session system prompt unchanged");
+}
+
+void test_project_primary_revocation_removes_authority_without_broadening_tools()
+{
+  constexpr std::string_view kAgentName = "layered-security-primary";
+  constexpr std::string_view kGlobalCanary = "GLOBAL_PRIMARY_SURVIVAL_CANARY_58cc";
+  constexpr std::string_view kInitialProjectCanary = "PROJECT_PRIMARY_REVOKE_CANARY_47e1";
+  constexpr std::string_view kReselectedProjectCanary = "PROJECT_PRIMARY_RESELECT_CANARY_715b";
+  constexpr std::string_view kReloadedProjectCanary = "PROJECT_PRIMARY_RELOAD_CANARY_a92d";
+
+  auto const root = create_empty_root("app-runtime-project-primary-revocation");
+  auto const workspace = root / "workspace";
+  auto const home = root / "home";
+  auto const paths = app_test_paths(root);
+  auto const global_primary_path = paths.ava_config_dir / "agents" / "layered-security-primary.md";
+  auto const project_primary_path = workspace / ".ava" / "agents" / "layered-security-primary.md";
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(home);
+
+  ScopedEnvVar home_env("HOME", home.string());
+  ScopedEnvVar config_env("XDG_CONFIG_HOME", paths.config_home.string());
+  ScopedEnvVar state_env("XDG_STATE_HOME", paths.state_home.string());
+  ScopedEnvVar data_env("XDG_DATA_HOME", paths.data_home.string());
+
+  auto write_global_primary = [&] {
+    write_app_test_file(global_primary_path,
+                        "---\nname: layered-security-primary\ndescription: Global fallback primary.\nmode: primary\ntools: inherit\n---\n"
+                        "GLOBAL_PRIMARY_SURVIVAL_CANARY_58cc\n");
+  };
+  auto write_project_primary = [&](std::string_view canary, std::string_view tools) {
+    write_app_test_file(project_primary_path, "---\nname: layered-security-primary\ndescription: Project authority canary.\nmode: primary\ntools: " +
+                                                  std::string(tools) + "\n---\n" + std::string(canary) + "\n");
+  };
+  write_global_primary();
+  write_project_primary(kInitialProjectCanary, "read-only");
+  auto initially_trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(initially_trusted.has_value(), "project-primary revocation fixture starts trusted");
+
+  ava::app::runtime::OpenContext open_context;
+  open_context.workspace_dir = workspace;
+  open_context.current_dir = workspace;
+  open_context.paths = paths;
+  open_context.requested_primary_agent = std::string(kAgentName);
+  auto unlocked_session_result = ava::app::runtime::Session::open(open_context);
+  expect(unlocked_session_result.has_value(), unlocked_session_result
+                                                  ? "trusted runtime selects the project primary"
+                                                  : "trusted runtime selects the project primary: " + unlocked_session_result.error().format());
+  if (!unlocked_session_result)
+    return;
+  auto& unlocked_session = *unlocked_session_result;
+
+  auto restricted_tools_are_retained = [](ava::agent::ToolVisibilityOptions const& visibility) {
+    return visibility.mode == ava::agent::ToolVisibilityMode::Default &&
+           visibility.included_tools == std::vector<std::string>({"read_file", "list_directory", "glob", "grep"}) && visibility.excluded_tools.empty();
+  };
+  auto expect_project_selection = [&](std::string_view canary, ava::agent::SubagentToolPreset preset, std::string_view label) {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    auto const& selected = session_r->selected_primary_agent();
+    expect(selected && selected->provenance == ava::agent::SubagentDefinitionProvenance::Project && selected->tool_preset == preset &&
+               selected->system_prompt.find(canary) != std::string::npos && session_r->requested_primary_agent() == std::optional<std::string>(kAgentName) &&
+               session_r->system_prompt().find(canary) != std::string::npos &&
+               session_r->ambient_extension_free_system_prompt().find(canary) != std::string::npos &&
+               session_r->system_prompt().find(kGlobalCanary) == std::string::npos && restricted_tools_are_retained(session_r->tool_visibility()),
+           std::string(label));
+  };
+  auto expect_project_authority_absent = [&](bool expect_global_fallback, std::string_view label) {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    auto const& selected = session_r->selected_primary_agent();
+    bool const selection_safe = expect_global_fallback ? selected && selected->provenance == ava::agent::SubagentDefinitionProvenance::Global &&
+                                                             selected->system_prompt.find(kGlobalCanary) != std::string::npos
+                                                       : !selected;
+    auto const prompts_safe = [&](std::string const& prompt) {
+      return prompt.find(kInitialProjectCanary) == std::string::npos && prompt.find(kReselectedProjectCanary) == std::string::npos &&
+             prompt.find(kReloadedProjectCanary) == std::string::npos &&
+             (expect_global_fallback ? prompt.find(kGlobalCanary) != std::string::npos : prompt.find(kGlobalCanary) == std::string::npos);
+    };
+    expect(selection_safe && session_r->requested_primary_agent() == std::optional<std::string>(kAgentName) && prompts_safe(session_r->system_prompt()) &&
+               prompts_safe(session_r->ambient_extension_free_system_prompt()) && restricted_tools_are_retained(session_r->tool_visibility()),
+           std::string(label));
+  };
+  auto run_trust = [&](std::string command, std::string_view label) {
+    auto result = ava::app::run_command(unlocked_session, ava::app::CommandRequest{.command = std::move(command)});
+    expect(result && result->handled && !result->output.empty(), std::string(label));
+    return result;
+  };
+
+  expect_project_selection(kInitialProjectCanary, ava::agent::SubagentToolPreset::ReadOnly,
+                           "trusted startup records project provenance and applies its closed read-only visibility");
+
+  auto denied = run_trust("/trust deny", "/trust deny succeeds when replacing a project primary with the permitted global definition");
+  expect(denied && denied->output[0].find("decision=denied") != std::string::npos, "/trust deny reports the applied denied decision");
+  expect_project_authority_absent(true, "/trust deny removes both project-primary prompt variants and preserves the prior effective tool restriction");
+
+  write_project_primary(kReselectedProjectCanary, "inherit");
+  auto reenabled = run_trust("/trust project", "/trust project re-enables and re-resolves the requested primary");
+  expect(reenabled && reenabled->output[0].find("decision=trusted") != std::string::npos, "/trust project reports the re-enabled trust decision");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "trust re-enable uses the current permitted project definition without broadening the previous read-only visibility");
+
+  std::error_code remove_global_error;
+  std::filesystem::remove(global_primary_path, remove_global_error);
+  expect(!remove_global_error, "project-primary revocation fixture removes its global fallback before clear");
+  auto cleared = run_trust("/trust clear", "/trust clear succeeds when the requested project-only primary becomes unavailable");
+  expect(cleared && cleared->output[0].find("decision=unknown") != std::string::npos, "/trust clear reports the applied unknown decision");
+  expect_project_authority_absent(false, "/trust clear falls back to no primary while retaining the previous effective tool restriction");
+
+  auto replacement_result = ava::app::runtime::Session::create_like(unlocked_session, {});
+  expect(replacement_result.has_value(),
+         replacement_result
+             ? "replacement session tolerates an inherited requested primary that is unavailable while untrusted"
+             : "replacement session tolerates an inherited requested primary that is unavailable while untrusted: " + replacement_result.error().format());
+  if (replacement_result)
+  {
+    SCOPED_CRITICAL_AREA_R(replacement_r, *replacement_result);
+    expect(!replacement_r->selected_primary_agent() && replacement_r->requested_primary_agent() == std::optional<std::string>(kAgentName) &&
+               replacement_r->system_prompt().find(kInitialProjectCanary) == std::string::npos &&
+               replacement_r->system_prompt().find(kReselectedProjectCanary) == std::string::npos &&
+               replacement_r->tool_visibility().mode == ava::agent::ToolVisibilityMode::Default && replacement_r->tool_visibility().included_tools.empty(),
+           "a new replacement session preserves selection intent but resets the prior session's sticky tool restriction at the session boundary");
+  }
+
+  write_global_primary();
+  (void)run_trust("/trust project", "/trust project re-enables the project primary after clear");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "project primary is reselected after clear when trust is explicitly enabled again");
+  (void)run_trust("/trust untrust", "/trust untrust revokes a reselected project primary");
+  expect_project_authority_absent(true, "/trust untrust removes project authority and preserves the valid global primary");
+
+  auto externally_trusted = ava::app::set_project_trust_decision(paths, workspace, true);
+  expect(externally_trusted.has_value(), "project-primary fixture externally re-enables trust for reload coverage");
+  (void)run_trust("/reload trust", "/reload trust applies external trust enablement");
+  expect_project_selection(kReselectedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "/reload trust re-resolves the requested primary from the newly permitted project catalog");
+
+  write_project_primary(kReloadedProjectCanary, "inherit");
+  (void)run_trust("/reload trust", "/reload trust refreshes a trusted primary definition");
+  expect_project_selection(kReloadedProjectCanary, ava::agent::SubagentToolPreset::Inherit,
+                           "/reload trust never accepts the cached project definition across a trust reload");
+
+  auto externally_denied = ava::app::set_project_trust_decision(paths, workspace, false);
+  expect(externally_denied.has_value(), "project-primary fixture externally denies trust for reload coverage");
+  (void)run_trust("/reload trust", "/reload trust applies external denial");
+  expect_project_authority_absent(true, "/reload trust to untrusted atomically replaces project authority with the permitted global primary");
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{
+      .status_code = 200,
+      .headers = {},
+      .body = "data: {\"type\":\"response.output_text.delta\",\"delta\":\"revoked authority absent\"}\n\n"
+              "data: [DONE]\n\n",
+  }});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  auto provider_result = ava::app::run_prompt(unlocked_session, "verify revoked primary", provider, transport, run_options);
+  expect(provider_result && provider_result->final_text == "revoked authority absent" && transport.requests().size() == 1,
+         "a provider request runs after project-primary revocation");
+  if (transport.requests().size() == 1)
+  {
+    auto const& request = transport.requests().front().body;
+    expect(request.find(kInitialProjectCanary) == std::string::npos && request.find(kReselectedProjectCanary) == std::string::npos &&
+               request.find(kReloadedProjectCanary) == std::string::npos && request.find(kGlobalCanary) != std::string::npos,
+           "the next provider request cannot observe any revoked project-primary prompt content and retains the global primary");
+    expect(request.find("\"name\":\"read_file\"") != std::string::npos && request.find("\"name\":\"write_file\"") == std::string::npos &&
+               request.find("\"name\":\"bash\"") == std::string::npos,
+           "the next provider request retains read tools without silently restoring broader mutation or shell tools");
+  }
+
+  write_app_test_file(global_primary_path,
+                      "---\nname: layered-security-primary\ndescription: Restricted global fallback.\nmode: primary\ntools: read-only\n---\n"
+                      "GLOBAL_PRIMARY_SURVIVAL_CANARY_58cc\n");
+  write_project_primary(kReloadedProjectCanary, "inherit");
+  expect(ava::app::set_project_trust_decision(paths, workspace, true).has_value(), "inverse preset fixture restores project trust on disk");
+  auto inverse_opened = ava::app::runtime::Session::open(open_context);
+  bool inverse_starts_broad = false;
+  if (inverse_opened)
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *inverse_opened);
+    inverse_starts_broad = session_r->selected_primary_agent() &&
+                           session_r->selected_primary_agent()->provenance == ava::agent::SubagentDefinitionProvenance::Project &&
+                           session_r->tool_visibility().included_tools.empty();
+  }
+  auto inverse_denied = inverse_opened ? ava::app::run_command(*inverse_opened, ava::app::CommandRequest{.command = "/trust deny"})
+                                       : ava::core::Result<ava::app::CommandResult>(std::unexpected(inverse_opened.error()));
+  bool inverse_narrowed = false;
+  if (inverse_opened)
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *inverse_opened);
+    inverse_narrowed = session_r->selected_primary_agent() &&
+                       session_r->selected_primary_agent()->provenance == ava::agent::SubagentDefinitionProvenance::Global &&
+                       restricted_tools_are_retained(session_r->tool_visibility());
+  }
+  expect(inverse_opened && inverse_starts_broad && inverse_denied && inverse_narrowed,
+         "inverse project-inherit/global-read-only presets narrow on revocation while the project-read-only/global-inherit case never broadened");
+}
+
+void test_clear_trust_retires_only_for_effective_untrusted_state()
+{
+  auto const root = create_empty_root("app-runtime-clear-effective-trust");
+  auto const ancestor = root / "ancestor";
+  auto const workspace = ancestor / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  expect(ava::app::set_project_trust_decision(paths, ancestor, true) && ava::app::set_project_trust_decision(paths, workspace, true),
+         "clear-effective fixture starts with trusted ancestor and exact trusted decision");
+
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  auto opened = ava::app::runtime::Session::open(context);
+  if (!opened)
+  {
+    expect(false, "clear-effective fixture opens");
+    return;
+  }
+  auto& session = *opened;
+  auto inherited_controller = ava::app::runtime::session_ts::rat(session)->run_controller();
+  auto inherited_clear = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust clear"});
+  bool inherited_trusted = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    inherited_trusted = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Trusted &&
+                        session_r->project_trust().matched_path == ava::core::normalized_absolute_path(ancestor) &&
+                        session_r->run_controller() == inherited_controller;
+  }
+  expect(inherited_clear && inherited_trusted && !inherited_controller->authority_retired(),
+         "clearing an exact decision that reveals a trusted ancestor keeps the current controller and ordinary refresh behavior");
+
+  auto denied = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  expect(denied && inherited_controller->authority_retired(), "explicit denial retires the pre-denial trusted controller");
+  auto before_untrusted_clear = ava::app::runtime::session_ts::rat(session)->run_controller();
+  expect(ava::app::clear_project_trust_decision(paths, ancestor).has_value(),
+         "clear-effective fixture removes the ancestor while the exact workspace denial remains effective");
+  auto untrusted_clear = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust clear"});
+  bool effective_unknown = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    effective_unknown = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Unknown &&
+                        session_r->run_controller() != before_untrusted_clear && !session_r->run_controller()->authority_retired();
+  }
+  expect(untrusted_clear && effective_unknown && before_untrusted_clear->authority_retired(),
+         "clearing the final effective decision to unknown performs the same permanent authority retirement transaction");
+}
+
+void test_untrusted_mutation_rejects_active_run_and_append_before_write()
+{
+  auto const root = create_empty_root("app-runtime-revocation-admission-conflicts");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  expect(ava::app::set_project_trust_decision(paths, workspace, true).has_value(), "revocation-conflict fixture starts trusted");
+
+  std::mutex append_mutex;
+  std::condition_variable append_changed;
+  bool append_entered = false;
+  bool release_append = false;
+  auto store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
+  auto lease = store ? ava::session::SessionLease::create_and_acquire(store->session_path())
+                     : ava::core::Result<ava::session::SessionLease>(std::unexpected(store.error()));
+  if (store)
+  {
+    store->set_before_append_identity_check_for_test([&] {
+      std::unique_lock lock(append_mutex);
+      append_entered = true;
+      append_changed.notify_all();
+      append_changed.wait(lock, [&] { return release_append; });
+    });
+  }
+
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  auto opened = store && lease ? ava::app::runtime::Session::open_owned(context, *store, *lease, true)
+                               : ava::core::Result<ava::app::runtime::session_ts>(std::unexpected(store ? lease.error() : store.error()));
+  if (!opened)
+  {
+    expect(false, "revocation-conflict fixture opens a runtime session");
+    return;
+  }
+  auto& session = *opened;
+  auto controller = ava::app::runtime::session_ts::rat(session)->run_controller();
+  auto active = controller->admit({.request_id = "provider-run-conflict"});
+  auto denied_during_run = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto trust_after_run_conflict = ava::app::load_project_trust_state(paths, workspace);
+  expect(active && !denied_during_run && trust_after_run_conflict.decision == ava::app::ProjectTrustDecision::Trusted && !controller->authority_retired(),
+         "an admitted provider run makes revocation fail before persistence without retiring the current controller");
+  if (active)
+    static_cast<void>(active->complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError}));
+
+  ava::agent::SessionAppendSink owner_route;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    owner_route = session_r->owner_append_route_1();
+  }
+  std::optional<ava::core::VoidResult> append_result;
+  std::jthread appender([&] {
+    append_result.emplace(owner_route(ava::session::SessionEntry{.id = "revocation-append-conflict",
+                                                                 .parent_id = "",
+                                                                 .type = ava::session::EntryType::UserMessage,
+                                                                 .timestamp = ava::session::now_timestamp(),
+                                                                 .data_json = "{\"text\":\"append conflict\"}"}));
+  });
+  {
+    std::unique_lock lock(append_mutex);
+    expect(append_changed.wait_for(lock, std::chrono::seconds(3), [&] { return append_entered; }),
+           "owner append reaches deterministic in-flight persistence gate");
+  }
+  auto denied_during_append = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto trust_after_append_conflict = ava::app::load_project_trust_state(paths, workspace);
+  expect(!denied_during_append && trust_after_append_conflict.decision == ava::app::ProjectTrustDecision::Trusted && !controller->authority_retired(),
+         "an in-flight owner append makes revocation fail before persistence and leaves controller authority unchanged");
+  {
+    std::lock_guard lock(append_mutex);
+    release_append = true;
+  }
+  append_changed.notify_all();
+  appender.join();
+  expect(append_result && append_result->has_value(), "the append that won revocation arbitration persists normally");
+
+  auto denied_after_idle = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  expect(denied_after_idle && ava::app::load_project_trust_state(paths, workspace).decision == ava::app::ProjectTrustDecision::Denied &&
+             controller->authority_retired(),
+         "the same revocation persists and retires old authority once run and append activity are idle");
+}
+
+void test_post_persistence_publication_failure_leaves_reopen_required()
+{
+  constexpr std::string_view kProjectCanary = "PUBLICATION_FAILURE_PROJECT_CANARY_2a14";
+  auto const root = create_empty_root("app-runtime-revocation-publication-failure");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  write_app_test_file(workspace / ".ava" / "APPEND_SYSTEM.md", std::string(kProjectCanary) + "\n");
+  expect(ava::app::set_project_trust_decision(paths, workspace, true).has_value(), "publication-failure fixture starts trusted");
+
+  auto coordinator = ava::agent::SubagentCoordinator::create();
+  if (!coordinator)
+    return;
+  auto manager =
+      ava::app::SubagentDeliveryManager::create({.coordinator = *coordinator, .revocation_before_publication_for_test = []() -> ava::core::VoidResult {
+                                                   return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "injected publication failure"));
+                                                 }});
+  if (!manager)
+    return;
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  context.subagent_coordinator = *coordinator;
+  context.subagent_delivery_manager = *manager;
+  auto opened = ava::app::runtime::Session::open(context);
+  if (!opened)
+    return;
+  auto& session = *opened;
+  auto old_controller = ava::app::runtime::session_ts::rat(session)->run_controller();
+  auto denied = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto const persisted = ava::app::load_project_trust_state(paths, workspace);
+
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  ava::app::runtime::RunOptions options;
+  options.access_token = "fake";
+  auto run = ava::app::run_prompt(session, "must require reopen", provider, transport, options);
+  auto current_controller = ava::app::runtime::session_ts::rat(session)->run_controller();
+  expect(!denied && denied.error().format().find(workspace.string()) == std::string::npos &&
+             denied.error().format().find(kProjectCanary) == std::string::npos && persisted.decision == ava::app::ProjectTrustDecision::Denied &&
+             current_controller == old_controller && old_controller->authority_retired() && !run && transport.requests().empty(),
+         "a post-persistence publication failure never restores trusted disk, retires old and fresh authority, and leaves current transport reopen-required");
+  (*manager)->shutdown();
+}
+
+void test_session_construction_linearizes_with_workspace_revocation()
+{
+  constexpr std::string_view kProjectCanary = "CONSTRUCTION_RACE_PROJECT_CANARY_14b7";
+  auto const root = create_empty_root("app-runtime-construction-revocation-race");
+  auto const workspace = root / "workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  write_app_test_file(workspace / ".ava" / "APPEND_SYSTEM.md", std::string(kProjectCanary) + "\n");
+  expect(ava::app::set_project_trust_decision(paths, workspace, true).has_value(), "construction race fixture starts trusted");
+
+  struct RaceBarrier
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool construction_armed = false;
+    bool construction_reached = false;
+    bool release_construction = false;
+    bool revocation_armed = false;
+    bool revocation_reached = false;
+    bool release_revocation = false;
+  };
+  auto barrier = std::make_shared<RaceBarrier>();
+  auto coordinator = ava::agent::SubagentCoordinator::create();
+  if (!coordinator)
+  {
+    expect(false, "construction race fixture creates a coordinator");
+    return;
+  }
+  auto manager = ava::app::SubagentDeliveryManager::create({.coordinator = *coordinator,
+                                                            .construction_after_trusted_prompt_resolution_for_test =
+                                                                [barrier] {
+                                                                  std::unique_lock lock(barrier->mutex);
+                                                                  if (!barrier->construction_armed)
+                                                                    return;
+                                                                  barrier->construction_reached = true;
+                                                                  barrier->changed.notify_all();
+                                                                  barrier->changed.wait(lock, [&] { return barrier->release_construction; });
+                                                                  barrier->construction_armed = false;
+                                                                },
+                                                            .revocation_after_retirement_for_test =
+                                                                [barrier] {
+                                                                  std::unique_lock lock(barrier->mutex);
+                                                                  if (!barrier->revocation_armed)
+                                                                    return;
+                                                                  barrier->revocation_reached = true;
+                                                                  barrier->changed.notify_all();
+                                                                  barrier->changed.wait(lock, [&] { return barrier->release_revocation; });
+                                                                  barrier->revocation_armed = false;
+                                                                }});
+  if (!manager)
+  {
+    expect(false, "construction race fixture creates a delivery manager");
+    return;
+  }
+
+  ava::app::runtime::OpenContext context;
+  context.workspace_dir = workspace;
+  context.current_dir = workspace;
+  context.paths = paths;
+  context.subagent_coordinator = *coordinator;
+  context.subagent_delivery_manager = *manager;
+  auto opened = ava::app::runtime::Session::open(context);
+  if (!opened)
+  {
+    expect(false, "construction race fixture opens the revoking session");
+    return;
+  }
+  auto& session = *opened;
+  auto trust_file_contents = [&] {
+    std::ifstream file(ava::app::project_trust_file(paths), std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>());
+  };
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->construction_armed = true;
+    barrier->construction_reached = false;
+    barrier->release_construction = false;
+  }
+  using SessionResult = ava::core::Result<ava::app::runtime::session_ts>;
+  std::optional<SessionResult> opening;
+  std::jthread opener([&] { opening.emplace(ava::app::runtime::Session::create_like(session, {})); });
+  bool construction_reached = false;
+  {
+    std::unique_lock lock(barrier->mutex);
+    construction_reached = barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return barrier->construction_reached; });
+  }
+  expect(construction_reached, "create_like pauses after trusted prompt resolution while holding construction authority");
+  if (!construction_reached)
+  {
+    {
+      std::lock_guard lock(barrier->mutex);
+      barrier->release_construction = true;
+    }
+    barrier->changed.notify_all();
+    opener.join();
+    return;
+  }
+
+  auto const trust_before_conflict = trust_file_contents();
+  auto conflicting_denial = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto const trust_after_conflict = trust_file_contents();
+  auto const disk_after_conflict = ava::app::load_project_trust_state(paths, workspace);
+  bool const conflict_is_redacted = !conflicting_denial && conflicting_denial.error().format().find(workspace.string()) == std::string::npos &&
+                                    conflicting_denial.error().format().find(kProjectCanary) == std::string::npos;
+  expect(!conflicting_denial && conflict_is_redacted && trust_before_conflict == trust_after_conflict &&
+             disk_after_conflict.decision == ava::app::ProjectTrustDecision::Trusted,
+         "construction wins the workspace barrier and revocation fails retryably before changing trusted disk");
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->release_construction = true;
+  }
+  barrier->changed.notify_all();
+  opener.join();
+  expect(opening && opening->has_value(), "create_like publishes its trusted Session after the construction barrier releases");
+  if (!opening || !*opening)
+    return;
+
+  auto& constructed = **opening;
+  std::shared_ptr<ava::app::SessionRunController> constructed_controller;
+  bool constructed_is_trusted = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, constructed);
+    constructed_controller = session_r->run_controller();
+    constructed_is_trusted = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Trusted &&
+                             session_r->system_prompt().find(kProjectCanary) != std::string::npos &&
+                             session_r->ambient_extension_free_system_prompt().find(kProjectCanary) != std::string::npos;
+  }
+  expect(constructed_is_trusted, "the construction winner returns both trusted prompt variants");
+
+  auto retried_denial = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport stale_transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  auto stale_run = ava::app::run_prompt(constructed, "must not reach transport", provider, stale_transport, run_options);
+  expect(retried_denial && constructed_controller && constructed_controller->authority_retired() && !stale_run && stale_transport.requests().empty(),
+         "retrying revocation captures and retires the newly registered opener before any stale provider request");
+
+  auto restored = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+  auto owned_store = ava::session::SessionStore::create(workspace, paths.sessions_dir);
+  auto owned_lease = owned_store ? ava::session::SessionLease::create_and_acquire(owned_store->session_path())
+                                 : ava::core::Result<ava::session::SessionLease>(std::unexpected(owned_store.error()));
+  if (!restored || !owned_store || !owned_lease)
+  {
+    expect(false, "inverse construction race restores trust and creates owned session inputs");
+    return;
+  }
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->revocation_armed = true;
+    barrier->revocation_reached = false;
+    barrier->release_revocation = false;
+  }
+  std::optional<ava::core::Result<ava::app::CommandResult>> inverse_denial;
+  std::jthread revoker([&] { inverse_denial.emplace(ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"})); });
+  bool revocation_reached = false;
+  {
+    std::unique_lock lock(barrier->mutex);
+    revocation_reached = barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return barrier->revocation_reached; });
+  }
+  expect(revocation_reached, "inverse revocation pauses with workspace maintenance reserved");
+  if (!revocation_reached)
+  {
+    {
+      std::lock_guard lock(barrier->mutex);
+      barrier->release_revocation = true;
+    }
+    barrier->changed.notify_all();
+    revoker.join();
+    return;
+  }
+
+  auto inverse_open = ava::app::runtime::Session::open_owned(context, *owned_store, *owned_lease, true);
+  bool const inverse_error_is_redacted = !inverse_open && inverse_open.error().format().find(workspace.string()) == std::string::npos &&
+                                         inverse_open.error().format().find(kProjectCanary) == std::string::npos;
+  expect(!inverse_open && inverse_error_is_redacted && !owned_lease->canonical_path().empty(),
+         "maintenance wins the inverse race and open_owned fails retryably before reading or consuming owned authority");
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->release_revocation = true;
+  }
+  barrier->changed.notify_all();
+  revoker.join();
+  expect(inverse_denial && *inverse_denial && ava::app::load_project_trust_state(paths, workspace).decision == ava::app::ProjectTrustDecision::Denied,
+         "the inverse revocation completes its denied persistence and publication");
+
+  auto inverse_retry = ava::app::runtime::Session::open_owned(context, *owned_store, *owned_lease, true);
+  bool inverse_retry_is_denied = false;
+  if (inverse_retry)
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *inverse_retry);
+    inverse_retry_is_denied = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Denied &&
+                              session_r->system_prompt().find(kProjectCanary) == std::string::npos &&
+                              session_r->ambient_extension_free_system_prompt().find(kProjectCanary) == std::string::npos;
+  }
+  expect(inverse_retry_is_denied, "retrying open_owned after revocation reads denied disk and excludes the project canary from both prompt variants");
+  (*manager)->shutdown();
+}
+
+void test_workspace_revocation_retires_retained_sessions_transactionally()
+{
+  constexpr std::string_view kProjectCanary = "RETAINED_WORKSPACE_PROJECT_CANARY_5d72";
+  auto const root = create_empty_root("app-runtime-workspace-revocation-transaction");
+  auto const workspace = root / "workspace";
+  auto const other_workspace = root / "other-workspace";
+  auto const paths = app_test_paths(root);
+  std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(other_workspace);
+  write_app_test_file(workspace / ".ava" / "APPEND_SYSTEM.md", std::string(kProjectCanary) + "\n");
+  expect(ava::app::set_project_trust_decision(paths, workspace, true) && ava::app::set_project_trust_decision(paths, other_workspace, true),
+         "retained-workspace transaction fixtures start with explicit independent trust decisions");
+
+  struct RetirementBarrier
+  {
+    std::mutex mutex;
+    std::condition_variable changed;
+    bool reached = false;
+    bool release = false;
+  };
+  auto barrier = std::make_shared<RetirementBarrier>();
+  auto coordinator = ava::agent::SubagentCoordinator::create();
+  if (!coordinator)
+  {
+    expect(false, "retained-workspace transaction creates a coordinator");
+    return;
+  }
+  auto manager = ava::app::SubagentDeliveryManager::create({.coordinator = *coordinator, .revocation_after_retirement_for_test = [barrier] {
+                                                              std::unique_lock lock(barrier->mutex);
+                                                              barrier->reached = true;
+                                                              barrier->changed.notify_all();
+                                                              barrier->changed.wait(lock, [&] { return barrier->release; });
+                                                            }});
+  if (!manager)
+  {
+    expect(false, "retained-workspace transaction creates a delivery manager");
+    return;
+  }
+
+  auto context_for = [&](std::filesystem::path directory) {
+    ava::app::runtime::OpenContext context;
+    context.workspace_dir = directory;
+    context.current_dir = directory;
+    context.paths = paths;
+    context.subagent_coordinator = *coordinator;
+    context.subagent_delivery_manager = *manager;
+    return context;
+  };
+  auto workspace_context = context_for(workspace);
+  auto other_context = context_for(other_workspace);
+  auto opened_a = ava::app::runtime::Session::open(workspace_context);
+  auto opened_b = ava::app::runtime::Session::open(workspace_context);
+  auto opened_other = ava::app::runtime::Session::open(other_context);
+  expect(opened_a && opened_b && opened_other, "one manager opens two target-workspace sessions and one isolated workspace session");
+  if (!opened_a || !opened_b || !opened_other)
+    return;
+  std::optional<ava::app::runtime::session_ts> session_a(std::in_place, std::move(*opened_a));
+  auto& session_b = *opened_b;
+  auto& other_session = *opened_other;
+
+  std::shared_ptr<ava::app::SessionRunController> controller_a;
+  std::shared_ptr<ava::app::SessionRunController> controller_b;
+  std::shared_ptr<ava::app::SessionRunController> other_controller;
+  std::string session_a_id;
+  ava::agent::SessionAppendSink stale_owner_route;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *session_a);
+    controller_a = session_r->run_controller();
+    session_a_id = session_r->store.session_id();
+    stale_owner_route = session_r->owner_append_route_1();
+    expect(session_r->system_prompt().find(kProjectCanary) != std::string::npos &&
+               session_r->ambient_extension_free_system_prompt().find(kProjectCanary) != std::string::npos,
+           "captured session A begins with project authority in both prompt variants");
+  }
+  controller_b = ava::app::runtime::session_ts::rat(session_b)->run_controller();
+  other_controller = ava::app::runtime::session_ts::rat(other_session)->run_controller();
+  ava::app::runtime::RunOptions retained_options;
+  retained_options.access_token = "discarded-retained-token";
+  expect((*manager)->refresh_parent(*session_a, retained_options).has_value(), "session A publishes a retained parent capsule before session B revokes trust");
+
+  std::optional<ava::core::Result<ava::app::CommandResult>> denial;
+  std::jthread revoker([&] { denial.emplace(ava::app::run_command(session_b, ava::app::CommandRequest{.command = "/trust deny"})); });
+  {
+    std::unique_lock lock(barrier->mutex);
+    expect(barrier->changed.wait_for(lock, std::chrono::seconds(3), [&] { return barrier->reached; }),
+           "revocation pauses deterministically after all old controllers retire and before capsule purge/publication");
+  }
+
+  auto persisted_during_pause = ava::app::load_project_trust_state(paths, workspace);
+  ava::provider::OpenAIProvider const provider("https://api.example.test");
+  ava::tests::FakeTransport stale_transport({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  ava::app::runtime::RunOptions run_options;
+  run_options.access_token = "fake";
+  auto stale_run_during_pause = ava::app::run_prompt(*session_a, "must not reach transport", provider, stale_transport, run_options);
+  auto stale_append_during_pause = stale_owner_route(ava::session::SessionEntry{.id = "retired-stale-append",
+                                                                                .parent_id = "",
+                                                                                .type = ava::session::EntryType::UserMessage,
+                                                                                .timestamp = ava::session::now_timestamp(),
+                                                                                .data_json = "{\"text\":\"blocked\"}"});
+  auto other_guard = other_controller->admit({.request_id = "unaffected-workspace-run"});
+  if (other_guard)
+    static_cast<void>(other_guard->complete({.run_id = {}, .reason = ava::app::StopReason::ProviderError}));
+  expect(persisted_during_pause.decision == ava::app::ProjectTrustDecision::Denied && controller_a->authority_retired() && controller_b->authority_retired() &&
+             !stale_run_during_pause && stale_transport.requests().empty() && !stale_append_during_pause && other_guard &&
+             !other_controller->authority_retired(),
+         "after persistence and retirement, captured A cannot admit, append, or send transport while another workspace remains runnable");
+
+  {
+    std::lock_guard lock(barrier->mutex);
+    barrier->release = true;
+  }
+  barrier->changed.notify_all();
+  revoker.join();
+  expect(denial && *denial && (*denial)->handled, "session B completes the denied-trust transaction after the retirement barrier releases");
+
+  std::shared_ptr<ava::app::SessionRunController> fresh_b;
+  ava::app::ProjectTrustDecision session_b_decision = ava::app::ProjectTrustDecision::Unknown;
+  std::string session_b_prompt;
+  std::string session_b_ambient_prompt;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session_b);
+    fresh_b = session_r->run_controller();
+    session_b_decision = session_r->project_trust().decision;
+    session_b_prompt = session_r->system_prompt();
+    session_b_ambient_prompt = session_r->ambient_extension_free_system_prompt();
+  }
+  ava::tests::FakeTransport stale_transport_after({ava::http::HttpResponse{.status_code = 200, .headers = {}, .body = "data: [DONE]\n\n"}});
+  auto stale_run_after = ava::app::run_prompt(*session_a, "still must not reach transport", provider, stale_transport_after, run_options);
+  bool retained_found = true;
+  auto retained = (*manager)->retained_session(session_a_id, workspace, retained_found, true);
+  expect(fresh_b && fresh_b != controller_b && !fresh_b->authority_retired() && session_b_decision == ava::app::ProjectTrustDecision::Denied &&
+             session_b_prompt.find(kProjectCanary) == std::string::npos && session_b_ambient_prompt.find(kProjectCanary) == std::string::npos &&
+             !stale_run_after && stale_transport_after.requests().empty() && !retained_found && !retained,
+         "purge publishes a fresh denied controller with both safe prompts while stale A remains permanently retired and its capsule is unavailable");
+
+  session_a.reset();
+  workspace_context.exact_session_id = true;
+  auto resumed_a = ava::app::runtime::Session::open(workspace_context, {.sessionless = false,
+                                                                        .requested_session_id = session_a_id,
+                                                                        .fork_session_id = std::nullopt,
+                                                                        .initial_session_name = std::nullopt,
+                                                                        .continue_last_session = false,
+                                                                        .initial_reasoning_level = std::nullopt,
+                                                                        .expected_original_cwd = std::nullopt});
+  bool resumed_safe = false;
+  if (resumed_a)
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, *resumed_a);
+    resumed_safe = session_r->run_controller() != controller_a && session_r->project_trust().decision == ava::app::ProjectTrustDecision::Denied &&
+                   session_r->system_prompt().find(kProjectCanary) == std::string::npos;
+  }
+  expect(resumed_safe, "resuming A bypasses the purged stale capsule, reloads denied trust from disk, and constructs a new controller");
+  bool other_unchanged = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, other_session);
+    other_unchanged = session_r->project_trust().decision == ava::app::ProjectTrustDecision::Trusted && session_r->run_controller() == other_controller;
+  }
+  expect(other_unchanged, "the transaction does not retire or mutate another workspace managed in the same application process");
+  (*manager)->shutdown();
 }
 
 void test_app_run_prompt_sources_private_launch_display_from_runtime_invocation()
@@ -733,16 +1474,19 @@ void test_app_clipboard_image_file_override_imports_attachment()
   if (!unlocked_session_result)
     return;
 
-  SCOPED_CRITICAL_AREA_W(session_w, *unlocked_session_result);
+  auto const store = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, *unlocked_session_result);
+    return session_r->store;
+  }();
 
   ScopedEnvVar clipboard_file("AVA_CLIPBOARD_IMAGE_FILE", image_path.string());
-  auto imported = ava::app::import_clipboard_image_attachment(session_w->store);
+  auto imported = ava::app::import_clipboard_image_attachment(store, std::nullopt);
   expect(imported && imported->has_value() && (*imported)->mime_type == "image/png" && (*imported)->byte_size == app_tiny_png_bytes().size(),
          "runtime clipboard image override imports supported image bytes into session storage");
   if (!imported || !*imported)
     return;
 
-  auto loaded = ava::session::load_image_attachment(session_w->store, **imported);
+  auto loaded = ava::session::load_image_attachment(store, **imported);
   expect(loaded && loaded->bytes == app_tiny_png_bytes(), "runtime clipboard image override writes reusable session-owned attachment bytes");
 }
 

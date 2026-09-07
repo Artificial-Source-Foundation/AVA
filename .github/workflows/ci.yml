@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - develop
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - develop
@@ -11,6 +13,11 @@ on:
     inputs:
       run_acpx:
         description: Run the opt-in alpha acpx interoperability smoke
+        required: false
+        type: boolean
+        default: false
+      full_terminal:
+        description: Run the release-candidate full credential-free terminal gate
         required: false
         type: boolean
         default: false
@@ -32,10 +39,16 @@ jobs:
       CC: gcc-16
       CXX: g++-16
       GITACHE_ROOT: /tmp/ava-gitache-${{ matrix.build_type }}
+      # The full credential-free terminal gate runs for release-candidate
+      # workflow_dispatch runs and version tag pushes; routine runs execute
+      # only the small required terminal selection below.
+      AVA_FULL_TERMINAL: ${{ (github.event_name == 'workflow_dispatch' && inputs.full_terminal) || (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Benchmark provenance tests inspect pinned ancestor commits.
+          fetch-depth: 0
           submodules: recursive
           persist-credentials: false
 
@@ -45,7 +58,7 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags tmux ccache
 
       - name: Restore gitache cache
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -55,16 +68,111 @@ jobs:
           restore-keys: |
             gitache-${{ runner.os }}-${{ runner.arch }}-${{ matrix.build_type }}-
 
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc16-${{ matrix.build_type }}
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+
       - name: Configure
         run: |
           mkdir -p "$GITACHE_ROOT"
-          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }}
+          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build
 
       - name: Build
-        run: scripts/build.sh --build-dir build
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Test
-        run: scripts/run-tests.sh --build-dir build
+        run: scripts/run-tests.sh --build-dir build --output-junit "${{ runner.temp }}/ava-junit-${{ matrix.build_type }}.xml"
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-${{ matrix.build_type }}.xml"
+
+      - name: Run required real-terminal checks
+        if: matrix.build_type == 'Release' && env.AVA_FULL_TERMINAL != 'true'
+        env:
+          AVA_TUI_TMUX_SMOKE: "1"
+          AVA_TUI_TERMINAL_LIFECYCLE_SMOKE: "1"
+        run: |
+          scripts/run-tests.sh --build-dir build --jobs 2 --no-tests=error \
+            --output-junit "${{ runner.temp }}/ava-junit-terminal.xml" \
+            -R '^(ava_tui[.]terminal_lifecycle_smoke|ava_tui[.]tmux_smoke_(main_editor_input|main_permission_flow|active_run))$'
+
+      - name: Verify required terminal results
+        if: always() && matrix.build_type == 'Release' && env.AVA_FULL_TERMINAL != 'true'
+        run: |
+          python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-terminal.xml" \
+            --require-count 4 --require-no-skips \
+            --require ava_tui.terminal_lifecycle_smoke \
+            --require ava_tui.tmux_smoke_main_editor_input \
+            --require ava_tui.tmux_smoke_main_permission_flow \
+            --require ava_tui.tmux_smoke_active_run
+
+      - name: Run full tmux terminal gate
+        if: matrix.build_type == 'Release' && env.AVA_FULL_TERMINAL == 'true'
+        env:
+          AVA_TUI_TMUX_SMOKE: "1"
+        run: |
+          scripts/run-tests.sh --build-dir build --jobs 4 --no-tests=error \
+            --output-junit "${{ runner.temp }}/ava-junit-terminal-tmux.xml" \
+            -R '^ava_tui[.]tmux_smoke_'
+
+      - name: Run full direct-PTY terminal gate
+        if: matrix.build_type == 'Release' && env.AVA_FULL_TERMINAL == 'true'
+        env:
+          AVA_TUI_TERMINAL_LIFECYCLE_SMOKE: "1"
+          AVA_TUI_KITTY_IMAGE_SMOKE: "1"
+          AVA_TUI_ITERM2_IMAGE_SMOKE: "1"
+          AVA_TUI_OSC8_SMOKE: "1"
+        run: |
+          scripts/run-tests.sh --build-dir build --jobs 2 --no-tests=error \
+            --output-junit "${{ runner.temp }}/ava-junit-terminal-pty.xml" \
+            -R '^ava_tui[.](terminal_lifecycle_smoke|kitty_image_smoke|iterm2_image_smoke|osc8_smoke)$'
+
+      - name: Verify full terminal gate results
+        if: always() && matrix.build_type == 'Release' && env.AVA_FULL_TERMINAL == 'true'
+        run: |
+          python3 scripts/summarize-test-results.py \
+            "${{ runner.temp }}/ava-junit-terminal-tmux.xml" \
+            "${{ runner.temp }}/ava-junit-terminal-pty.xml" \
+            --require-count 27 --require-no-skips \
+            --require ava_tui.terminal_lifecycle_smoke \
+            --require ava_tui.kitty_image_smoke \
+            --require ava_tui.iterm2_image_smoke \
+            --require ava_tui.osc8_smoke \
+            --require ava_tui.tmux_smoke_suspend_resume \
+            --require ava_tui.tmux_smoke_keybind_conflict \
+            --require ava_tui.tmux_smoke_theme_env \
+            --require ava_tui.tmux_smoke_theme_persisted \
+            --require ava_tui.tmux_smoke_nested_settings_preview \
+            --require ava_tui.tmux_smoke_startup_overview \
+            --require ava_tui.tmux_smoke_active_run \
+            --require ava_tui.tmux_smoke_restore_followup \
+            --require ava_tui.tmux_smoke_streaming_scroll \
+            --require ava_tui.tmux_smoke_mermaid \
+            --require ava_tui.tmux_smoke_transcript_search \
+            --require ava_tui.tmux_smoke_transcript_selection \
+            --require ava_tui.tmux_smoke_subagent_workspace \
+            --require ava_tui.tmux_smoke_branch_summary \
+            --require ava_tui.tmux_smoke_main_startup_trust_keybinds \
+            --require ava_tui.tmux_smoke_main_models_selectors \
+            --require ava_tui.tmux_smoke_main_editor_input \
+            --require ava_tui.tmux_smoke_main_slash_completions \
+            --require ava_tui.tmux_smoke_main_permission_flow \
+            --require ava_tui.tmux_smoke_main_question_flow \
+            --require ava_tui.tmux_smoke_main_session_mgmt \
+            --require ava_tui.tmux_smoke_main_paste_scrollback_attach \
+            --require ava_tui.tmux_smoke_plugin_ui
 
       - name: Build strict release package
         if: matrix.build_type == 'Release'
@@ -77,7 +185,9 @@ jobs:
             printf 'error: source checkout is not clean before strict packaging:\n%s\n' "$status" >&2
             exit 1
           fi
-          scripts/package-linux.sh --require-release-qualified --output-dir "$output_dir"
+          # Strict packaging stays uncached: the fresh private configure
+          # keeps its default module scanning and qualification inputs.
+          CCACHE_DISABLE=1 scripts/package-linux.sh --require-release-qualified --output-dir "$output_dir"
 
   arm64-release:
     name: Build and test (AArch64 Release)
@@ -91,24 +201,45 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Benchmark provenance tests inspect pinned ancestor commits.
+          fetch-depth: 0
           submodules: recursive
           persist-credentials: false
 
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-13 g++-13 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags
+          sudo apt-get install -y gcc-13 g++-13 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags ccache
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc13-Release
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Configure
         run: |
           mkdir -p "$GITACHE_ROOT"
-          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release
+          cmake -S . -B build -G Ninja -DAVA_BUILD_TESTS=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build
 
       - name: Build
-        run: scripts/build.sh --build-dir build
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Test
-        run: scripts/run-tests.sh --build-dir build
+        run: scripts/run-tests.sh --build-dir build --output-junit "${{ runner.temp }}/ava-junit-arm64-release.xml"
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-arm64-release.xml"
 
       - name: Build strict release package
         run: |
@@ -120,7 +251,9 @@ jobs:
             printf 'error: source checkout is not clean before strict packaging:\n%s\n' "$status" >&2
             exit 1
           fi
-          scripts/package-linux.sh --require-release-qualified --output-dir "$output_dir"
+          # Strict packaging stays uncached: the fresh private configure
+          # keeps its default module scanning and qualification inputs.
+          CCACHE_DISABLE=1 scripts/package-linux.sh --require-release-qualified --output-dir "$output_dir"
 
   tsan:
     name: ThreadSanitizer coordinator and ACP peer
@@ -141,16 +274,35 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev ccache
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc16-TSan
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Configure
-        run: cmake --preset tsan -G Ninja
+        run: cmake --preset tsan -G Ninja -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build-tsan
 
       - name: Build focused test target
-        run: scripts/build.sh --build-dir build-tsan --jobs 2 --target ava_tests
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build-tsan --jobs 2 --target ava_tests
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Test focused coordinator and ACP peer races
-        run: ctest --preset tsan
+        run: ctest --preset tsan --output-junit "${{ runner.temp }}/ava-junit-tsan.xml"
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-tsan.xml"
 
   sanitizer:
     name: Sanitizers
@@ -163,6 +315,8 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          # Benchmark provenance tests inspect pinned ancestor commits.
+          fetch-depth: 0
           submodules: recursive
           persist-credentials: false
 
@@ -172,18 +326,37 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev universal-ctags ccache
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc16-ASanUBSan
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Configure
         run: |
           mkdir -p "$GITACHE_ROOT"
-          cmake --preset sanitize -G Ninja
+          cmake --preset sanitize -G Ninja -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build-sanitize
 
       - name: Build
-        run: scripts/build.sh --build-dir build-sanitize --jobs 2
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build-sanitize --jobs 2
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Test
-        run: scripts/run-tests.sh --build-dir build-sanitize --jobs 2
+        run: scripts/run-tests.sh --build-dir build-sanitize --jobs 2 --output-junit "${{ runner.temp }}/ava-junit-sanitize.xml"
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-sanitize.xml"
 
   acp-sdk-interop:
     name: Official ACP SDK interoperability (Release)
@@ -209,17 +382,32 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev ccache
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc16-Release-SDK
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Install locked official SDK test dependencies
         working-directory: tests/acp-sdk
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Configure required SDK interoperability
-        run: cmake -S . -B build-sdk -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_REQUIRE_ACP_SDK_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build-sdk -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_REQUIRE_ACP_SDK_INTEROP=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build-sdk
 
       - name: Build AVA and test helpers
-        run: scripts/build.sh --build-dir build-sdk --target ava ava_tests ava_fake_provider_server ava_fake_mcp_server
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build-sdk --target ava ava_tests ava_fake_provider_server ava_fake_mcp_server
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Run focused credential-free ACP tests
         run: |
@@ -236,7 +424,12 @@ jobs:
             PATH="/usr/local/bin:/usr/bin:/bin" \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             ctest --test-dir build-sdk --output-on-failure \
+              --output-junit "${{ runner.temp }}/ava-junit-sdk.xml" \
               -R '^(ava_cli[.]acp_sdk_interop|ava_cli[.]acp_subprocess|ava_tests[.]acp|ava_tests[.]acp_support_manifest|ava_tests[.]acp_interop_manifest)$'
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-sdk.xml"
 
   acpx-interop:
     name: Opt-in acpx interoperability (Release)
@@ -263,17 +456,32 @@ jobs:
           sudo apt-get install -y software-properties-common
           sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
           sudo apt-get update
-          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev
+          sudo apt-get install -y gcc-16 g++-16 cmake ninja-build libncursesw5-dev pkg-config libboost-dev libdw-dev ccache
+
+      - name: Set up compiler cache
+        uses: ./.github/actions/setup-ccache
+        with:
+          key-prefix: ccache-${{ runner.os }}-${{ runner.arch }}-gcc16-Release-acpx
+          save: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
       - name: Install locked acpx test dependencies
         working-directory: tests/acp-acpx
         run: npm ci --ignore-scripts --no-audit --no-fund
 
       - name: Configure opt-in acpx interoperability
-        run: cmake -S . -B build-acpx -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_ACPX_INTEROP=ON -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S . -B build-acpx -G Ninja -DAVA_BUILD_TESTS=ON -DAVA_ENABLE_ACPX_INTEROP=ON -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_SCAN_FOR_MODULES=OFF
+
+      - name: Guard against C++ module scanner flags
+        run: scripts/guard-no-cxx-modules.sh build-acpx
 
       - name: Build AVA and fake provider
-        run: scripts/build.sh --build-dir build-acpx --target ava ava_fake_provider_server
+        run: |
+          ccache -z
+          scripts/build.sh --build-dir build-acpx --target ava ava_fake_provider_server
+
+      - name: Compiler cache metrics
+        if: always()
+        run: ccache -s
 
       - name: Run opt-in credential-free acpx and manifest tests
         run: |
@@ -288,4 +496,9 @@ jobs:
             PATH="/usr/local/bin:/usr/bin:/bin" \
             LANG=C.UTF-8 LC_ALL=C.UTF-8 \
             ctest --test-dir build-acpx --output-on-failure \
+              --output-junit "${{ runner.temp }}/ava-junit-acpx.xml" \
               -R '^(ava_cli[.]acpx_interop|ava_tests[.]acp_interop_manifest)$'
+
+      - name: Summarize test results
+        if: always()
+        run: python3 scripts/summarize-test-results.py "${{ runner.temp }}/ava-junit-acpx.xml"

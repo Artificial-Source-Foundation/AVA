@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "ava/core/AnchorOpen.h"
+#include "ava/core/AnchorOpen_test_support.h"
 #include "ava/core/AnchorSet.h"
 #include "ava/core/open_beneath.h"
 
@@ -7,6 +8,9 @@
 #include <cstdint>
 #include <deque>
 #include <filesystem>
+#include <functional>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <system_error>
 #include <utility>
@@ -22,6 +26,20 @@
 
 namespace ava::core {
 namespace {
+
+std::mutex external_reopen_hook_mutex;
+std::shared_ptr<std::function<void()>> external_reopen_hook;
+
+void invoke_external_reopen_hook()
+{
+  std::shared_ptr<std::function<void()>> hook;
+  {
+    std::lock_guard lock(external_reopen_hook_mutex);
+    hook = external_reopen_hook;
+  }
+  if (hook && *hook)
+    (*hook)();
+}
 
 class UniqueFd
 {
@@ -198,6 +216,7 @@ struct ResolvedPath
 {
   UniqueFd object;
   UniqueFd parent;
+  std::filesystem::path final_component;
   bool is_directory;
 };
 
@@ -205,7 +224,8 @@ std::vector<std::filesystem::path> path_components(std::filesystem::path const& 
 {
   std::vector<std::filesystem::path> result;
 
-  for (auto const& component : path.relative_path()) result.push_back(component);
+  for (auto const& component : path.relative_path())
+    result.push_back(component);
 
   return result;
 }
@@ -217,7 +237,7 @@ bool is_beneath_any_anchor(ResolvedPath const& path, std::vector<FileId> const& 
   return is_beneath_any_anchor(directory, anchor_ids);
 }
 
-Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesystem::path const& absolute)
+Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesystem::path const& absolute, bool nofollow_logical_final)
 {
   auto const& anchor_list = anchors.anchors();
   std::vector<FileId> anchor_ids;
@@ -232,7 +252,8 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
   UniqueFd root = open_root();
   UniqueFd current = duplicate_fd(root.get());
   std::deque<std::filesystem::path> components;
-  for (auto const& component : path_components(absolute)) components.push_back(component);
+  for (auto const& component : path_components(absolute))
+    components.push_back(component);
   unsigned int followed_symlinks = 0;
 
   while (!components.empty())
@@ -251,7 +272,7 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
 
     UniqueFd object = open_nofollow(current.get(), component);
     mode_t const type = file_type(object.get());
-    if (type == S_IFLNK)
+    if (type == S_IFLNK && !(nofollow_logical_final && components.empty()))
     {
       if (++followed_symlinks > 40)
         throw_error(ELOOP, "symbolic-link resolution");
@@ -259,11 +280,12 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
       if (target.is_absolute())
         current = duplicate_fd(root.get());
       auto const target_components = path_components(target);
-      for (auto it = target_components.rbegin(); it != target_components.rend(); ++it) components.push_front(*it);
+      for (auto it = target_components.rbegin(); it != target_components.rend(); ++it)
+        components.push_front(*it);
       continue;
     }
 
-    ResolvedPath resolved{std::move(object), duplicate_fd(current.get()), type == S_IFDIR};
+    ResolvedPath resolved{std::move(object), duplicate_fd(current.get()), std::move(component), type == S_IFDIR};
     if (is_beneath_any_anchor(resolved, anchor_ids))
       return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
     if (components.empty())
@@ -273,22 +295,23 @@ Result<ResolvedPath> resolve_external_path(AnchorSet const& anchors, std::filesy
     current = std::move(resolved.object);
   }
 
-  ResolvedPath resolved{std::move(current), UniqueFd(), true};
+  ResolvedPath resolved{std::move(current), UniqueFd(), {}, true};
   if (is_beneath_any_anchor(resolved, anchor_ids))
     return std::unexpected(Error(ErrorCategory::Configuration, "external path resolution enters a writable anchor"));
   return resolved;
 }
 
-UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags)
+UniqueFd reopen_resolved_object(ResolvedPath const& resolved, int flags, mode_t mode)
 {
   auto const expected = file_id(resolved.object.get());
-  auto const proc_path = std::string("/proc/self/fd/") + std::to_string(resolved.object.get());
-  int const fd = ::open(proc_path.c_str(), (flags & ~O_NOFOLLOW) | O_CLOEXEC);
+  invoke_external_reopen_hook();
+  int const fd = resolved.parent.get() >= 0 ? ::openat(resolved.parent.get(), resolved.final_component.c_str(), flags | O_NOFOLLOW | O_CLOEXEC, mode)
+                                            : ::openat(resolved.object.get(), ".", flags | O_NOFOLLOW | O_CLOEXEC, mode);
   if (fd == -1)
-    throw_errno("open(/proc/self/fd)");
+    throw_errno("openat(resolved external target)");
   UniqueFd reopened(fd);
   if (file_id(reopened.get()) != expected)
-    throw_error(EIO, "/proc/self/fd identity mismatch");
+    throw_error(EIO, "resolved external target identity mismatch");
   return reopened;
 }
 
@@ -313,6 +336,19 @@ Error open_path_error(std::string const& message, int error_number, std::filesys
 }
 
 }  // namespace
+
+void testing::AnchorOpenTestAccess::set_before_external_reopen_hook(std::function<void()> hook)
+{
+  auto retained = std::make_shared<std::function<void()>>(std::move(hook));
+  std::lock_guard lock(external_reopen_hook_mutex);
+  external_reopen_hook = std::move(retained);
+}
+
+void testing::AnchorOpenTestAccess::clear_before_external_reopen_hook() noexcept
+{
+  std::lock_guard lock(external_reopen_hook_mutex);
+  external_reopen_hook.reset();
+}
 
 // Return the current working directory as a logical path, preserving symlinks.
 // This function is guaranteed to return a non-empty, absolute path, or throw
@@ -454,14 +490,14 @@ Result<AnchorOpen> open_readable(AnchorSet const& anchors, std::filesystem::path
 
   try
   {
-    auto resolved = resolve_external_path(anchors, absolute);
+    auto resolved = resolve_external_path(anchors, absolute, (flags & O_NOFOLLOW) != 0);
     if (!resolved)
     {
       auto error = std::move(resolved.error());
       error.with_context("path", absolute.string());
       return std::unexpected(std::move(error));
     }
-    auto opened = reopen_resolved_object(*resolved, flags);
+    auto opened = reopen_resolved_object(*resolved, flags, mode);
     return AnchorOpen(opened.release(), {}, std::move(absolute), {});
   }
   catch (std::system_error const& error)

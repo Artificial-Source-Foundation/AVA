@@ -1,0 +1,118 @@
+{
+  "artifacts": {
+    "after_document": {
+      "executable": false,
+      "mode": 436,
+      "mtime_ns": 1788383617176350648,
+      "path": "/tmp/ava-plugin-reverse-after.json",
+      "sha256": "c242f1ea8960cdcda94fe389ceff37be77a5cdb8dc8dcdca8763691e94a19b9c",
+      "size_bytes": 635269
+    },
+    "before_document": {
+      "executable": false,
+      "mode": 436,
+      "mtime_ns": 1788383729974925985,
+      "path": "/tmp/ava-plugin-reverse-before.json",
+      "sha256": "f59e6e6cf88f789a7603fcc2b8bb73d89b52ce3391a207f145601b30637e1cf3",
+      "size_bytes": 634211
+    }
+  },
+  "comparisons": [
+    {
+      "id": "family_curl_lifecycle",
+      "reason": "Family comparison requires a legacy_local to supervised authority transition.",
+      "reason_code": "authority_transition_required",
+      "status": "unsupported"
+    },
+    {
+      "after_statistics": {
+        "metrics": {
+          "helper_invocation_ns": {
+            "maximum": 26024581.0,
+            "median": 25608276.0,
+            "p95": 26024581.0
+          }
+        },
+        "primary": {
+          "maximum": 24474965.0,
+          "median": 24320772.0,
+          "p95": 24474965.0
+        }
+      },
+      "before_statistics": {
+        "metrics": {
+          "helper_invocation_ns": {
+            "maximum": 13060678.0,
+            "median": 12537932.0,
+            "p95": 13060678.0
+          }
+        },
+        "primary": {
+          "maximum": 11481427.0,
+          "median": 11355040.0,
+          "p95": 11481427.0
+        }
+      },
+      "boundary": "sample_plugin_start_initialize_call_shutdown",
+      "faster_required": false,
+      "gating": false,
+      "id": "family_plugin_lifecycle",
+      "investigation_trigger": true,
+      "median_delta": 12965732.0,
+      "median_delta_percent": 114.18482013273402,
+      "status": "measured",
+      "unit": "ns"
+    },
+    {
+      "id": "family_mcp_lifecycle",
+      "reason": "Family comparison requires a legacy_local to supervised authority transition.",
+      "reason_code": "authority_transition_required",
+      "status": "unsupported"
+    },
+    {
+      "id": "family_lsp_lifecycle",
+      "reason": "Family comparison requires a legacy_local to supervised authority transition.",
+      "reason_code": "authority_transition_required",
+      "status": "unsupported"
+    },
+    {
+      "id": "family_bash_lifecycle",
+      "reason": "Family comparison requires a legacy_local to supervised authority transition.",
+      "reason_code": "authority_transition_required",
+      "status": "unsupported"
+    }
+  ],
+  "confirmation": "reversed_order_required",
+  "contract_version": "m1_process_supervision_v1",
+  "faster_required": false,
+  "gating": false,
+  "investigation_thresholds": {
+    "latency": {
+      "absolute_ns": 100000.0,
+      "relative_percent": 20.0
+    },
+    "monitor_cpu": {
+      "absolute_cpu_ns_per_wall_second": 5000000.0,
+      "relative_percent": 25.0
+    },
+    "rss": {
+      "absolute_kib": 4096.0,
+      "relative_percent": 20.0
+    }
+  },
+  "provenance": {
+    "after_commit": "2a30f40ec562b49915c3b09369cf4e6897de3d4d",
+    "before_commit": "13fb0cef5925368fa12f8bcf693235281bce099f",
+    "run_order_confirmation": "reversed_order_required"
+  },
+  "repeatable_claim": false,
+  "schema_version": "ava.backend-benchmark-comparison.v1",
+  "source_attribution": {
+    "changed_family_scopes": [
+      "plugin"
+    ],
+    "shared_process_scope_changed": true,
+    "transitioned_family": "plugin"
+  },
+  "status": "measured"
+}

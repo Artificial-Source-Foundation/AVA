@@ -55,9 +55,11 @@ bool ascii_space(unsigned char ch) noexcept
 std::string trim_ascii(std::string_view text)
 {
   std::size_t begin = 0;
-  while (begin < text.size() && ascii_space(static_cast<unsigned char>(text[begin]))) ++begin;
+  while (begin < text.size() && ascii_space(static_cast<unsigned char>(text[begin])))
+    ++begin;
   std::size_t end = text.size();
-  while (end > begin && ascii_space(static_cast<unsigned char>(text[end - 1]))) --end;
+  while (end > begin && ascii_space(static_cast<unsigned char>(text[end - 1])))
+    --end;
   return std::string(text.substr(begin, end - begin));
 }
 
@@ -76,7 +78,8 @@ std::string lower_ascii(std::string_view text)
 void wipe_bytes(void* data, std::size_t size) noexcept
 {
   auto* cursor = static_cast<unsigned char volatile*>(data);
-  while (size-- > 0) *cursor++ = 0;
+  while (size-- > 0)
+    *cursor++ = 0;
 }
 
 void clear_secret(std::string& value) noexcept
@@ -121,7 +124,8 @@ void clear_entry(ava::session::SessionEntry& entry) noexcept
 
 void clear_entries(std::vector<ava::session::SessionEntry>& entries) noexcept
 {
-  for (auto& entry : entries) clear_entry(entry);
+  for (auto& entry : entries)
+    clear_entry(entry);
   entries.clear();
 }
 
@@ -130,7 +134,8 @@ void clear_session_metadata(ava::session::SessionMetadataView& metadata) noexcep
   clear_secret(metadata.session_id);
   clear_secret(metadata.name);
   clear_secret(metadata.generated_title);
-  for (auto& label : metadata.labels) clear_secret(label);
+  for (auto& label : metadata.labels)
+    clear_secret(label);
   metadata.labels.clear();
   clear_secret(metadata.labels_updated);
   clear_secret(metadata.parent_session_id);
@@ -273,7 +278,8 @@ void clear_provider_request(ava::provider::ProviderRequest& request) noexcept
     message.content_parts.clear();
   }
   request.messages.clear();
-  for (auto& tool : request.tools_json) clear_secret(tool);
+  for (auto& tool : request.tools_json)
+    clear_secret(tool);
   request.tools_json.clear();
   if (request.reasoning)
   {
@@ -282,7 +288,8 @@ void clear_provider_request(ava::provider::ProviderRequest& request) noexcept
     request.reasoning.reset();
   }
   clear_secret(request.system_prompt_cache_ttl);
-  for (auto& quirk : request.compatibility_quirks) clear_secret(quirk);
+  for (auto& quirk : request.compatibility_quirks)
+    clear_secret(quirk);
   request.compatibility_quirks.clear();
 }
 
@@ -315,7 +322,8 @@ void clear_http_request(ava::http::HttpRequest& request) noexcept
   }
   request.headers.clear();
   clear_secret(request.body);
-  for (auto& host : request.resolve_hosts) clear_secret(host);
+  for (auto& host : request.resolve_hosts)
+    clear_secret(host);
   request.resolve_hosts.clear();
 }
 
@@ -728,7 +736,9 @@ ava::core::Result<std::string> default_generate_branch_summary(BranchSummaryOper
   auto transport_factory = operation.provider_options.transport_factory;
   ScopeCleanup clear_transport_factory([&]() noexcept { transport_factory = nullptr; });
   if (!transport_factory)
-    transport_factory = [] { return std::make_unique<ava::http::CurlCliTransport>(); };
+  {
+    return std::unexpected(generation_error(ava::core::ErrorCategory::Provider, "branch summary transport process authority is unavailable", "provider"));
+  }
 
   runtime::RunOptions credentials;
   ScopeCleanup wipe_credentials([&]() noexcept { clear_runtime_credentials(credentials); });
@@ -739,9 +749,9 @@ ava::core::Result<std::string> default_generate_branch_summary(BranchSummaryOper
   credentials.offline = operation.provider_options.offline;
 
   auto auth_inner = transport_factory();
-  if (!auth_inner)
+  if (!auth_inner || !*auth_inner)
     return std::unexpected(generation_error(ava::core::ErrorCategory::Provider, "branch summary auth transport is unavailable", "provider"));
-  DeadlineTransport auth_transport(std::move(auth_inner), stop_token, deadline);
+  DeadlineTransport auth_transport(std::move(*auth_inner), stop_token, deadline);
   ava::core::Result<runtime::RunOptions> prepared =
       std::unexpected(generation_error(ava::core::ErrorCategory::PermissionDenied, "branch summary credentials were not prepared", "auth"));
   ScopeCleanup wipe_prepared([&]() noexcept {
@@ -797,9 +807,9 @@ ava::core::Result<std::string> default_generate_branch_summary(BranchSummaryOper
     return std::unexpected(generation_error(ava::core::ErrorCategory::Provider, "branch summary request could not be built", "provider"));
 
   auto transport_inner = transport_factory();
-  if (!transport_inner)
+  if (!transport_inner || !*transport_inner)
     return std::unexpected(generation_error(ava::core::ErrorCategory::Provider, "branch summary transport is unavailable", "provider"));
-  DeadlineTransport transport(std::move(transport_inner), stop_token, deadline);
+  DeadlineTransport transport(std::move(*transport_inner), stop_token, deadline);
   auto canceled = [&] { return stop_token.stop_requested() || std::chrono::steady_clock::now() >= deadline; };
   ava::core::Result<ava::http::HttpResponse> response =
       std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "branch summary request was not attempted"));
@@ -1892,6 +1902,7 @@ ava::core::Result<BranchSummaryOperationRequest> make_branch_summary_operation_r
     ava::config::ModelInfo selected_model;
     std::shared_ptr<ava::provider::ProviderCatalog const> provider_catalog;
     std::shared_ptr<ava::core::AnchorSet> anchor_set;
+    std::optional<ava::process::ProcessScopeV1> process_scope;
     bool offline;
   };
 
@@ -1919,6 +1930,7 @@ ava::core::Result<BranchSummaryOperationRequest> make_branch_summary_operation_r
                              .selected_model = session_r->model(),
                              .provider_catalog = session_r->provider_catalog(),
                              .anchor_set = session_r->anchor_set(),
+                             .process_scope = session_r->session_process_scope(),
                              .offline = session_r->is_offline()};
   }();
   if (!projection)
@@ -1942,6 +1954,13 @@ ava::core::Result<BranchSummaryOperationRequest> make_branch_summary_operation_r
   if (!valid_branch_summary_read_limits(read_limits))
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "branch summary bounded read limits are invalid"));
   provider_options.offline = provider_options.offline || projection->offline;
+  if (!provider_options.transport_factory && projection->process_scope)
+  {
+    provider_options.transport_factory = [scope = *projection->process_scope]() -> ava::core::Result<std::unique_ptr<ava::http::Transport>> {
+      std::unique_ptr<ava::http::Transport> transport = std::make_unique<ava::http::CurlCliTransport>(scope);
+      return transport;
+    };
+  }
   return BranchSummaryOperationRequest{.current_session_id = std::move(projection->current_session_id),
                                        .source_session_id = std::move(selected_source.session_id),
                                        .source_session_path = std::move(selected_source.path),

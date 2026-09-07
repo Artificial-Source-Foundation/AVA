@@ -14,6 +14,9 @@ import tempfile
 import threading
 import time
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from fake_provider import launch_fake_provider  # noqa: E402
+
 EXPECTED_NODE_VERSION = "v24.13.1"
 EXPECTED_ACPX_VERSION = "0.12.0"
 FAKE_KEY = "AVA_ACPX_FAKE_KEY_NOT_A_SECRET"
@@ -238,23 +241,6 @@ exec %s --acp 2>"$AVA_ACP_STDERR"
     return wrapper
 
 
-def wait_for_port(port_file, provider):
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        if port_file.exists():
-            value = int(port_file.read_text(encoding="ascii").strip())
-            assert 0 < value <= 65535
-            return value
-        if provider.process.poll() is not None:
-            provider.wait(1)
-            raise AssertionError(
-                f"fake provider exited during startup: {provider.process.returncode}: "
-                f"{provider.stderr.decode(errors='replace')}"
-            )
-        time.sleep(0.02)
-    raise AssertionError("fake provider did not publish a loopback port")
-
-
 def assert_raw_records(records):
     assert records, "acpx emitted no JSON records"
     assert all(isinstance(record, dict) and record.get("jsonrpc") == "2.0" for record in records)
@@ -299,17 +285,17 @@ def main():
         acpx_version = run_preflight([str(Path(args.acpx).absolute()), "--version"], base_env, root)
         assert acpx_version == EXPECTED_ACPX_VERSION, (acpx_version, EXPECTED_ACPX_VERSION)
 
-        provider_root = root / "provider"
-        port_file = provider_root / "port"
-        request_log = provider_root / "requests.log"
         effect = root / "workspace" / "acpx-effect.txt"
-        provider = ManagedProcess(
-            [str(Path(args.fake_provider).absolute()), str(port_file), str(request_log), "0", "write-tool", str(effect)],
-            env=base_env,
-            cwd=root / "workspace",
+        provider = launch_fake_provider(
+            Path(args.fake_provider).absolute(),
+            root / "provider",
+            prefix="provider",
+            delay_ms=0,
+            scenario="write-tool",
+            target=effect,
+            environment=base_env,
         )
-        port = wait_for_port(port_file, provider)
-        env = clean_environment(root, args.node, port)
+        env = clean_environment(root, args.node, provider.port)
         command = [
             str(Path(args.acpx).absolute()),
             "--agent", str(wrapper),
@@ -331,17 +317,16 @@ def main():
         assert_raw_records(records)
 
         assert effect.read_text(encoding="utf-8") == "rpc new\n"
-        provider_log = request_log.read_text(encoding="utf-8")
+        provider_log = provider.request_log.read_text(encoding="utf-8")
         assert "rpc new" in provider_log, "provider did not observe the client-owned tool effect"
-        assert provider.wait(7) == 0, provider.stderr.decode(errors="replace")
-        assert provider.stdout == b"" and provider.stderr == b""
+        provider.finish(timeout=7)
+        assert provider.stdout_path.read_bytes() == b"" and provider.stderr_path.read_bytes() == b""
         assert (root / "ava.stderr").read_bytes() == b"", "successful AVA stderr was not clean"
         assert (root / "ava-wrapper.proof").read_text(encoding="utf-8") == "exec ava --acp\n"
         assert not download_marker.exists(), "acpx attempted an adapter/package download"
         assert not any((root / "home/.acpx").rglob("node_modules")), "acpx installed an adapter into isolated state"
 
         acpx.assert_group_gone()
-        provider.assert_group_gone()
         print("opt-in acpx 0.12.0 raw-agent interoperability smoke passed")
         return 0
     except subprocess.TimeoutExpired as error:
@@ -357,9 +342,7 @@ def main():
             acpx.assert_group_gone()
             discard_process(acpx)
         if provider is not None:
-            provider.terminate()
-            provider.assert_group_gone()
-            discard_process(provider)
+            provider.stop()
         shutil.rmtree(root, ignore_errors=True)
         ACTIVE_ROOTS.discard(root)
 

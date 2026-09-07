@@ -100,15 +100,13 @@ def _provider_request_count(path: pathlib.Path) -> int:
     return len(_request_payloads(path))
 
 
-def _wait_for_request_count(path: pathlib.Path, expected: int, label: str, timeout: float = 8.0) -> list[dict[str, object]]:
-    deadline = time.monotonic() + timeout
-    last: list[dict[str, object]] = []
-    while time.monotonic() < deadline:
-        last = _request_payloads(path)
-        if len(last) >= expected:
-            return last
-        time.sleep(0.05)
-    raise RuntimeError(f"timed out waiting for {label}; expected {expected} provider requests, saw {len(last)}")
+def _wait_for_request_count(provider, expected: int, label: str, timeout: float = 8.0) -> list[dict[str, object]]:
+    """Wait for the zero-based request gate and classify payloads after it opens."""
+
+    if expected < 1:
+        raise RuntimeError(f"{label}; expected request count must be positive, got {expected}")
+    provider.wait_for_request(expected - 1, f"{label} provider request {expected - 1}", timeout=timeout)
+    return _request_payloads(provider.request_log)
 
 
 def _assert_request_count_stays(path: pathlib.Path, expected: int, label: str, duration: float = 0.8) -> None:
@@ -151,9 +149,9 @@ def _fork_from(tmux: object, session: str, query: str, label: str) -> None:
     wait_for_absent(tmux, session, r"Fork from user turn", f"{label} picker closed")
 
 
-def _ordinary_turn(tmux: object, session: str, provider_log: pathlib.Path, text: str, expected_request_count: int, label: str) -> None:
+def _ordinary_turn(tmux: object, session: str, provider, text: str, expected_request_count: int, label: str) -> None:
     _submit(tmux, session, text, label)
-    _wait_for_request_count(provider_log, expected_request_count, f"{label} provider request")
+    _wait_for_request_count(provider, expected_request_count, f"{label} provider request")
     wait_for(tmux, session, rf"(?s){text}.*headless active prompt complete", f"{label} completion")
     wait_for_absent(tmux, session, r"Esc stop|processing", f"{label} idle")
 
@@ -178,8 +176,8 @@ def scenario_branch_summary(ctx: SmokeContext) -> None:
     wait_for(tmux, session, r"Type a message|live session", "branch-summary initial frame")
 
     _name_session(tmux, session, "Success source")
-    _ordinary_turn(tmux, session, provider.request_log, "alpha branch-summary earlier turn", 1, "first source turn")
-    _ordinary_turn(tmux, session, provider.request_log, "beta branch-summary abandoned turn", 2, "second source turn")
+    _ordinary_turn(tmux, session, provider, "alpha branch-summary earlier turn", 1, "first source turn")
+    _ordinary_turn(tmux, session, provider, "beta branch-summary abandoned turn", 2, "second source turn")
     _fork_from(tmux, session, "alpha branch-summary earlier", "success branch")
     _name_session(tmux, session, "Success child")
 
@@ -213,7 +211,7 @@ def scenario_branch_summary(ctx: SmokeContext) -> None:
     if "Success source" not in succeeded:
         raise RuntimeError(f"success did not preserve the child transcript and selector state\nscreen:\n{succeeded}")
 
-    payloads = _wait_for_request_count(provider.request_log, requests_before_cancel + 1, "parent-summary generation request")
+    payloads = _wait_for_request_count(provider, requests_before_cancel + 1, "parent-summary generation request")
     summary_payloads = [payload for payload in payloads if _is_summary_request(payload)]
     expected_projection = (
         "ASSISTANT:\nheadless active prompt complete\n\n"
@@ -251,7 +249,7 @@ def scenario_branch_summary(ctx: SmokeContext) -> None:
     send_keys(tmux, session, "Escape")
     wait_for_absent(tmux, session, r"Select session|Session tree", "selector closed before ordinary prompt")
     ordinary_followup = "ordinary-followup-excludes-parent-summary-91A"
-    _ordinary_turn(tmux, session, provider.request_log, ordinary_followup, request_count_after_success + 1, "ordinary child follow-up")
+    _ordinary_turn(tmux, session, provider, ordinary_followup, request_count_after_success + 1, "ordinary child follow-up")
     followup_payloads = _request_payloads(provider.request_log)
     followup = next(
         (
@@ -269,7 +267,7 @@ def scenario_branch_summary(ctx: SmokeContext) -> None:
     _name_session(tmux, session, "Failure source")
     failure_later = "failure-source-later-abandoned-turn"
     current_count = _provider_request_count(provider.request_log)
-    _ordinary_turn(tmux, session, provider.request_log, failure_later, current_count + 1, "failure source later turn")
+    _ordinary_turn(tmux, session, provider, failure_later, current_count + 1, "failure source later turn")
     _fork_from(tmux, session, ordinary_followup, "failure branch")
     _name_session(tmux, session, "Failure child")
     failure_source_path = _session_path_named(ctx.state, "Failure source")
@@ -298,7 +296,7 @@ def scenario_branch_summary(ctx: SmokeContext) -> None:
     for forbidden in ("FAKE_UNKNOWN_DISCRIMINATOR_CANARY", "provider unavailable", "secret reasoning", "secret-key"):
         if forbidden in failed:
             raise RuntimeError(f"raw provider failure leaked into TUI ({forbidden!r})\nscreen:\n{failed}")
-    failure_payloads = _wait_for_request_count(failing_provider.request_log, 1, "failing parent-summary provider request")
+    failure_payloads = _wait_for_request_count(failing_provider, 1, "failing parent-summary provider request")
     if len([payload for payload in failure_payloads if _is_summary_request(payload)]) != 1:
         raise RuntimeError(f"provider-failure subcase did not send exactly one summary request: {failure_payloads!r}")
     if failure_source_path.read_bytes() != failure_source_before or failure_child_path.read_bytes() != failure_child_before:

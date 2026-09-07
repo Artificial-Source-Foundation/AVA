@@ -1,10 +1,13 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
 #include "ava/http/curl_transport.h"
+#include "ava/process/scope.h"
+#include "ava/process/supervisor.h"
 #include "ava/provider/registry.h"
 
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -193,7 +196,12 @@ void run_provider_live_smoke_tests()
   }
 
   auto registry = ava::provider::builtin_provider_registry();
-  ava::http::CurlCliTransport transport;
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto process_scope = ava::process::ProcessScopeV1::application(supervisor);
+  expect(static_cast<bool>(process_scope), "live smoke creates explicit curl process authority");
+  if (!process_scope)
+    return;
+  ava::http::CurlCliTransport transport(*process_scope);
   for (auto const& smoke : cases)
   {
     run_live_smoke_case(registry, transport, smoke);

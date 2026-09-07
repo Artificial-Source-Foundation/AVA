@@ -3,6 +3,8 @@
 #include "tests/support/test_harness.h"
 #include "tests/support/test_timeout.h"
 #include "ava/http/transport.h"
+#include "ava/app/commands.h"
+#include "ava/app/project_trust.h"
 #include "ava/app/runtime.h"
 #include "ava/app/runtime/Session.h"
 #include "ava/app/subagent_delivery_manager.h"
@@ -108,6 +110,7 @@ struct DeliveryFactoryState
   bool ambient_extensions_isolated = false;
   bool session_mcp_disabled = false;
   bool provider_request_has_no_tools = false;
+  std::vector<std::string> provider_request_bodies;
   std::string observed_model_id;
   std::string observed_reasoning_level;
   std::string delivery_run_request_id;
@@ -179,6 +182,7 @@ class DeliveryTransport final : public ava::http::Transport
     {
       std::lock_guard lock(state_->mutex);
       state_->provider_request_has_no_tools = state_->provider_request_has_no_tools || request.body.find("\"type\":\"function\"") == std::string::npos;
+      state_->provider_request_bodies.push_back(request.body);
     }
     if (responses_.empty())
       return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Provider, "delivery test response queue exhausted"));
@@ -978,6 +982,117 @@ void test_forged_text_marker_cannot_ack_delivery()
   fixture.manager->shutdown();
 }
 
+void test_automatic_delivery_uses_fresh_untrusted_prompt_authority()
+{
+  constexpr std::string_view kProjectCanary = "AUTOMATIC_DELIVERY_PROJECT_AUTHORITY_CANARY_0c91";
+  auto state = std::make_shared<DeliveryFactoryState>();
+  auto fixture = make_fixture("subagent-delivery-fresh-untrusted-authority", state);
+  if (!fixture.unlocked_session_opt)
+    return;
+  auto& session = fixture.unlocked_session_opt.value();
+  ava::tests::write_app_test_file(fixture.session_r()->workspace_dir() / ".ava" / "APPEND_SYSTEM.md", std::string(kProjectCanary) + "\n");
+  auto trusted = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+  bool trusted_prompts = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    trusted_prompts = session_r->system_prompt().find(kProjectCanary) != std::string::npos &&
+                      session_r->ambient_extension_free_system_prompt().find(kProjectCanary) != std::string::npos;
+  }
+  auto stale_completed = start_completed(fixture, "child_pending_before_revocation");
+  auto const parent_id = fixture.session_r()->store.session_id();
+  if (!stale_completed.job.identity.job_id.empty())
+    static_cast<void>(fixture.coordinator->wait(parent_id, stale_completed.job.identity.job_id, std::chrono::seconds(3)));
+  auto denied = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+  auto stale_after_revocation = fixture.coordinator->snapshot(parent_id, stale_completed.job.identity.job_id);
+  bool denied_prompts = false;
+  {
+    SCOPED_CRITICAL_AREA_R(session_r, session);
+    denied_prompts = session_r->system_prompt().find(kProjectCanary) == std::string::npos &&
+                     session_r->ambient_extension_free_system_prompt().find(kProjectCanary) == std::string::npos;
+  }
+  ava::app::runtime::RunOptions options;
+  options.access_token = "discarded-after-revocation-token";
+  auto refreshed = fixture.manager->refresh_parent(session, options);
+  auto completed = start_completed(fixture, "child_after_revocation");
+  bool const delivered = state->wait_completed();
+  auto stale_after_refresh = fixture.coordinator->snapshot(parent_id, stale_completed.job.identity.job_id);
+  bool automatic_request_safe = false;
+  {
+    std::lock_guard lock(state->mutex);
+    automatic_request_safe = !state->provider_request_bodies.empty() && std::ranges::none_of(state->provider_request_bodies, [&](auto const& body) {
+      return body.find(kProjectCanary) != std::string::npos;
+    });
+  }
+  bool const stale_delivery_truthful = stale_after_revocation && stale_after_refresh &&
+                                       stale_after_refresh->job.delivery == ava::agent::SubagentDeliveryState::Pending &&
+                                       stale_after_refresh->job.delivery_attempts == 0;
+  expect(trusted && trusted_prompts && denied && denied_prompts && refreshed && !completed.job.identity.job_id.empty() && delivered && automatic_request_safe &&
+             stale_delivery_truthful,
+         "revocation reconstructs both prompts, disables the old pending delivery without acknowledging/exhausting it, and uses fresh untrusted authority for "
+         "new automatic calls");
+  fixture.manager->shutdown();
+}
+
+void test_workspace_revocation_rejects_running_job_and_in_flight_delivery_before_write()
+{
+  {
+    auto state = std::make_shared<DeliveryFactoryState>();
+    auto fixture = make_fixture("subagent-delivery-revocation-running-job", state);
+    if (!fixture.unlocked_session_opt)
+      return;
+    auto& session = fixture.unlocked_session_opt.value();
+    auto trusted = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+    auto const session_id = fixture.session_r()->store.session_id();
+    auto blocking = std::make_shared<DeliveryBlockingJob>();
+    auto started = fixture.coordinator->start_background(session_id, {.title = "running conflict", .child_session_id = "child_running_conflict"},
+                                                         [blocking](auto const& context) { return blocking->run(context); });
+    bool worker_started = false;
+    {
+      std::unique_lock lock(blocking->mutex);
+      worker_started = blocking->changed.wait_for(lock, std::chrono::seconds(3), [&] { return blocking->started; });
+    }
+    auto denied = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+    auto const persisted = ava::app::load_project_trust_state(fixture.paths, fixture.session_r()->workspace_dir());
+    expect(trusted && started && worker_started && !denied && persisted.decision == ava::app::ProjectTrustDecision::Trusted &&
+               !fixture.session_r()->run_controller()->authority_retired(),
+           "a starting/running workspace job rejects revocation before trust persistence or controller retirement");
+    {
+      std::lock_guard lock(blocking->mutex);
+      blocking->release = true;
+      blocking->changed.notify_all();
+    }
+    if (started)
+      static_cast<void>(fixture.coordinator->wait(session_id, started->job.identity.job_id, std::chrono::seconds(3)));
+    fixture.manager->shutdown();
+  }
+
+  {
+    auto state = std::make_shared<DeliveryFactoryState>();
+    auto admission = std::make_shared<DeliveryAdmissionBarrier>();
+    auto fixture = make_fixture("subagent-delivery-revocation-in-flight", state, false, 3,
+                                [admission](std::stop_token stop_token) { admission->arrive_and_wait(stop_token); });
+    if (!fixture.unlocked_session_opt)
+      return;
+    auto& session = fixture.unlocked_session_opt.value();
+    auto trusted = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust project"});
+    ava::app::runtime::RunOptions options;
+    options.access_token = "discarded-in-flight-token";
+    auto refreshed = fixture.manager->refresh_parent(session, options);
+    auto completed = start_completed(fixture, "child_in_flight_conflict");
+    bool const in_flight = admission->wait_reached();
+    auto denied = ava::app::run_command(session, ava::app::CommandRequest{.command = "/trust deny"});
+    auto const persisted = ava::app::load_project_trust_state(fixture.paths, fixture.session_r()->workspace_dir());
+    auto pending = fixture.coordinator->pending_deliveries(fixture.session_r()->store.session_id());
+    expect(trusted && refreshed && !completed.job.identity.job_id.empty() && in_flight && !denied &&
+               persisted.decision == ava::app::ProjectTrustDecision::Trusted && pending && pending->size() == 1 &&
+               pending->front().job.delivery != ava::agent::SubagentDeliveryState::Acknowledged,
+           "an in-flight delivery wins arbitration, so revocation writes nothing and leaves its pending delivery truthful");
+    admission->release();
+    expect(state->wait_completed(), "the delivery that won arbitration can complete after failed revocation releases it");
+    fixture.manager->shutdown();
+  }
+}
+
 void test_same_process_reconciliation_acks_existing_commit_without_rerun()
 {
   auto state = std::make_shared<DeliveryFactoryState>();
@@ -1048,5 +1163,7 @@ void run_subagent_delivery_manager_tests()
   test_retry_after_synthetic_user_append_uses_same_marker();
   test_two_pending_deliveries_survive_coordinator_retention();
   test_forged_text_marker_cannot_ack_delivery();
+  test_automatic_delivery_uses_fresh_untrusted_prompt_authority();
+  test_workspace_revocation_rejects_running_job_and_in_flight_delivery_before_write();
   test_same_process_reconciliation_acks_existing_commit_without_rerun();
 }

@@ -566,7 +566,10 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
   CommandResult result;
   result.handled = true;
   auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
-  auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
+  auto const [workspace_dir, session_process_scope] = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::pair{session_r->workspace_dir(), session_r->session_process_scope()};
+  }();
   auto const usage = [&]() {
     add_output(result, missing_argument("/plugins "
                                         "<list|inspect|install|remove|enable|disable|validate|failures|prompts|prompt|skills|skill|dynamic-prompts|dynamic-"
@@ -711,6 +714,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 
       ava::plugin::PluginRunnerOptions options;
       options.workspace_dir = workspace_dir;
+      options.process_scope = session_process_scope;
       auto process = ava::plugin::PluginProcess::start(status.plugin.manifest, options, request.cancel_requested);
       if (!process)
       {
@@ -834,6 +838,7 @@ ava::core::Result<CommandResult> run_plugins_command(runtime::session_ts& unlock
 
     ava::plugin::PluginRunnerOptions options;
     options.workspace_dir = workspace_dir;
+    options.process_scope = session_process_scope;
     auto process = ava::plugin::PluginProcess::start(status->plugin.manifest, options, request.cancel_requested);
     if (!process)
     {
@@ -949,7 +954,10 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
   CommandResult result;
   result.handled = true;
   auto const resource_policy = runtime::make_extension_resource_policy_1(unlocked_session);
-  auto const workspace_dir = runtime::session_ts::rat(unlocked_session)->workspace_dir();
+  auto const [workspace_dir, session_process_scope] = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return std::pair{session_r->workspace_dir(), session_r->session_process_scope()};
+  }();
   auto run_args = parse_plugin_run_arguments(command_argument(request.command, "/plugin"));
   if (!run_args)
   {
@@ -1022,6 +1030,7 @@ ava::core::Result<CommandResult> run_plugin_command(runtime::session_ts& unlocke
 
   ava::plugin::PluginRunnerOptions options;
   options.workspace_dir = workspace_dir;
+  options.process_scope = session_process_scope;
 
   std::optional<PluginUiInvocationClaim> ui_claim;
   std::shared_ptr<ExactPluginEnablementRevocation> ui_enablement;

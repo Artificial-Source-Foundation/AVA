@@ -50,7 +50,8 @@ class ScopedSignalIgnore
 
 }  // namespace
 
-int run_acp_mode(std::ostream& error_output, std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics)
+int run_acp_mode(std::ostream& error_output, ava::process::ProcessScopeV1 const& application_process_scope,
+                 std::shared_ptr<ava::diagnostics::RuntimeDiagnostics> diagnostics)
 {
   ScopedSignalIgnore ignore_sigpipe(SIGPIPE);
   if (!ignore_sigpipe.installed())
@@ -75,6 +76,7 @@ int run_acp_mode(std::ostream& error_output, std::shared_ptr<ava::diagnostics::R
   acp::AgentServiceOptions service_options;
   service_options.agent_version = std::string(ava::core::version::kFullVersion);
   service_options.launch_root = *launch_root;
+  service_options.open_context.application_process_scope = application_process_scope;
   service_options.open_context.diagnostics = std::move(diagnostics);
   auto provider_catalog = ava::provider::ProviderCatalog::build(service_options.open_context.paths);
   if (!provider_catalog)

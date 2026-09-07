@@ -12,6 +12,7 @@ target_link_libraries(ava_http
   PUBLIC
     AVA::core
     AVA::observability
+    AVA::process
 )
 
 ava_apply_debugging(ava_http)

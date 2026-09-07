@@ -32,6 +32,14 @@ define `MIT_LICENSE_ONLY` so accidental future inclusion fails compilation.
 
 Copyright (c) 2004-2026 Carlo Wood
 
+## memory — MIT
+
+**Usage boundary:** Carlo Wood's memory page-pool headers are used to construct
+AVA's application-scoped `MemoryPagePool` and `NodeMemoryResource`. The pool is
+currently constructed but no production allocation path uses it.
+
+Copyright (c) 2004-2026 Carlo Wood
+
 ## threadsafe — MIT
 
 **Usage boundary:** Carlo Wood's header/source synchronization utilities used by
@@ -80,7 +88,7 @@ FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 
 ## MIT License text (cwds, cmake-aicxx, AVA-used Carlo-owned ai-utils paths,
-threadsafe, enchantum, and nlohmann JSON)
+memory, threadsafe, enchantum, and nlohmann JSON)
 
 MIT License
 

@@ -205,6 +205,14 @@ Trust gates project prompt commands, skills, subagents, plugins, MCP config, LSP
 config, and project `SYSTEM.md`/`APPEND_SYSTEM.md`. It does not gate plain
 workspace `AGENTS.md`/`CLAUDE.md` instruction files.
 
+An effective denial or unknown decision retires all runtime controllers and
+retained delivery capsules for that workspace known to the current application
+manager, then publishes a fresh fail-closed controller for the visible session.
+A stale session copy must be reopened. This is a **process-local,
+manager-scoped** transaction: it is not a singleton, distributed lock, or
+cross-process revocation protocol. Another AVA process observes the persisted
+trust decision only at its own open/reload boundary.
+
 ## Reload And Freshness
 
 - `/context [query]` reports the prompt mode/model, project trust state, loaded
@@ -216,8 +224,10 @@ workspace `AGENTS.md`/`CLAUDE.md` instruction files.
   instruction files, skills, and task subagents, and refreshes freshness metadata for
   prompt commands, skills, and plugin resources. It reuses the already resolved
   selected-primary definition rather than changing that agent's identity or policy.
-- `/reload trust` reloads project trust and then rebuilds prompt state with the
-  new project-resource decision.
+- `/reload trust` reloads project trust and rebuilds prompt state with the new
+  project-resource decision in the same transaction. An effective untrusted
+  reload retires retained local authority rather than refreshing an old parent
+  capsule.
 - `/reload mcp`, `/reload lsp`, and `/reload plugins` report restart-required
   domains; running server/plugin process state is not hot-reloaded.
 - Theme/display and keybinding behavior has TUI-specific live reload support;

@@ -1,0 +1,63 @@
+name: Set up AVA compiler cache
+description: >-
+  Restores a policy-pinned ccache object cache and exports the strict ccache
+  environment. Used by every CI build job (both x86 matrix legs, AArch64,
+  TSan, sanitizers, SDK, and acpx) so the caching policy lives in exactly one
+  place. Caches ccache objects only; never build trees, binaries, or secrets.
+inputs:
+  key-prefix:
+    description: >-
+      Cache key prefix encoding OS, architecture, compiler, and build
+      configuration (for example ccache-Linux-X64-gcc16-Release).
+    required: true
+  save:
+    description: >-
+      "true" on trusted push/workflow_dispatch runs to save the cache after a
+      successful job; anything else restores read-only (pull requests).
+    required: true
+runs:
+  using: composite
+  steps:
+    - name: Restore compiler cache (trusted run, saved on success)
+      if: inputs.save == 'true'
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ava-ccache-objects
+        key: ${{ inputs.key-prefix }}-${{ github.sha }}
+        restore-keys: |
+          ${{ inputs.key-prefix }}-
+
+    - name: Restore compiler cache (read-only)
+      if: inputs.save != 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/ava-ccache-objects
+        key: ${{ inputs.key-prefix }}-${{ github.sha }}
+        restore-keys: |
+          ${{ inputs.key-prefix }}-
+
+    - name: Export strict ccache environment
+      shell: bash
+      run: |
+        set -euo pipefail
+        objects="${{ runner.temp }}/ava-ccache-objects"
+        policy="${{ runner.temp }}/ava-ccache-policy.conf"
+        install -d -m 0700 "$objects"
+        # The policy file is rewritten fresh on every run and lives outside
+        # the cached object tree, so a restored cache cannot relax it. Only
+        # non-default settings are pinned; everything else intentionally
+        # keeps ccache's strict defaults (no sloppiness, hashed directory,
+        # no base_dir path rewriting, no hard links).
+        {
+          printf '%s\n' '# AVA CI compiler-cache policy; rewritten fresh every run.'
+          printf '%s\n' 'compiler_check = content'
+          printf '%s\n' 'max_size = 1G'
+        } >"$policy"
+        chmod 0600 "$policy"
+        {
+          printf '%s\n' "CCACHE_DIR=$objects"
+          printf '%s\n' "CCACHE_CONFIGPATH=$policy"
+          printf '%s\n' 'CCACHE_COMPILERCHECK=content'
+          printf '%s\n' 'CCACHE_MAXSIZE=1G'
+          printf '%s\n' 'CMAKE_CXX_COMPILER_LAUNCHER=ccache'
+        } >>"$GITHUB_ENV"

@@ -67,7 +67,7 @@ def scenario_transcript_search(ctx: SmokeContext) -> None:
 
     send_literal(ctx.tmux, session, "UNICODE-Ä transcript seed")
     send_keys(ctx.tmux, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "transcript-search provider request")
+    _wait_for_normal_turn_request_count(provider, 1, "transcript-search provider request")
     paused = wait_for(ctx.tmux, session, r"stream line 029", "transcript-search paused active stream")
     paused_numbers = _numbered_lines(paused)
 

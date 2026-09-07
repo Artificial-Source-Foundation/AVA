@@ -1,5 +1,6 @@
 #pragma once
 #include "ava/http/transport.h"
+#include "ava/process/scope.h"
 #include "ava/config/openai_oauth.h"
 #include "ava/config/xdg_paths.h"
 #include "ava/provider/provider.h"
@@ -34,13 +35,15 @@ struct ConnectProviderWizardOptions
   AVA_DEBUG_PRINT_MEMBERS_ON
 };
 
-[[nodiscard]] int run_connect_openai(ava::config::XdgPaths const& paths);
-[[nodiscard]] int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err);
-[[nodiscard]] int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err);
+[[nodiscard]] int run_connect_openai(ava::config::XdgPaths const& paths, std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt);
+[[nodiscard]] int run_connect_openai_browser(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err,
+                                             std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt);
+[[nodiscard]] int run_connect_openai_headless(ava::config::XdgPaths const& paths, std::ostream& out, std::ostream& err,
+                                              std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt);
 [[nodiscard]] int run_connect_openai_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options, std::istream& in,
-                                            std::ostream& out, std::ostream& err);
+                                            std::ostream& out, std::ostream& err, std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt);
 [[nodiscard]] int run_connect_provider_wizard(ava::config::XdgPaths const& paths, ConnectProviderWizardOptions const& options, std::istream& in,
-                                              std::ostream& out, std::ostream& err);
+                                              std::ostream& out, std::ostream& err, std::optional<ava::process::ProcessScopeV1> process_scope = std::nullopt);
 [[nodiscard]] int run_connect_provider_credential(ava::config::XdgPaths const& paths, ConnectProviderCredentialOptions const& options, std::istream& in,
                                                   std::ostream& out, std::ostream& err);
 [[nodiscard]] ava::core::Result<ava::config::OpenAICredential> complete_openai_browser_oauth(ava::config::OpenAIOAuthSession const& session,

@@ -19,6 +19,8 @@ import sys
 import termios
 import time
 
+from fake_provider import launch_fake_provider
+
 
 MAX_CAPTURE_BYTES = 2 * 1024 * 1024
 DEADLINE_SECONDS = 15.0
@@ -152,30 +154,23 @@ class PtyAva:
 
 
 class FakeProvider:
+    """Thin adapter keeping this harness's constructor shape on the shared owner."""
+
     def __init__(self, executable: pathlib.Path, root: pathlib.Path, name: str, scenario: str, target: pathlib.Path | None, environment: dict[str, str]) -> None:
-        self.port_file = root / f"{name}.port"
-        request_log = root / f"{name}.requests"
-        self.process = subprocess.Popen(
-            [str(executable), str(self.port_file), str(request_log), "0", scenario, str(target or "")],
-            cwd=root,
-            env=environment,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
+        self._provider = launch_fake_provider(
+            executable,
+            root,
+            prefix=name,
+            delay_ms=0,
+            scenario=scenario,
+            target=target or "",
+            environment=environment,
         )
-        deadline = time.monotonic() + 8.0
-        while time.monotonic() < deadline and not self.port_file.exists():
-            if self.process.poll() is not None:
-                stderr = self.process.stderr.read() if self.process.stderr else b""
-                raise RuntimeError(f"fake provider exited before startup: rc={self.process.returncode} stderr={stderr!r}")
-            select.select([], [], [], 0.05)
-        require(self.port_file.exists(), f"fake provider {name} did not publish its loopback port")
-        self.port = self.port_file.read_text(encoding="utf-8").strip()
+        self.port_file = self._provider.port_file
+        self.port = self._provider.port
 
     def close(self) -> None:
-        terminate_group(self.process)
-        if self.process.stderr:
-            self.process.stderr.close()
+        self._provider.stop()
 
 
 def isolated_environment(root: pathlib.Path) -> dict[str, str]:

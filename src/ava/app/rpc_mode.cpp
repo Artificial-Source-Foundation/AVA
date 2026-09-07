@@ -1132,7 +1132,16 @@ int run_rpc_mode(RpcModeOptions const& options, std::istream& in, std::ostream& 
     provider = std::move(*provider_result);
   }
 
-  ava::http::CurlCliTransport transport;
+  auto const session_process_scope = [&] {
+    SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+    return session_r->session_process_scope();
+  }();
+  if (!session_process_scope)
+  {
+    err << "RPC process authority is unavailable\n";
+    return 1;
+  }
+  ava::http::CurlCliTransport transport(*session_process_scope);
   ava::core::VoidResult result;
   if (&in == &std::cin)
   {

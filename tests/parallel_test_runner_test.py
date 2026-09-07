@@ -69,8 +69,13 @@ def wait_for_process_exit(pid: int, timeout: float) -> None:
         except ProcessLookupError:
             return
         stat_path = Path(f"/proc/{pid}/stat")
-        if stat_path.is_file() and stat_path.read_text(encoding="utf-8").split()[2] == "Z":
-            return
+        if stat_path.is_file():
+            try:
+                state = stat_path.read_text(encoding="utf-8").split()[2]
+            except (FileNotFoundError, ProcessLookupError):
+                return
+            if state == "Z":
+                return
         time.sleep(0.01)
     raise AssertionError(f"timed out waiting for worker process {pid} to exit")
 

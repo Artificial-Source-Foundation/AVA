@@ -32,6 +32,8 @@ void run_branch_summary_coordinator_tests();
 void run_subagent_coordinator_tests();
 void run_subagent_delivery_manager_tests();
 void run_core_json_permission_tests();
+void run_curl_transport_process_tests();
+void run_clipboard_image_process_tests();
 void run_app_command_classification_tests();
 void run_app_command_registry_tests();
 void run_tools_tests();
@@ -60,7 +62,17 @@ void run_agent_todo_tests();
 void run_tool_scheduler_tests();
 void run_lsp_tests();
 void run_plugin_tests();
+void run_plugin_runner_process_tests();
 void run_plugin_ui_tests();
+void run_process_adoption_posix_tests();
+void run_process_capability_posix_tests();
+void run_process_deadline_tests();
+void run_process_environment_tests();
+void run_process_launch_protocol_posix_tests();
+void run_process_monitor_tests();
+void run_process_readiness_tests();
+void run_process_supervisor_tests();
+void run_process_supervisor_posix_tests();
 void run_mcp_tests();
 void run_mermaid_render_coordinator_tests();
 void run_permission_rules_tests();
@@ -96,6 +108,8 @@ constexpr std::array kTestSuites{
     TestSuite{"subagent_coordinator", run_subagent_coordinator_tests},
     TestSuite{"subagent_delivery_manager", run_subagent_delivery_manager_tests},
     TestSuite{"core_json_permission", run_core_json_permission_tests},
+    TestSuite{"curl_transport_process", run_curl_transport_process_tests},
+    TestSuite{"clipboard_image_process", run_clipboard_image_process_tests},
     TestSuite{"app_command_classification", run_app_command_classification_tests},
     TestSuite{"app_command_registry", run_app_command_registry_tests},
     TestSuite{"tools", run_tools_tests},
@@ -124,7 +138,17 @@ constexpr std::array kTestSuites{
     TestSuite{"tool_scheduler", run_tool_scheduler_tests},
     TestSuite{"lsp", run_lsp_tests},
     TestSuite{"plugin", run_plugin_tests},
+    TestSuite{"plugin_runner_process", run_plugin_runner_process_tests},
     TestSuite{"plugin_ui", run_plugin_ui_tests},
+    TestSuite{"process_adoption_posix", run_process_adoption_posix_tests},
+    TestSuite{"process_capability_posix", run_process_capability_posix_tests},
+    TestSuite{"process_deadline", run_process_deadline_tests},
+    TestSuite{"process_environment", run_process_environment_tests},
+    TestSuite{"process_launch_protocol_posix", run_process_launch_protocol_posix_tests},
+    TestSuite{"process_monitor", run_process_monitor_tests},
+    TestSuite{"process_readiness", run_process_readiness_tests},
+    TestSuite{"process_supervisor", run_process_supervisor_tests},
+    TestSuite{"process_supervisor_posix", run_process_supervisor_posix_tests},
     TestSuite{"mcp", run_mcp_tests},
     TestSuite{"mermaid_render", run_mermaid_render_coordinator_tests},
     TestSuite{"permission_rules", run_permission_rules_tests},

@@ -26,6 +26,7 @@ void run_app_runtime_tests()
   test_app_active_context_status_tracks_compaction_projection();
   test_app_runtime_no_session_mode();
   test_app_runtime_replacement_open_context();
+  test_app_runtime_process_scope_lifecycle();
   test_app_runtime_session_startup_options();
   test_app_runtime_recovers_torn_tail_before_resume_and_startup_fork();
   test_app_runtime_reconciles_committed_function_calls_on_resume();
@@ -35,8 +36,15 @@ void run_app_runtime_tests()
   test_app_runtime_project_plugin_resources_follow_trust_gate();
   test_app_runtime_enabled_plugin_resource_failures_are_context_visible();
   test_app_runtime_plugin_install_remove_commands();
+  test_runtime_plugin_event_hook_uses_admitted_run_cancellation_scope();
   test_app_context_reports_lsp_config_load_errors();
   test_app_run_prompt_isolates_ambient_extensions();
+  test_project_primary_revocation_removes_authority_without_broadening_tools();
+  test_clear_trust_retires_only_for_effective_untrusted_state();
+  test_untrusted_mutation_rejects_active_run_and_append_before_write();
+  test_post_persistence_publication_failure_leaves_reopen_required();
+  test_session_construction_linearizes_with_workspace_revocation();
+  test_workspace_revocation_retires_retained_sessions_transactionally();
   test_app_run_prompt_sources_private_launch_display_from_runtime_invocation();
   test_app_run_prompt_emits_events();
   test_app_run_prompt_expands_file_references();

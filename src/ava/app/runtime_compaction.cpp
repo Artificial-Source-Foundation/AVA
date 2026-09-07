@@ -362,11 +362,6 @@ ava::core::Result<std::string> parse_compaction_response_text(ava::provider::Pro
 
 }  // namespace
 
-bool same_session_snapshot(std::vector<ava::session::SessionEntry> const& expected, std::vector<ava::session::SessionEntry> const& actual)
-{
-  return ava::session::compaction_snapshot_matches(expected, actual);
-}
-
 ava::core::Error stale_compaction_snapshot_error(std::string_view trigger, std::size_t snapshot_entries, std::size_t current_entries)
 {
   auto error = ava::core::Error(ava::core::ErrorCategory::Session, "session changed during context compaction after retry");
@@ -490,13 +485,11 @@ ava::core::Result<std::string> build_compaction_summary_prompt(std::vector<ava::
   return prompt;
 }
 
-ava::core::Result<std::string> generate_compaction_summary_impl(ava::config::XdgPaths const& paths,
-                                                                std::shared_ptr<ava::provider::ProviderCatalog const> const& provider_catalog,
-                                                                ava::config::ModelInfo const& current_model, bool offline, std::string session_id,
-                                                                std::vector<ava::session::SessionEntry> const& entries,
-                                                                ava::session::CompactionConfig const& config, std::string_view instructions,
-                                                                std::size_t estimated_tokens, ava::provider::Provider const& provider,
-                                                                ava::http::Transport& transport, runtime::RunOptions const& options)
+ava::core::Result<std::string> generate_compaction_summary_impl(
+    ava::config::XdgPaths const& paths, std::shared_ptr<ava::provider::ProviderCatalog const> const& provider_catalog,
+    ava::config::ModelInfo const& current_model, bool offline, std::string session_id, std::optional<ava::process::ProcessScopeV1> const& session_process_scope,
+    std::vector<ava::session::SessionEntry> const& entries, ava::session::CompactionConfig const& config, std::string_view instructions,
+    std::size_t estimated_tokens, ava::provider::Provider const& provider, ava::http::Transport& transport, runtime::RunOptions const& options)
 {
   if (offline || options.offline)
   {
@@ -521,8 +514,13 @@ ava::core::Result<std::string> generate_compaction_summary_impl(ava::config::Xdg
     summary_options.credential_type = "bearer";
     summary_options.openai_oauth = false;
     summary_options.openai_account_id.clear();
-    ava::http::CurlCliTransport auth_transport;
-    auto prepared = prepare_runtime_credentials(paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction", provider_catalog);
+    if (!session_process_scope)
+    {
+      return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Configuration, "compaction process authority is unavailable"));
+    }
+    ava::http::CurlCliTransport auth_transport(*session_process_scope);
+    auto prepared =
+        prepare_runtime_credentials(paths, effective_config->provider_id, std::move(summary_options), auth_transport, "compaction", provider_catalog);
     if (!prepared)
       return std::unexpected(std::move(prepared.error()));
     summary_options = std::move(*prepared);
@@ -632,12 +630,13 @@ ava::core::Result<std::string> generate_compaction_summary(runtime::session_ts c
                                                            std::size_t estimated_tokens, ava::provider::Provider const& provider,
                                                            ava::http::Transport& transport, runtime::RunOptions const& options)
 {
-  auto [paths, provider_catalog, current_model, offline, session_id] = [&] {
+  auto [paths, provider_catalog, current_model, offline, session_id, session_process_scope] = [&] {
     SCOPED_CRITICAL_AREA_CR(session_r, unlocked_session);
-    return std::tuple{session_r->paths(), session_r->provider_catalog(), session_r->model(), session_r->is_offline(), session_r->store.session_id()};
+    return std::tuple{session_r->paths(),      session_r->provider_catalog(), session_r->model(),
+                      session_r->is_offline(), session_r->store.session_id(), session_r->session_process_scope()};
   }();
-  return generate_compaction_summary_impl(paths, provider_catalog, current_model, offline, std::move(session_id), entries, config, instructions,
-                                          estimated_tokens, provider, transport, options);
+  return generate_compaction_summary_impl(paths, provider_catalog, current_model, offline, std::move(session_id), session_process_scope, entries, config,
+                                          instructions, estimated_tokens, provider, transport, options);
 }
 
 }  // namespace ava::app
@@ -653,9 +652,10 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "compaction requires provider access token"));
   }
 
-  auto [paths, provider_catalog, current_model, offline, session_id] = [&] {
+  auto [paths, provider_catalog, current_model, offline, session_id, session_process_scope] = [&] {
     SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
-    return std::tuple{session_r->paths(), session_r->provider_catalog(), session_r->model(), session_r->is_offline(), session_r->store.session_id()};
+    return std::tuple{session_r->paths(),      session_r->provider_catalog(), session_r->model(),
+                      session_r->is_offline(), session_r->store.session_id(), session_r->session_process_scope()};
   }();
 
   auto loaded_config = ava::session::load_compaction_config(paths);
@@ -741,8 +741,8 @@ ava::core::Result<bool> compact_runtime_context(session_ts& unlocked_session, av
       return std::unexpected(std::move(emitted.error()));
     }
 
-    auto summary = generate_compaction_summary_impl(paths, provider_catalog, current_model, offline, session_id, prepared->active_entries,
-                                                    *config, "", estimated_tokens, provider, transport, options);
+    auto summary = generate_compaction_summary_impl(paths, provider_catalog, current_model, offline, session_id, session_process_scope,
+                                                    prepared->active_entries, *config, "", estimated_tokens, provider, transport, options);
     if (!summary)
       return std::unexpected(std::move(summary.error()));
     if (options.cancel_requested && options.cancel_requested())

@@ -57,7 +57,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     wait_for(tmux_exe, compact_session, r"Type a message|live session", "compact follow-up initial frame")
     send_literal(tmux_exe, compact_session, "source before compact")
     send_keys(tmux_exe, compact_session, "Enter")
-    _wait_for_normal_turn_request_count(compact_request_log, 1, "compact source provider request")
+    _wait_for_normal_turn_request_count(compact_provider, 1, "compact source provider request")
     wait_for(tmux_exe, compact_session, r"before compact", "compact source completion", timeout=12.0)
     send_literal(tmux_exe, compact_session, "/compact")
     wait_for(tmux_exe, compact_session, r"│  /compact(?:\s|$)", "compact command draft")
@@ -242,7 +242,7 @@ def scenario_active_run(ctx: SmokeContext) -> None:
     )
     send_literal(tmux_exe, active_session, f"\x1b[200~{idle_seed}\x1b[201~")
     send_keys(tmux_exe, active_session, "Enter")
-    _wait_for_normal_turn_request_count(active_request_log, 1, "idle F5 assistant seed provider request")
+    _wait_for_normal_turn_request_count(active_provider, 1, "idle F5 assistant seed provider request")
     wait_for(tmux_exe, active_session, r"headless active prompt complete", "idle F5 assistant seed completion", timeout=14.0)
 
     send_literal(tmux_exe, active_session, "F5-IDLE-DRAFT-KEEP")

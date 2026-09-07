@@ -27,6 +27,7 @@
 #include <mutex>
 #include <optional>
 #include <ranges>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -891,16 +892,26 @@ void test_subagent_config_loads_project_definitions()
   auto const* reviewer = ava::agent::find_subagent(loaded.subagents, "reviewer");
   auto const* general = ava::agent::find_subagent(loaded.subagents, "general");
   expect(reviewer && reviewer->description == "Review implementation details." && reviewer->tool_preset == ava::agent::SubagentToolPreset::ReadOnly &&
-             reviewer->system_prompt.find("Inspect files") != std::string::npos,
-         "subagent config loads project-defined read-only subagents");
-  expect(general && general->builtin, "subagent config keeps builtin subagents from project override");
+             reviewer->system_prompt.find("Inspect files") != std::string::npos && reviewer->provenance == ava::agent::SubagentDefinitionProvenance::Project,
+         "subagent config loads project-defined read-only subagents with explicit project provenance");
+  expect(general && general->provenance == ava::agent::SubagentDefinitionProvenance::Builtin,
+         "subagent config keeps builtin subagents from project override with explicit builtin provenance");
   auto ordered_primary = ava::agent::resolve_primary_agent(loaded, "ordered");
   expect(ordered_primary && ordered_primary->system_prompt.find("LEXICALLY LATER") != std::string::npos,
          "same-root duplicate definitions resolve in deterministic lexical path order");
   auto coder_primary = ava::agent::resolve_primary_agent(loaded, "coder");
   expect(coder_primary && coder_primary->system_prompt.find("PROJECT PRIMARY") != std::string::npos &&
-             coder_primary->tool_preset == ava::agent::SubagentToolPreset::ReadOnly,
-         "project mode-all definitions override global primary definitions");
+             coder_primary->tool_preset == ava::agent::SubagentToolPreset::ReadOnly &&
+             coder_primary->provenance == ava::agent::SubagentDefinitionProvenance::Project,
+         "project mode-all definitions override global primary definitions with explicit project provenance");
+  if (coder_primary)
+  {
+    std::ostringstream diagnostic;
+    coder_primary->print_on(diagnostic);
+    expect(diagnostic.str().find("provenance:project") != std::string::npos && diagnostic.str().find("coder") == std::string::npos &&
+               diagnostic.str().find("PROJECT PRIMARY") == std::string::npos && diagnostic.str().find(agent_dir.string()) == std::string::npos,
+           "primary-definition diagnostics expose typed provenance without names, prompt content, or source paths");
+  }
   expect(ava::agent::find_subagent(loaded.subagents, "coder") != nullptr, "mode-all definitions are task-subagent visible");
   expect(ava::agent::find_subagent(loaded.subagents, "primary-only") == nullptr, "primary-mode definitions are not task-subagent visible");
   expect(!ava::agent::resolve_primary_agent(loaded, "reviewer"), "subagent-mode definitions are not primary selectable");
@@ -916,7 +927,9 @@ void test_subagent_config_loads_project_definitions()
       .workspace_root = workspace, .global_agent_dirs = {global_agent_dir}, .project_agent_dirs = {agent_dir}, .include_project_agents = false});
   expect(ava::agent::find_subagent(untrusted.subagents, "reviewer") == nullptr, "project subagents are gated by project resource trust");
   auto global_coder = ava::agent::resolve_primary_agent(untrusted, "coder");
-  expect(global_coder && global_coder->system_prompt.find("GLOBAL PRIMARY") != std::string::npos, "global primary definitions load without project trust");
+  expect(global_coder && global_coder->system_prompt.find("GLOBAL PRIMARY") != std::string::npos &&
+             global_coder->provenance == ava::agent::SubagentDefinitionProvenance::Global,
+         "global primary definitions load without project trust with explicit global provenance");
   expect(!ava::agent::resolve_primary_agent(untrusted, "primary-only"), "project-only primary definitions fail closed without trust");
 
   auto narrowed_default = ava::agent::narrow_tool_visibility_to_read_only({});

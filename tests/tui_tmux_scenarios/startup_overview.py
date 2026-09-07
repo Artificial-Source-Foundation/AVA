@@ -14,6 +14,7 @@ from tui_smoke_helpers import (
     tmux,
     wait_for,
     wait_for_absent,
+    wait_for_screen_state,
 )
 from .common import _finish_main, _main_session
 
@@ -23,6 +24,21 @@ def _assert_zero_overview_chrome(screen: str, label: str) -> None:
     # overview surface is reachable only through the exact on-demand /overview command.
     if "/overview" in screen:
         raise RuntimeError(f"{label}: fresh startup reserved persistent overview chrome rows\nscreen:\n{screen}")
+
+
+def _wait_for_closed_overview(tmux_exe: object, session: str, label: str) -> str:
+    """Wait for one frame that both dropped the overview and restored the composer.
+
+    Absence of "Startup overview" alone can be satisfied by a transient blank
+    repaint between overview teardown and the composer redraw. Requiring the
+    composer placeholder in that same captured frame proves the close finished,
+    so a blank or partially drawn frame never satisfies this wait.
+    """
+
+    def overview_closed(screen: str) -> bool:
+        return "Startup overview" not in screen and "Type a message" in screen
+
+    return wait_for_screen_state(tmux_exe, session, overview_closed, label)
 
 
 def scenario_startup_overview(ctx: SmokeContext) -> None:
@@ -89,9 +105,7 @@ def scenario_startup_overview(ctx: SmokeContext) -> None:
 
     # Esc closes without backend mutation and without resurrecting collapsed chrome.
     send_keys(tmux_exe, session, "Escape")
-    closed = wait_for_absent(tmux_exe, session, r"Startup overview", "overview closed via Esc")
-    if "Type a message" not in closed:
-        raise RuntimeError(f"closing overview did not restore composer chrome\nscreen:\n{closed}")
+    closed = _wait_for_closed_overview(tmux_exe, session, "overview closed via Esc")
     _assert_zero_overview_chrome(closed, "frame after closing overview")
     save_evidence(root, "startup-overview-closed", closed)
 
@@ -112,7 +126,7 @@ def scenario_startup_overview(ctx: SmokeContext) -> None:
     tmux(tmux_exe, "resize-window", "-t", session, "-x", "100", "-y", "24")
     wait_for(tmux_exe, session, r"Startup overview", "overview restored after resize")
     send_keys(tmux_exe, session, "Escape")
-    restored = wait_for_absent(tmux_exe, session, r"Startup overview", "overview closed after resize")
+    restored = _wait_for_closed_overview(tmux_exe, session, "overview closed after resize")
 
     after_jsonl = session_jsonl_snapshot()
     if after_jsonl != before_jsonl:

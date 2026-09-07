@@ -594,8 +594,11 @@ int run_tui(ShellState state)
         return ava::session::import_image_attachment(session_w->store, source);
       },
       .on_paste_clipboard_image = [&unlocked_session]() -> ava::core::Result<std::optional<ava::session::ImageAttachmentRef>> {
-        SCOPED_CRITICAL_AREA_W(session_w, unlocked_session);
-        return ava::app::import_clipboard_image_attachment(session_w->store);
+        auto const [store, session_process_scope] = [&unlocked_session] {
+          SCOPED_CRITICAL_AREA_R(session_r, unlocked_session);
+          return std::pair{session_r->store, session_r->session_process_scope()};
+        }();
+        return ava::app::import_clipboard_image_attachment(store, session_process_scope);
       },
       .on_external_editor = [](std::string_view initial_text) -> ava::core::Result<std::optional<std::string>> {
         return edit_text_with_external_editor(initial_text);

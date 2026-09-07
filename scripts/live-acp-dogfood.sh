@@ -4,12 +4,16 @@ IFS=$'\n\t'
 
 readonly SCRIPT_PATH="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/$(basename -- "${BASH_SOURCE[0]}")"
 readonly SOURCE_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
+# Shared standard-library fake-provider owner; the script only ever drives its
+# broker protocol, so provider process-group cleanup stays in exactly one place.
+readonly FAKE_PROVIDER_PY="$SOURCE_ROOT/tests/fake_provider.py"
 readonly FAKE_KEY="AVA_ZED_DOGFOOD_FAKE_KEY_NOT_A_SECRET"
 readonly MAX_PREFLIGHT_BYTES=16384
 readonly MAX_REPORT_BYTES=65536
 readonly MAX_RAW_FILE_BLOCKS=16384 # 16 MiB with Bash's Linux 1024-byte blocks.
 readonly MAX_ZED_FILE_BLOCKS=65536 # 64 MiB; Zed preallocates state files above the raw-log cap.
 readonly DEFAULT_OPERATOR_TIMEOUT=600
+readonly CANCELLATION_REQUEST_TIMEOUT=60
 readonly ZED_PHASE_TAG_NAME="AVA_ZED_DOGFOOD_PHASE_ROOT"
 readonly MAX_PROC_SCAN_PIDS=131072
 readonly MAX_PROC_ENVIRON_BYTES=4194304
@@ -17,6 +21,8 @@ readonly PROC_SCAN_DEADLINE_SECONDS=5
 
 provider_pid=""
 provider_port=""
+provider_broker_in_fd=""
+provider_broker_out_fd=""
 zed_pid=""
 zed_stdout_capture_pid=""
 zed_stderr_capture_pid=""
@@ -364,6 +370,7 @@ cleanup_zed_phase_processes() {
 cleanup_active_processes() {
   local status=$? phase_root=$active_phase_root
   trap - EXIT INT TERM HUP
+  close_provider_broker
   cleanup_zed_phase_processes "$phase_root" || status=1
   terminate_group "$provider_pid" || status=1
   provider_pid=""
@@ -482,30 +489,13 @@ prepare_phase_root() {
   printf '%s\n' "$phase_root"
 }
 
-wait_for_provider_port() {
-  local port_file=$1 pid=$2
-  local deadline=$((SECONDS + 5)) value
-  while ((SECONDS < deadline)); do
-    if [[ -s $port_file ]]; then
-      IFS= read -r value <"$port_file"
-      if [[ $value =~ ^[0-9]+$ ]] && ((value > 0 && value <= 65535)); then
-        printf '%s\n' "$value"
-        return 0
-      fi
-    fi
-    if ! process_group_alive "$pid" && ! kill -0 "$pid" 2>/dev/null; then
-      wait "$pid" 2>/dev/null || true
-      die "fake provider exited before publishing its loopback port for phase $active_phase"
-    fi
-    sleep 0.05
-  done
-  die "fake provider startup exceeded 5 seconds for phase $active_phase"
-}
-
 start_provider() {
   local phase_root=$1 fake_provider=$2 delay_ms=$3 scenario=$4 target=$5
-  local port_file="$phase_root/provider/port"
-  local request_log="$phase_root/raw/provider-requests.log"
+  [[ -f $FAKE_PROVIDER_PY ]] || die "shared fake-provider owner is missing: $FAKE_PROVIDER_PY"
+  local broker_in="$phase_root/raw/provider-broker-in"
+  local broker_out="$phase_root/raw/provider-broker-out"
+  rm -f -- "$broker_in" "$broker_out"
+  mkfifo -- "$broker_in" "$broker_out"
   (
     ulimit -f "$MAX_RAW_FILE_BLOCKS"
     exec setsid env -i \
@@ -517,10 +507,54 @@ start_provider() {
       XDG_RUNTIME_DIR="$phase_root/xdg-runtime" \
       TMPDIR="$phase_root/tmp" \
       PATH=/usr/bin:/bin LANG=C.UTF-8 LC_ALL=C.UTF-8 \
-      "$fake_provider" "$port_file" "$request_log" "$delay_ms" "$scenario" "$target"
-  ) >"$phase_root/raw/provider.stdout" 2>"$phase_root/raw/provider.stderr" &
+      python3 "$FAKE_PROVIDER_PY" broker \
+        --provider "$fake_provider" \
+        --directory "$phase_root/raw" \
+        --prefix provider \
+        --delay-ms "$delay_ms" \
+        --scenario "$scenario" \
+        --target "$target" \
+      <"$broker_in" >"$broker_out"
+  ) 2>"$phase_root/raw/provider.stderr" &
   provider_pid=$!
-  provider_port=$(wait_for_provider_port "$port_file" "$provider_pid")
+  exec {provider_broker_in_fd}>"$broker_in"
+  exec {provider_broker_out_fd}<"$broker_out"
+  local ready
+  if ! IFS= read -r -t 15 ready <&"$provider_broker_out_fd"; then
+    die "fake provider broker did not publish its loopback port for phase $active_phase"
+  fi
+  case $ready in
+    "ready port="[0-9]*)
+      provider_port=${ready#ready port=}
+      ;;
+    *)
+      die "fake provider broker failed for phase $active_phase: $ready"
+      ;;
+  esac
+}
+
+provider_gate_command() {
+  # Send one bounded broker protocol command (for example 'release 0').
+  local command=$1 reply
+  [[ -n $provider_broker_in_fd ]] || die "fake provider broker channel is not open"
+  printf '%s\n' "$command" >&"$provider_broker_in_fd"
+  if ! IFS= read -r -t 65 reply <&"$provider_broker_out_fd"; then
+    die "fake provider broker did not answer: $command"
+  fi
+  if [[ $reply != ok ]]; then
+    printf 'ERROR: fake provider broker: %s\n' "$reply" >&2
+    return 1
+  fi
+}
+
+close_provider_broker() {
+  # Closing the channel gives the broker EOF, which reaps the provider group.
+  if [[ -n $provider_broker_in_fd ]]; then
+    exec {provider_broker_in_fd}>&-
+    exec {provider_broker_out_fd}<&-
+    provider_broker_in_fd=""
+    provider_broker_out_fd=""
+  fi
 }
 
 start_zed() {
@@ -632,14 +666,12 @@ EOF
   else
     cat >&2 <<EOF
 
-CANCELLATION PHASE — observations are required; launch alone is never a pass.
+CANCELLATION PHASE — prompt submission comes first; do not cancel yet.
 1. In Zed, select “AVA M6 dogfood (cancellation)” as the external agent.
 2. Start a new thread rooted at: $workspace
 3. Send exactly: cancel this delayed deterministic M6 turn
-4. While the delayed provider request is in flight, cancel from Zed.
-5. Observe cancelled termination (not end_turn), then close the agent cleanly.
-6. If a screenshot is necessary, save the raw image only under: $screenshots
-Do not infer cancellation from killing Zed or from process cleanup.
+4. Wait for this launcher to confirm that provider request 0 arrived before cancelling.
+The launcher will print the cancellation and observation steps only after that gate.
 EOF
   fi
 }
@@ -693,20 +725,43 @@ run_zed_phase() {
     scenario=end-to-end-workflow
     target="$phase_root/workspace/src/todo.txt"
   else
-    delay=15000
-    scenario=text
+    # The delayed scenario holds the operator's prompt behind broker gate 0, so
+    # cancellation provably lands while the provider request is in flight; the
+    # ineffective legacy text+15000 numeric delay is gone.
+    delay=0
+    scenario=text-delayed
     target=unused
   fi
 
   start_provider "$phase_root" "$fake_provider" "$delay" "$scenario" "$target"
   write_zed_settings "$phase_root" "$ava" "$provider_port" "$phase"
   append_phase_metadata "$root" "$phase" "$phase_root" \
-    "$fake_provider <port-file> <raw-request-log> $delay $scenario <workspace-target>" \
+    "shared-owner broker -> $fake_provider ($delay $scenario gates)" \
     "$ava --acp (spawned by the exact Zed binary)"
   phase_checklist "$phase" "$phase_root/workspace" "$phase_root/raw/screenshots"
   start_zed "$phase_root" "$zed" "$display_kind" "$display" "$display_auth" "$phase_root/workspace"
+  if [[ $phase == cancellation ]]; then
+    if ! provider_gate_command "wait 0 $CANCELLATION_REQUEST_TIMEOUT"; then
+      die "cancellation prompt did not reach provider request gate 0; no cancellation outcome was requested"
+    fi
+    cat >&2 <<EOF
+
+PROVIDER REQUEST 0 CONFIRMED — now perform cancellation.
+5. Cancel the in-flight turn from Zed.
+6. Observe cancelled termination (not end_turn), then close the agent cleanly.
+7. If a screenshot is necessary, save the raw image only under: $phase_root/raw/screenshots
+Do not infer cancellation from killing Zed or from process cleanup.
+EOF
+  fi
   outcome=$(record_operator_outcome "$root" "$phase" "$operator_timeout")
 
+  if [[ $phase == cancellation ]]; then
+    # Release the delayed provider request only after the operator observed the
+    # cancelled termination. Cancellation may close the provider HTTP
+    # connection, so a failed response write after release is tolerated.
+    provider_gate_command "release 0" || true
+  fi
+  close_provider_broker
   if ! cleanup_zed_phase_processes "$phase_root"; then
     cleanup_ok=false
   fi
@@ -1067,6 +1122,7 @@ EOF
 
   trap - EXIT INT TERM HUP
   terminate_group "$zed_pid"; zed_pid=""
+  close_provider_broker
   terminate_group "$provider_pid"; provider_pid=""
   cat <<EOF
 Dogfood staging finished. The generated report remains INCOMPLETE regardless of phase input:

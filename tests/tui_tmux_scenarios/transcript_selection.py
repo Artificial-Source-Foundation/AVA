@@ -133,7 +133,7 @@ def scenario_transcript_selection(ctx: SmokeContext) -> None:
 
     send_literal(ctx.tmux, session, "credential-free ordinary provider tool selection seed")
     send_keys(ctx.tmux, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "transcript-selection provider tool request")
+    _wait_for_normal_turn_request_count(provider, 1, "transcript-selection provider tool request")
     card = wait_for(
         ctx.tmux,
         session,

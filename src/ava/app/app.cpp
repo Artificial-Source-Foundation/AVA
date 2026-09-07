@@ -228,7 +228,7 @@ void print_exit_card(ava::app::runtime::session_ts const& unlocked_session, int 
 
 }  // namespace
 
-int run(int argc, char** argv)
+int run(int argc, char** argv, ava::process::ProcessScopeV1 const& application_process_scope)
 {
   // Print a command-line error with the invoked program name and return its requested exit status.
   //
@@ -293,7 +293,7 @@ int run(int argc, char** argv)
     {
       return fatal_error(1, "trace startup failed: private diagnostics storage is unavailable.");
     }
-    return run_acp_mode(std::cerr, std::move(*diagnostics));
+    return run_acp_mode(std::cerr, application_process_scope, std::move(*diagnostics));
   }
   if (acp_trace_flags > 1)
   {
@@ -400,8 +400,8 @@ int run(int argc, char** argv)
         return fatal_error(2, "OpenAI OAuth flags require provider `openai`");
       }
       if (source == CredentialSource::BrowserOAuth)
-        return run_connect_openai_browser(paths, std::cout, std::cerr);
-      return run_connect_openai_headless(paths, std::cout, std::cerr);
+        return run_connect_openai_browser(paths, std::cout, std::cerr, application_process_scope);
+      return run_connect_openai_headless(paths, std::cout, std::cerr, application_process_scope);
     }
 
     if (source == CredentialSource::Stdin || source == CredentialSource::Env)
@@ -419,16 +419,16 @@ int run(int argc, char** argv)
     {
       return run_connect_provider_wizard(
           paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .credential_type = credential_type, .stdin_is_tty = stdin_is_tty()}, std::cin,
-          std::cout, std::cerr);
+          std::cout, std::cerr, application_process_scope);
     }
 
     if (provider && *provider == "openai")
     {
       return run_connect_openai_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
-                                       std::cout, std::cerr);
+                                       std::cout, std::cerr, application_process_scope);
     }
     return run_connect_provider_wizard(paths, ava::app::ConnectProviderWizardOptions{.provider_id = provider, .stdin_is_tty = stdin_is_tty()}, std::cin,
-                                       std::cout, std::cerr);
+                                       std::cout, std::cerr, application_process_scope);
   };
 
   for (int index = 1; index < argc; ++index)
@@ -803,6 +803,7 @@ int run(int argc, char** argv)
   }
 
   ava::app::runtime::OpenContext open_context;
+  open_context.application_process_scope = application_process_scope;
   auto cwd = ava::core::launch_workspace_root();
   if (!cwd)
   {

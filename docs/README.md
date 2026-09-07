@@ -45,6 +45,10 @@ Read the [security index](security/README.md). [Sandboxing and trust guidance](s
 
 The [development index](development/README.md) links contribution, architecture, codebase, C++ safety, side-effect, session-versioning, and internal runtime references. Documentation maintainers must also follow [`docs/AGENTS.md`](AGENTS.md) and the [documentation policy](development/documentation-policy.md).
 
+## Engineering programs
+
+The [engineering index](engineering/README.md) contains active, evidence-backed engineering programs and their reproducible ledgers, baselines, ADRs, and reports. Current architecture and policy remain under `development/`; completed ledgers remain under `history/`.
+
 ## Product and current status
 
 The [product index](product/README.md) contains canonical [product principles](product/principles.md), the single current [release-readiness cut](product/release-readiness.md), feature/capability baselines, and evidence mapping. Runtime version `1.0.0` is not a published release; complete candidate qualification and publication require the release ledger, [release checklist](operations/release-checklist.md), and publication runbook.

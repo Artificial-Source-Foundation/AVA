@@ -320,42 +320,6 @@ std::string function_call_output_input_item_json(ContentPart const& part)
          ava::core::json::escape(part.text) + "\"}";
 }
 
-ava::core::VoidResult validate_image_payloads(ProviderRequest const& request)
-{
-  for (std::size_t message_index = 0; message_index < request.messages.size(); ++message_index)
-  {
-    auto const& message = request.messages[message_index];
-    for (std::size_t part_index = 0; part_index < message.content_parts.size(); ++part_index)
-    {
-      auto const& part = message.content_parts[part_index];
-      if (part.type != ContentPartType::Image)
-        continue;
-      if (message.role != "user")
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI image content requires user role");
-        error.with_context("message_index", std::to_string(message_index));
-        error.with_context("content_part_index", std::to_string(part_index));
-        return std::unexpected(std::move(error));
-      }
-      if (!is_supported_image_mime_type(part.mime_type))
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI image MIME type is not supported");
-        error.with_context("message_index", std::to_string(message_index));
-        error.with_context("content_part_index", std::to_string(part_index));
-        return std::unexpected(std::move(error));
-      }
-      if (part.data_base64.empty() || !is_valid_base64(part.data_base64))
-      {
-        auto error = ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "OpenAI image content requires verified attachment bytes");
-        error.with_context("message_index", std::to_string(message_index));
-        error.with_context("content_part_index", std::to_string(part_index));
-        return std::unexpected(std::move(error));
-      }
-    }
-  }
-  return {};
-}
-
 ava::core::VoidResult validate_tools_json(ProviderRequest const& request)
 {
   for (std::size_t index = 0; index < request.tools_json.size(); ++index)
@@ -506,7 +470,7 @@ ava::core::Result<ava::http::HttpRequest> build_openai_responses_request(Provide
   {
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "OpenAI credential is required"));
   }
-  if (auto valid_images = validate_image_payloads(request); !valid_images)
+  if (auto valid_images = validate_outbound_image_payloads(request, "OpenAI"); !valid_images)
   {
     return std::unexpected(std::move(valid_images.error()));
   }

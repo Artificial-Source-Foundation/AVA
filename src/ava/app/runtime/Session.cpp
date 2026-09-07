@@ -171,6 +171,7 @@ void append_command_authority_root(std::vector<std::filesystem::path>& roots, st
 void SessionResources::swap(SessionResources& other)
 {
   lease.swap(other.lease);
+  session_process_scope.swap(other.session_process_scope);
   anchor_set.swap(other.anchor_set);
   run_controller.swap(other.run_controller);
   append_target.swap(other.append_target);
@@ -352,6 +353,15 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   // This function ends with a move of the newly created Session, after which that moved Session is destructed.
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::construct");
 
+  std::optional<ava::process::ProcessScopeV1> session_process_scope;
+  if (context.application_process_scope)
+  {
+    auto derived = context.application_process_scope->session();
+    if (!derived)
+      return std::unexpected(std::move(derived.error()));
+    session_process_scope = std::move(*derived);
+  }
+
   // Provider catalog is application-scoped authority. Resolve it before any
   // session-file mutation so unsafe providers.json fails closed at startup.
   auto provider_catalog = ava::provider::ensure_provider_catalog(context.provider_catalog, context.paths);
@@ -423,28 +433,38 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   if (loaded_entries)
     reasoning = latest_persisted_reasoning(*loaded_entries, model);
 
-  auto project_trust = load_project_trust_state(context.paths, workspace_dir);
-  std::optional<ava::agent::SubagentDefinition> selected_primary_agent;
-  if (context.requested_primary_agent)
+  if (!delivery_manager)
   {
-    auto global_agent_dirs = ava::agent::default_global_subagent_dirs();
-    if (global_agent_dirs.size() >= 2)
-    {
-      global_agent_dirs[0] = context.paths.ava_config_dir / "agents";
-      global_agent_dirs[1] = context.paths.ava_config_dir / "agent";
-    }
-    auto loaded_agents = ava::agent::load_subagents(ava::agent::SubagentLoadOptions{.workspace_root = workspace_dir,
-                                                                                    .global_agent_dirs = std::move(global_agent_dirs),
-                                                                                    .include_project_agents = project_resources_trusted(project_trust)});
-    auto resolved = ava::agent::resolve_primary_agent(loaded_agents, *context.requested_primary_agent);
-    if (!resolved)
-      return std::unexpected(std::move(resolved.error()));
-    selected_primary_agent = std::move(*resolved);
+    auto created_manager = delivery_manager_for_context(context);
+    if (!created_manager)
+      return std::unexpected(std::move(created_manager.error()));
+    delivery_manager = std::move(*created_manager);
   }
-  auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_resources_trusted(project_trust),
-                                                context.prompt_overrides, selected_primary_agent);
+  // This manager normalizes the workspace key. Holding the move-only
+  // reservation across authority resolution, controller registration, and the
+  // returned Session publication linearizes construction's trust read against
+  // revocation persistence.
+  auto reserved_construction = delivery_manager->reserve_workspace_navigation(workspace_dir);
+  if (!reserved_construction)
+    return std::unexpected(std::move(reserved_construction.error()));
+  auto construction_reservation = std::move(*reserved_construction);
+
+  auto project_trust = load_project_trust_state(context.paths, workspace_dir);
+  bool const project_trusted = project_resources_trusted(project_trust);
+  auto selected_primary_agent = resolve_runtime_primary_agent(
+      context.paths, workspace_dir, project_trusted, context.requested_primary_agent,
+      context.allow_unavailable_primary_agent ? PrimaryAgentResolutionPolicy::AllowUnavailable : PrimaryAgentResolutionPolicy::RequireAvailable);
+  if (!selected_primary_agent)
+    return std::unexpected(std::move(selected_primary_agent.error()));
+  auto prompt_state = load_runtime_prompt_state(context.paths, model, context.mode, workspace_dir, current_dir, project_trusted, context.prompt_overrides,
+                                                *selected_primary_agent);
   if (!prompt_state)
     return std::unexpected(prompt_state.error());
+  if (project_trusted)
+  {
+    if (auto hooked = delivery_manager->run_construction_after_trusted_prompt_resolution_test_hook(); !hooked)
+      return std::unexpected(std::move(hooked.error()));
+  }
 
   if (should_append_session_start)
   {
@@ -566,13 +586,6 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
       return std::unexpected(std::move(bound.error()));
   }
 
-  if (!delivery_manager)
-  {
-    auto created_manager = delivery_manager_for_context(context);
-    if (!created_manager)
-      return std::unexpected(std::move(created_manager.error()));
-    delivery_manager = std::move(*created_manager);
-  }
   if (!title_coordinator)
   {
     auto created_coordinator = title_coordinator_for_context(context, anchor_set);
@@ -582,14 +595,15 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
   }
 
   auto effective_tool_visibility = context.tool_visibility;
-  if (selected_primary_agent && selected_primary_agent->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
+  if (*selected_primary_agent && (*selected_primary_agent)->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
     effective_tool_visibility = ava::agent::narrow_tool_visibility_to_read_only(std::move(effective_tool_visibility));
 
   InvocationInputs invocation_inputs{.workspace_dir = workspace_dir,
                                      .current_dir = current_dir,
                                      .requested_tool_visibility = context.tool_visibility,
                                      .tool_visibility = std::move(effective_tool_visibility),
-                                     .selected_primary_agent = std::move(selected_primary_agent),
+                                     .requested_primary_agent = context.requested_primary_agent,
+                                     .selected_primary_agent = std::move(*selected_primary_agent),
                                      .paths = context.paths,
                                      .sessionless = sessionless,
                                      .is_offline_ = context.offline,
@@ -604,9 +618,21 @@ ava::core::Result<session_ts> Session::construct(OpenContext const& context, run
                                             .ambient_extension_free_system_prompt = std::move(prompt_state->ambient_extension_free_system_prompt)};
   ModelSelection model_selection{.model = std::move(model), .reasoning = std::move(reasoning), .scoped_model_cycle = registry.scoped_model_cycle};
   TrustState trust_state{.project_trust = std::move(project_trust)};
+  std::shared_ptr<SessionRunController> run_controller;
+  try
+  {
+    run_controller = std::make_shared<SessionRunController>(*append_target);
+  }
+  catch (...)
+  {
+    return std::unexpected(ava::core::Error(ava::core::ErrorCategory::Unknown, "failed to allocate the runtime session controller"));
+  }
+  if (auto registered = delivery_manager->register_workspace_controller(workspace_dir, store.session_id(), run_controller); !registered)
+    return std::unexpected(std::move(registered.error()));
   SessionResources resources{.lease = std::move(lease),
+                             .session_process_scope = std::move(session_process_scope),
                              .anchor_set = std::move(anchor_set),
-                             .run_controller = std::make_shared<SessionRunController>(*append_target),
+                             .run_controller = std::move(run_controller),
                              .append_target = std::move(*append_target),
                              .subagent_coordinator = delivery_manager->coordinator(),
                              .subagent_delivery_manager = std::move(delivery_manager),
@@ -662,6 +688,7 @@ Session_aggregate_base Session::create_detached_state(ava::session::SessionLease
                                                       std::shared_ptr<ava::app::SubagentDeliveryManager> manager) const
 {
   SessionResources session_resources{.lease = std::move(lease),
+                                     .session_process_scope = session_process_scope(),
                                      .anchor_set = anchor_set(),
                                      .run_controller = run_controller(),
                                      .append_target = append_target(),
@@ -698,6 +725,48 @@ ava::core::VoidResult Session::replace_with(session_ts& unlocked_current, sessio
 
   if (&unlocked_current == &unlocked_replacement)
     return std::unexpected(ava::core::Error(ava::core::ErrorCategory::InvalidArgument, "cannot replace a session with itself"));
+
+  struct NavigationSnapshot
+  {
+    std::shared_ptr<SubagentDeliveryManager> manager;
+    std::filesystem::path workspace;
+    std::shared_ptr<SessionRunController> controller;
+    AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
+  };
+  NavigationSnapshot current_navigation;
+  NavigationSnapshot replacement_navigation;
+  {
+    SCOPED_CRITICAL_AREA_R(current_r, unlocked_current);
+    current_navigation = {
+        .manager = current_r->subagent_delivery_manager(), .workspace = current_r->workspace_dir(), .controller = current_r->run_controller()};
+  }
+  {
+    SCOPED_CRITICAL_AREA_R(replacement_r, unlocked_replacement);
+    replacement_navigation = {
+        .manager = replacement_r->subagent_delivery_manager(), .workspace = replacement_r->workspace_dir(), .controller = replacement_r->run_controller()};
+  }
+  std::vector<SubagentDeliveryManager::WorkspaceNavigationReservation> navigation_reservations;
+  if (current_navigation.manager)
+  {
+    auto reserved = current_navigation.manager->reserve_workspace_navigation(current_navigation.workspace);
+    if (!reserved)
+      return std::unexpected(std::move(reserved.error()));
+    navigation_reservations.push_back(std::move(*reserved));
+  }
+  if (replacement_navigation.manager)
+  {
+    auto reserved = replacement_navigation.manager->reserve_workspace_navigation(replacement_navigation.workspace);
+    if (!reserved)
+      return std::unexpected(std::move(reserved.error()));
+    navigation_reservations.push_back(std::move(*reserved));
+  }
+  if (!current_navigation.controller || !replacement_navigation.controller || current_navigation.controller->authority_retired() ||
+      replacement_navigation.controller->authority_retired())
+  {
+    auto error = ava::core::Error(ava::core::ErrorCategory::PermissionDenied, "runtime session authority was retired");
+    error.with_context("recovery", "reopen the session before navigating");
+    return std::unexpected(std::move(error));
+  }
 
   // We can't destroy any resources while holding session locks; therefore keep a store for them outside the critical area.
   SessionResources old_resources;
@@ -830,13 +899,18 @@ OpenContext Session::replacement_open_context(runtime::OpenContext const& base_c
   context.current_dir = current_dir();
   context.mode = mode();
   context.tool_visibility = invocation_inputs().requested_tool_visibility;
-  context.requested_primary_agent = selected_primary_agent() ? std::optional<std::string>(selected_primary_agent()->name) : std::nullopt;
+  context.requested_primary_agent = requested_primary_agent();
+  context.allow_unavailable_primary_agent = true;
   context.paths = paths();
   context.offline = is_offline();
   context.additional_writable_dirs = additional_writable_dirs();
   context.anchor_set = sessionless() ? nullptr : anchor_set();
   context.prompt_overrides = prompt_overrides();
   context.session_read_limits = session_read_limits();
+  if (session_process_scope())
+    context.application_process_scope = session_process_scope()->application_scope();
+  else
+    context.application_process_scope.reset();
   context.subagent_coordinator = subagent_coordinator();
   context.subagent_delivery_manager = subagent_delivery_manager();
   context.session_title_coordinator = session_title_coordinator();
@@ -920,6 +994,32 @@ ava::core::VoidResult Session::apply_prompt_state_and_refresh(session_ts& unlock
 {
   AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_prompt_state_and_refresh");
   CRITICAL_AREA_BEGIN_W(session);
+  auto applied = session_w->apply_prompt_state(std::move(prompt_state));
+  CRITICAL_AREA_END_W(session);
+  if (!applied)
+    return applied;
+  return refresh_parent_configuration(unlocked_session);
+}
+
+//static
+ava::core::VoidResult Session::apply_trust_prompt_state_and_refresh(session_ts& unlocked_session, ProjectTrustState project_trust,
+                                                                    std::optional<ava::agent::SubagentDefinition> selected_primary_agent,
+                                                                    PromptState prompt_state)
+{
+  AVA_ASSERT_NO_SESSION_LOCK_HELD("calling Session::apply_trust_prompt_state_and_refresh");
+  bool const selected_primary_agent_is_non_project =
+      selected_primary_agent && (selected_primary_agent->provenance == ava::agent::SubagentDefinitionProvenance::Builtin ||
+                                 selected_primary_agent->provenance == ava::agent::SubagentDefinitionProvenance::Global);
+  if (selected_primary_agent && !project_resources_trusted(project_trust) && !selected_primary_agent_is_non_project)
+    selected_primary_agent.reset();
+
+  CRITICAL_AREA_BEGIN_W(session);
+  auto effective_tool_visibility = session_w->tool_visibility();
+  if (selected_primary_agent && selected_primary_agent->tool_preset == ava::agent::SubagentToolPreset::ReadOnly)
+    effective_tool_visibility = ava::agent::narrow_tool_visibility_to_read_only(std::move(effective_tool_visibility));
+  session_w->trust_state().project_trust = std::move(project_trust);
+  session_w->invocation_inputs().tool_visibility = std::move(effective_tool_visibility);
+  session_w->invocation_inputs().selected_primary_agent = std::move(selected_primary_agent);
   auto applied = session_w->apply_prompt_state(std::move(prompt_state));
   CRITICAL_AREA_END_W(session);
   if (!applied)

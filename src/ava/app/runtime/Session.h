@@ -58,6 +58,8 @@ struct InvocationInputs
   // Invocation-requested visibility is retained separately so a replacement can re-resolve primary policy from the original CLI boundary.
   ava::agent::ToolVisibilityOptions requested_tool_visibility = {};
   ava::agent::ToolVisibilityOptions tool_visibility = {};
+  // Keep bounded selection intent separately from the currently permitted, provenance-carrying definition.
+  std::optional<std::string> requested_primary_agent = std::nullopt;
   std::optional<ava::agent::SubagentDefinition> selected_primary_agent = std::nullopt;
   ava::config::XdgPaths paths;
   bool sessionless;
@@ -137,6 +139,9 @@ struct SessionResources
 {
   // Persistent runtime owners hold a cross-process lease for the complete session lifetime.
   ava::session::SessionLease lease;
+  // One generated session owner, when explicit application process authority
+  // was supplied. Copies representing this same runtime session share it.
+  std::optional<ava::process::ProcessScopeV1> session_process_scope = std::nullopt;
   // Pre-opened anchor descriptors for all writable directories. Opened once
   // at session creation and shared across all prompts and subagent loops.
   std::shared_ptr<ava::core::AnchorSet> anchor_set = nullptr;
@@ -308,6 +313,7 @@ class Session : protected Session_aggregate_base
   std::filesystem::path const& workspace_dir() const { return invocation_inputs_.workspace_dir; }
   std::filesystem::path const& current_dir() const noexcept { return invocation_inputs_.current_dir; }
   ava::agent::ToolVisibilityOptions const& tool_visibility() const { return invocation_inputs_.tool_visibility; }
+  std::optional<std::string> const& requested_primary_agent() const { return invocation_inputs_.requested_primary_agent; }
   std::optional<ava::agent::SubagentDefinition> const& selected_primary_agent() const { return invocation_inputs_.selected_primary_agent; }
   ava::config::XdgPaths const& paths() const { return invocation_inputs_.paths; }
   bool sessionless() const { return invocation_inputs_.sessionless; }
@@ -335,6 +341,7 @@ class Session : protected Session_aggregate_base
 
   // Session resources.
   ava::session::SessionLease const& lease() const { return resources_.lease; }
+  std::optional<ava::process::ProcessScopeV1> const& session_process_scope() const { return resources_.session_process_scope; }
   std::shared_ptr<ava::core::AnchorSet> const& anchor_set() const { return resources_.anchor_set; }
   std::shared_ptr<SessionRunController> const& run_controller() const { return resources_.run_controller; }
   std::shared_ptr<ava::session::SessionAppendTarget> const& append_target() const { return resources_.append_target; }
@@ -422,8 +429,10 @@ class Session : protected Session_aggregate_base
   // Build replacement OpenContext from this session and `base_context`.
   //
   // Runtime context, filesystem policy, resolved read limits, and shared
-  // application services are inherited from this session. Frontend policy in
-  // `base_context`, including model pinning and exact-ID behavior, is retained.
+  // application services are inherited from this session. A stored process
+  // scope is reduced to its application root so the replacement derives one
+  // fresh session owner. Frontend policy in `base_context`, including model
+  // pinning and exact-ID behavior, is retained.
   // An ephemeral session's AnchorSet is not inherited because its temporary
   // spill root cannot authorize a new persistent or ephemeral store.
   [[nodiscard]] OpenContext replacement_open_context(OpenContext const& base_context) const;
@@ -454,6 +463,12 @@ class Session : protected Session_aggregate_base
 
   // Apply prompt_state to unlocked_session, release its write lock, then synchronously refresh retained parent configuration.
   [[nodiscard]] static ava::core::VoidResult apply_prompt_state_and_refresh(session_ts& unlocked_session, PromptState prompt_state);
+
+  // Atomically publish a trust transition with its permitted primary definition, sticky effective tool visibility, and reconstructed prompt state, then
+  // refresh retained parent configuration after releasing the session lock.
+  [[nodiscard]] static ava::core::VoidResult apply_trust_prompt_state_and_refresh(session_ts& unlocked_session, ProjectTrustState project_trust,
+                                                                                  std::optional<ava::agent::SubagentDefinition> selected_primary_agent,
+                                                                                  PromptState prompt_state);
 
   // Switch the active model to `model`, re-deriving the prompt state for the
   // current mode and clearing any active reasoning selection.

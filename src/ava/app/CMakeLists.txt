@@ -116,6 +116,7 @@ target_link_libraries(ava_app
   PRIVATE
     AVA::context
     AVA::plugin
+    AVA::process
     nlohmann_json::nlohmann_json
 )
 

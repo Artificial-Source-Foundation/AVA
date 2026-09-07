@@ -1,6 +1,7 @@
 #include "sys.h"
 #include "tests/support/app_runtime_support.h"
 #include "tests/support/golden.h"
+#include "tests/support/process_group_test_support.h"
 #include "tests/support/test_harness.h"
 #include "ava/event/RuntimeEvent.h"
 #include "ava/app/command_plugins.h"
@@ -27,6 +28,7 @@
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <sstream>
@@ -45,7 +47,13 @@
 #define AVA_SAMPLE_TODO_PLUGIN_DIR ""
 #endif
 
+#ifndef AVA_FAKE_PLUGIN_CHILD_PATH
+#define AVA_FAKE_PLUGIN_CHILD_PATH ""
+#endif
+
 namespace {
+
+using ava::test::wait_for_process_group_exit;
 
 using PluginDescriptorExecutor = decltype(ava::plugin::PluginBrokeredTool::executor);
 static_assert(
@@ -119,25 +127,6 @@ std::optional<pid_t> read_pid_file_for_test(std::filesystem::path const& path)
   if (!file || value <= 0)
     return std::nullopt;
   return static_cast<pid_t>(value);
-}
-
-bool process_group_exists(pid_t pgid)
-{
-  errno = 0;
-  if (::kill(-pgid, 0) == 0)
-    return true;
-  return errno != ESRCH;
-}
-
-bool wait_for_process_group_exit(pid_t pgid)
-{
-  for (int index = 0; index < 100; ++index)
-  {
-    if (!process_group_exists(pgid))
-      return true;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  }
-  return !process_group_exists(pgid);
 }
 
 std::string shell_single_quote(std::string_view value)
@@ -260,6 +249,16 @@ std::string dynamic_resource_manifest_json(std::string id, std::string script_na
 //
 // The caller supplies the isolated XDG paths and workspace. Test setup failures are reported before
 // returning the successfully opened Session by value.
+std::optional<ava::process::ProcessScopeV1> plugin_test_process_scope()
+{
+  auto supervisor = std::make_shared<ava::process::Supervisor>();
+  auto scope = ava::process::ProcessScopeV1::application(std::move(supervisor));
+  expect(scope.has_value(), scope ? "plugin test process scope is available" : "plugin test process scope is available: " + scope.error().format());
+  if (!scope)
+    return std::nullopt;
+  return std::move(*scope);
+}
+
 ava::app::runtime::session_ts plugin_command_test_session(ava::config::XdgPaths const& paths, std::filesystem::path const& workspace)
 {
   auto trusted = ava::app::set_project_trust_decision(paths, workspace, true);
@@ -269,6 +268,7 @@ ava::app::runtime::session_ts plugin_command_test_session(ava::config::XdgPaths 
   context.workspace_dir = workspace;
   context.current_dir = workspace;
   context.paths = paths;
+  context.application_process_scope = plugin_test_process_scope();
   auto unlocked_session_result = ava::app::runtime::Session::open(context, {.sessionless = true,
                                                                             .requested_session_id = std::nullopt,
                                                                             .fork_session_id = std::nullopt,
@@ -304,6 +304,7 @@ ava::plugin::PluginRunnerOptions runner_options(std::filesystem::path const& wor
   options.startup_timeout = startup_timeout;
   options.max_record_bytes = 64 * 1024;
   options.max_stderr_bytes = 64 * 1024;
+  options.process_scope = plugin_test_process_scope();
   return options;
 }
 
@@ -311,8 +312,10 @@ std::string nested_arrays_json(std::size_t depth)
 {
   std::string text;
   text.reserve(depth * 2);
-  for (std::size_t index = 0; index < depth; ++index) text += '[';
-  for (std::size_t index = 0; index < depth; ++index) text += ']';
+  for (std::size_t index = 0; index < depth; ++index)
+    text += '[';
+  for (std::size_t index = 0; index < depth; ++index)
+    text += ']';
   return text;
 }
 
@@ -360,6 +363,7 @@ ava::tools::ToolContext plugin_proxy_test_context(std::filesystem::path const& w
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
+  context.process_scope = plugin_test_process_scope();
   context.session_id = "ses_proxy_test";
   context.provider_id = "openai";
   context.model_id = "gpt-test";
@@ -429,9 +433,11 @@ void test_plugin_manifest_parsing()
   std::string deeply_nested_manifest =
       "{\"schema_version\":1,\"id\":\"com.example.deep\",\"name\":\"Deep\",\"version\":\"0.1\","
       "\"api_version\":\"ava.plugin.v1\",\"entrypoint\":{\"command\":\"node\"},\"extra\":";
-  for (int index = 0; index < 70; ++index) deeply_nested_manifest += '[';
+  for (int index = 0; index < 70; ++index)
+    deeply_nested_manifest += '[';
   deeply_nested_manifest += "0";
-  for (int index = 0; index < 70; ++index) deeply_nested_manifest += ']';
+  for (int index = 0; index < 70; ++index)
+    deeply_nested_manifest += ']';
   deeply_nested_manifest += '}';
   auto deep = ava::plugin::parse_plugin_manifest(deeply_nested_manifest, {});
   expect(!deep && deep.error().message().find("maximum JSON depth") != std::string::npos,
@@ -873,33 +879,24 @@ void test_plugin_runner_initializes_and_shuts_down()
   }
 }
 
-void test_plugin_runner_accepts_buffered_extra_records()
+void test_plugin_runner_rejects_oversized_buffered_extra_records()
 {
   auto const root = create_empty_root("plugin-runner-buffered");
 
   auto const workspace = root / "workspace";
   auto const plugin_dir = root / "plugins" / "com.example.buffered";
   std::filesystem::create_directories(workspace);
+  std::filesystem::create_directories(plugin_dir);
 
-  write_text(plugin_dir / "plugin.sh",
-             "read line\n"
-             "printf '%s\\n' '{\"id\":\"ava_1\",\"type\":\"initialized\",\"api_version\":\"ava."
-             "plugin.v1\",\"plugin_version\":\"0.1.0\",\"contributions\":{}}'\n"
-             "printf '%s\\n' '" +
-                 std::string(300, 'x') +
-                 "'\n"
-                 "while read line; do :; done\n");
-
+  auto manifest = runner_manifest(plugin_dir, "com.example.buffered", "unused");
+  manifest.entrypoint.command = AVA_FAKE_PLUGIN_CHILD_PATH;
+  manifest.entrypoint.args = {"oversized-buffered-initialize"};
   auto options = runner_options(workspace, std::chrono::milliseconds(500));
   options.max_record_bytes = 256;
-  auto process = ava::plugin::PluginProcess::start(runner_manifest(plugin_dir, "com.example.buffered", "plugin.sh"), options);
-  expect(process.has_value(), process ? "plugin runner accepts buffered records after initialize"
-                                      : "plugin runner accepts buffered records after initialize: " + process.error().format());
-  if (process)
-  {
-    auto shutdown = (*process)->shutdown(std::chrono::milliseconds(500));
-    expect(shutdown.has_value(), "plugin runner shuts down after buffered records");
-  }
+  auto process = ava::plugin::PluginProcess::start(std::move(manifest), options);
+  expect(!process && process.error().format().find("output_limit: true") != std::string::npos,
+         process ? "plugin runner rejects every oversized complete record already buffered after initialize"
+                 : "plugin runner rejects every oversized complete record already buffered after initialize: " + process.error().format());
 }
 
 void test_plugin_runner_contained_failures()
@@ -927,7 +924,8 @@ void test_plugin_runner_contained_failures()
   expect(!unsupported && unsupported.error().message().find("unsupported") != std::string::npos, "plugin runner rejects unsupported handshake API versions");
 
   std::string deep_contributions = "{}";
-  for (int i = 0; i < 160; ++i) deep_contributions = "{\"x\":" + deep_contributions + "}";
+  for (int i = 0; i < 160; ++i)
+    deep_contributions = "{\"x\":" + deep_contributions + "}";
   auto const deep_dir = root / "plugins" / "com.example.deep";
   write_text(deep_dir / "plugin.sh",
              "read line\n"
@@ -952,9 +950,16 @@ void test_plugin_runner_contained_failures()
       ava::plugin::PluginProcess::start(runner_manifest(startup_cancel_dir, "com.example.startupcancel", "plugin.sh"), startup_cancel_options,
                                         [&] { return read_pid_file_for_test(startup_cancel_pgid_file).has_value(); });
   auto const startup_cancel_pgid = read_pid_file_for_test(startup_cancel_pgid_file);
-  expect(!startup_canceled && startup_canceled.error().message().find("canceled") != std::string::npos && startup_cancel_pgid &&
-             wait_for_process_group_exit(*startup_cancel_pgid),
-         "plugin runner cancels hung startup and terminates the plugin process group before timeout");
+  auto const startup_cancel_category = startup_canceled ? std::string{} : ava::core::to_string(startup_canceled.error().category());
+  std::string const startup_cancel_message = startup_canceled ? std::string{} : startup_canceled.error().message();
+  std::string const startup_cancel_format = startup_canceled ? std::string{} : startup_canceled.error().format();
+  bool const startup_cancel_group_exited = startup_cancel_pgid && wait_for_process_group_exit(*startup_cancel_pgid);
+  expect(!startup_canceled, "canceled plugin startup returns a failed result instead of a process");
+  expect(!startup_canceled && startup_cancel_message.find("canceled") != std::string::npos && startup_cancel_format.find("canceled: true") != std::string::npos,
+         "canceled plugin startup keeps a stable cancellation category, message, and context [category=" + startup_cancel_category +
+             "]: " + startup_cancel_format);
+  expect(startup_cancel_pgid.has_value(), "canceled plugin startup child publishes its process-group marker");
+  expect(startup_cancel_group_exited, "canceled plugin startup terminates the plugin process group before timeout");
 
   auto const exited_dir = root / "plugins" / "com.example.exited";
   write_text(exited_dir / "plugin.sh",
@@ -1582,6 +1587,7 @@ void test_enabled_plugin_event_hooks_observe_runtime_events()
                                              prompts.push_back(prompt);
                                              return ava::permissions::PermissionResolution::Allow;
                                            },
+                                           .process_scope = plugin_test_process_scope(),
                                            .session_id = "ses_event_test",
                                            .provider_id = "openai",
                                            .model_id = "gpt-test",
@@ -1656,6 +1662,7 @@ void test_plugin_event_hook_failures_report_to_opt_in_sink()
           .permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
             return ava::permissions::PermissionResolution::Allow;
           },
+          .process_scope = plugin_test_process_scope(),
           .hook_failure_sink =
               [&failures](std::string_view plugin_id, std::string_view event_name, ava::core::Error const& error) {
                 failures.push_back(CapturedFailure{.plugin_id = std::string(plugin_id),
@@ -1744,6 +1751,7 @@ void test_plugin_tool_dispatcher()
     return {};
   };
   context.cancel_requested = [&] { return cancel_requested; };
+  context.process_scope = plugin_test_process_scope();
 
   auto const schemas = ava::agent::ToolDispatcher::tool_schemas_json(context);
   auto const plugin_schema = std::find_if(schemas.begin(), schemas.end(), [&](std::string const& schema) {
@@ -2219,6 +2227,7 @@ void test_plugin_tool_dispatcher_rejects_invalid_result()
   context.permission_resolver = [](ava::permissions::PermissionPrompt const&) -> ava::core::Result<ava::permissions::PermissionResolutionDecision> {
     return ava::permissions::PermissionResolution::Allow;
   };
+  context.process_scope = plugin_test_process_scope();
 
   auto const model_tool_name = ava::plugin::plugin_model_tool_name("com.example.invalid", "todo_add");
   ava::agent::ToolDispatcher dispatcher(context);
@@ -2291,7 +2300,7 @@ void run_plugin_tests()
   test_plugin_discovery();
   test_plugin_enablement();
   test_plugin_runner_initializes_and_shuts_down();
-  test_plugin_runner_accepts_buffered_extra_records();
+  test_plugin_runner_rejects_oversized_buffered_extra_records();
   test_plugin_runner_contained_failures();
   test_plugin_runner_tool_calls();
   test_plugin_runner_command_calls();

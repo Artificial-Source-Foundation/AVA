@@ -191,7 +191,7 @@ def scenario_main_slash_completions(ctx: SmokeContext) -> None:
     ordinary_seed = "LOCAL-COMMAND-TRANSCRIPT-SEED"
     send_literal(tmux_exe, session, ordinary_seed)
     send_keys(tmux_exe, session, "Enter")
-    _wait_for_normal_turn_request_count(provider.request_log, 1, "slash command-output ordinary provider request")
+    _wait_for_normal_turn_request_count(provider, 1, "slash command-output ordinary provider request")
     wait_for(tmux_exe, session, r"headless active prompt complete", "slash command-output ordinary provider completion")
     wait_for_absent(tmux_exe, session, r"Esc stop|processing", "slash command-output provider turn settled")
 

@@ -15,6 +15,7 @@ Use one primary home for each kind of information:
 | Users/operators | `docs/core/`, `docs/interfaces/`, `docs/operations/` | current commands, configuration, interfaces, behavior, limits, and recovery |
 | Client/extension authors | `docs/extensions/` plus fixed contracts in `docs/` | current setup/authoring guides and versioned normative wire/file contracts |
 | Maintainers | `docs/development/` and [`docs/AGENTS.md`](../AGENTS.md) | current architecture, source map, invariants, and engineering/documentation policy |
+| Active engineering programs | `docs/engineering/` | evidence-backed programs, reproducible ledgers, baselines, ADRs, and report sets |
 | Security | `docs/security/` | practical threat guidance plus fixed verified guarantees and limitations |
 | Testing/release | `docs/operations/testing.md`, `docs/operations/release-checklist.md` | reproducible validation and release gates |
 | Product state | `docs/product/` | current capability baselines and evidence mappings |
@@ -22,7 +23,7 @@ Use one primary home for each kind of information:
 | History/evidence | `docs/history/`, `docs/versions/`, `docs/interop/` | what was claimed or observed at a particular point in time; `docs/interop/evidence/` holds the dated reports |
 | Schemas/machine status | `docs/schema/`, JSON manifests | machine-readable contracts or status checked by tests |
 
-The mechanically allowed top-level taxonomy is `core`, `interfaces`, `extensions`, `operations`, `development`, `security`, `product`, `plans`, `roadmap`, `goals`, `history`, `versions`, `interop`, and `schema`, plus optional excluded `reference-code`. Only `README.md`, `AGENTS.md`, `acp.md`, `acp-support.json`, `rpc-protocol.md`, `headless-protocol.md`, `session-format.md`, and `plugin-compatibility-policy.md` remain as fixed `docs/`-root files. Every owned category has its required `README.md`; nested implementation inputs such as `operations/docker/Dockerfile` are not document graph nodes.
+The mechanically allowed top-level taxonomy is `core`, `interfaces`, `extensions`, `operations`, `development`, `engineering`, `security`, `product`, `plans`, `roadmap`, `goals`, `history`, `versions`, `interop`, and `schema`, plus optional excluded `reference-code`. `engineering/` is narrowly reserved for active, evidence-backed engineering programs and the reproducible ledgers, baselines, ADRs, and report sets that support them. Current general architecture and policy remain under `development/`; historical completed ledgers remain under `history/`. Only `README.md`, `AGENTS.md`, `acp.md`, `acp-support.json`, `rpc-protocol.md`, `headless-protocol.md`, `session-format.md`, and `plugin-compatibility-policy.md` remain as fixed `docs/`-root files. Every owned category has its required `README.md`; nested implementation inputs such as `operations/docker/Dockerfile` are not document graph nodes.
 
 Do not make a historical ledger, roadmap, or reference checkout the only place
 that current user or maintainer behavior is explained. `docs/reference-code/`

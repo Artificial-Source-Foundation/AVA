@@ -23,7 +23,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Callable
 
-from process_gate import PROCESS_GATE_FD_ENV, ProcessGateSet, create_process_gate_pair
+from fake_provider import FakeProvider, launch_fake_provider
 from test_timing_trace import timed_operation, timing_poll
 
 
@@ -398,22 +398,6 @@ def wait_for_session_exit(tmux_client: TmuxClient, session: str, timeout: float 
     raise RuntimeError(f"tmux session did not exit\nscreen:\n{screen}")
 
 
-@timed_operation("provider_wait", label_argument="label")
-def wait_for_request_count(path: pathlib.Path, expected_count: int, label: str, timeout: float = 8.0) -> str:
-    deadline = time.monotonic() + timeout
-    last = ""
-    while time.monotonic() < deadline:
-        timing_poll()
-        if path.exists():
-            last = path.read_text(encoding="utf-8", errors="replace")
-            if last.count("--- request ") >= expected_count:
-                return last
-        time.sleep(POLL_INTERVAL)
-    raise RuntimeError(
-        f"timed out waiting for {label}; expected at least {expected_count} provider requests\nlast log:\n{last}"
-    )
-
-
 @timed_operation("wait", label_argument="label")
 def wait_for_json_file(path: pathlib.Path, predicate: Callable[[object], bool], label: str, timeout: float = 8.0) -> str:
     deadline = time.monotonic() + timeout
@@ -432,83 +416,6 @@ def wait_for_json_file(path: pathlib.Path, predicate: Callable[[object], bool], 
                 last_error = str(exc)
         time.sleep(POLL_INTERVAL)
     raise RuntimeError(f"timed out waiting for {label}; {last_error}\nlast content:\n{last}")
-
-
-@timed_operation("observation", label_argument="label")
-def assert_request_count_stays(path: pathlib.Path, expected_count: int, label: str, duration: float = 1.2) -> str:
-    deadline = time.monotonic() + duration
-    last = path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
-    while time.monotonic() < deadline:
-        timing_poll()
-        if path.exists():
-            last = path.read_text(encoding="utf-8", errors="replace")
-        count = last.count("--- request ")
-        if count != expected_count:
-            raise RuntimeError(
-                f"{label}; expected exactly {expected_count} provider requests, saw {count}\nrequest log:\n{last}"
-            )
-        time.sleep(POLL_INTERVAL)
-    return last
-
-
-@dataclass
-class FakeProvider:
-    """Own one fake-provider process and its harness-side control gates.
-
-    The provider opens gate N after recording zero-based HTTP request N. Tests
-    may also open gates in the reverse direction for scenario-specific barriers;
-    stopping the provider closes the control endpoint after process cleanup.
-    """
-
-    root: pathlib.Path
-    name: str
-    process: subprocess.Popen[str]
-    port_file: pathlib.Path
-    request_log: pathlib.Path
-    stdout_path: pathlib.Path
-    stderr_path: pathlib.Path
-    gates: ProcessGateSet
-    _stdout: object
-    _stderr: object
-
-    @property
-    def port(self) -> str:
-        return self.port_file.read_text(encoding="utf-8").strip()
-
-    @timed_operation("provider_gate", label_argument="label")
-    def wait_for_request(self, request_index: int, label: str, timeout: float = 8.0) -> None:
-        """Wait until the provider records zero-based ``request_index``."""
-
-        self.gates.wait(request_index, timeout)
-
-    def release_request(self, request_index: int) -> None:
-        """Allow a gate-delayed zero-based provider request to respond."""
-
-        self.gates.open(request_index)
-
-    @timed_operation("cleanup", label_argument="name", default_label="fake provider cleanup")
-    def stop(self) -> None:
-        if self.process.poll() is None:
-            try:
-                os.killpg(self.process.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
-            try:
-                self.process.wait(timeout=2.0)
-            except subprocess.TimeoutExpired:
-                try:
-                    os.killpg(self.process.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                try:
-                    self.process.wait(timeout=2.0)
-                except subprocess.TimeoutExpired:
-                    pass
-        if not self._stdout.closed:
-            self._stdout.close()
-        if not self._stderr.closed:
-            self._stderr.close()
-        self.gates.close()
 
 
 @dataclass
@@ -831,60 +738,16 @@ class SmokeContext:
         that only the child retains its endpoint after ``Popen`` succeeds.
         """
 
-        port_file = self.root / f"{name}-provider.port"
-        request_log = self.root / f"{name}-provider-requests.log"
-        stdout_path = self.root / f"{name}-provider.out"
-        stderr_path = self.root / f"{name}-provider.err"
-        port_file.unlink(missing_ok=True)
-        request_log.unlink(missing_ok=True)
-        stdout = stdout_path.open("w", encoding="utf-8")
-        stderr = stderr_path.open("w", encoding="utf-8")
-        gate_pair = create_process_gate_pair()
-        provider_environment = self._environment.copy()
-        provider_environment[PROCESS_GATE_FD_ENV] = str(gate_pair.child_fd)
-        try:
-            process = subprocess.Popen(
-                [str(self.fake_provider_exe), str(port_file), str(request_log), str(delay_ms), scenario, str(target)],
-                stdout=stdout,
-                stderr=stderr,
-                env=provider_environment,
-                pass_fds=(gate_pair.child_fd,),
-                start_new_session=True,
-                text=True,
-            )
-        except BaseException:
-            gate_pair.close()
-            stdout.close()
-            stderr.close()
-            raise
-        gate_pair.close_child_endpoint()
-        provider = FakeProvider(
+        provider = launch_fake_provider(
+            self.fake_provider_exe,
             self.root,
-            name,
-            process,
-            port_file,
-            request_log,
-            stdout_path,
-            stderr_path,
-            gate_pair.gates,
-            stdout,
-            stderr,
+            prefix=f"{name}-provider",
+            delay_ms=delay_ms,
+            scenario=scenario,
+            target=target,
+            environment=self._environment,
         )
         self._providers.append(provider)
-        deadline = time.monotonic() + 8.0
-        while not port_file.exists():
-            if process.poll() is not None:
-                stdout.close()
-                stderr.close()
-                raise RuntimeError(
-                    "fake provider exited before writing its port\n"
-                    f"stdout:\n{stdout_path.read_text(encoding='utf-8', errors='replace')}\n"
-                    f"stderr:\n{stderr_path.read_text(encoding='utf-8', errors='replace')}"
-                )
-            if time.monotonic() >= deadline:
-                provider.stop()
-                raise RuntimeError("timed out waiting for fake provider port")
-            time.sleep(0.05)
         return provider
 
     def fake_provider_command(

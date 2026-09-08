@@ -90,14 +90,6 @@ def load_tests(loader, standard_tests, pattern):
     return filter_discovered_tests(standard_tests)
 
 
-class GroupAwareTestLoader(unittest.TestLoader):
-    def loadTestsFromName(self, name, module=None):
-        return filter_discovered_tests(super().loadTestsFromName(name, module))
-
-    def loadTestsFromNames(self, names, module=None):
-        return filter_discovered_tests(super().loadTestsFromNames(names, module))
-
-
 def sanitize_fixture_git_output(text: str, *, limit: int = _FIXTURE_GIT_OUTPUT_LIMIT) -> str:
     if not text:
         return ""
@@ -2316,11 +2308,7 @@ def main() -> int:
     arguments, remaining = parser.parse_known_args()
     BenchmarkHarnessTests.script = arguments.script
     set_selected_test_group("process" if arguments.process_tests else "general")
-    program = unittest.main(
-        argv=[sys.argv[0], *remaining],
-        testLoader=GroupAwareTestLoader(),
-        exit=False,
-    )
+    program = unittest.main(argv=[sys.argv[0], *remaining], exit=False)
     return 0 if program.result.wasSuccessful() else 1
 
 

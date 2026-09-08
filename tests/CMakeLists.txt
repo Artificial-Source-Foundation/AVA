@@ -798,12 +798,18 @@ if(Python3_Interpreter_FOUND)
   set_tests_properties(ava_tests.sidebar_drawer_reflow_wait PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
   add_test(
+    NAME ava_tests.model_selector_wait
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/tui_tmux_scenarios/model_selector_wait_test.py)
+  set_tests_properties(ava_tests.model_selector_wait PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
+  add_test(
     NAME ava_benchmark.harness_self_test
     COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_test.py
             --script ${CMAKE_SOURCE_DIR}/scripts/benchmark-backend.py)
-  # The 70-case self-test takes about 15 seconds even without parallel CTest
-  # load; allow scheduling headroom without changing any benchmark budgets.
+  # General and process self-tests select disjoint groups. Retain the authored
+  # outer deadlines without changing any benchmark budgets.
   set_tests_properties(ava_benchmark.harness_self_test PROPERTIES
     TIMEOUT 30
     LABELS "benchmark;offline;self-test"

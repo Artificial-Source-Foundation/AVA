@@ -125,7 +125,7 @@ class BenchmarkDriverTests(unittest.TestCase):
         self.assertTrue(general)
         self.assertTrue(process)
 
-    def test_k_filter_and_exact_selector_stay_inside_selected_group(self) -> None:
+    def test_k_filter_stays_inside_selected_group(self) -> None:
         general_k = suite_case_names(self.load_group("general", ["*statistics_use_nearest*"]))
         process_k = suite_case_names(self.load_group("process", ["*statistics_use_nearest*"]))
         self.assertEqual(general_k, {"test_statistics_use_nearest_rank_p95"})
@@ -137,38 +137,13 @@ class BenchmarkDriverTests(unittest.TestCase):
         general_schema = suite_case_names(
             self.load_group("general", ["*process_schema_preserves_order*"])
         )
-        self.assertEqual(process_schema, {"test_process_schema_preserves_order_raw_correlation_and_metric_statistics"})
-        self.assertEqual(general_schema, set())
-
-        harness.set_selected_test_group("general")
-        loader = harness.GroupAwareTestLoader()
-        exact_general = suite_case_names(
-            loader.loadTestsFromName(
-                "BenchmarkHarnessTests.test_statistics_use_nearest_rank_p95",
-                harness,
-            )
-        )
-        harness.set_selected_test_group("process")
-        exact_blocked = suite_case_names(
-            loader.loadTestsFromName(
-                "BenchmarkHarnessTests.test_statistics_use_nearest_rank_p95",
-                harness,
-            )
-        )
-        exact_process = suite_case_names(
-            loader.loadTestsFromName(
-                "BenchmarkHarnessTests.test_process_schema_preserves_order_raw_correlation_and_metric_statistics",
-                harness,
-            )
-        )
-        self.assertEqual(exact_general, {"test_statistics_use_nearest_rank_p95"})
-        self.assertEqual(exact_blocked, set())
         self.assertEqual(
-            exact_process,
+            process_schema,
             {"test_process_schema_preserves_order_raw_correlation_and_metric_statistics"},
         )
+        self.assertEqual(general_schema, set())
 
-    def test_cli_flag_changes_default_group_without_crossing_selectors(self) -> None:
+    def test_cli_discovery_and_k_stay_in_selected_group(self) -> None:
         excluded_process = self.run_harness(
             "--process-tests",
             "-k",
@@ -184,13 +159,6 @@ class BenchmarkDriverTests(unittest.TestCase):
         self.assertEqual(excluded_general.returncode, 0, excluded_general.stderr)
         self.assertEqual(ran_count(excluded_general), 0)
 
-        excluded_exact = self.run_harness(
-            "--process-tests",
-            "BenchmarkHarnessTests.test_statistics_use_nearest_rank_p95",
-        )
-        self.assertEqual(excluded_exact.returncode, 0, excluded_exact.stderr)
-        self.assertEqual(ran_count(excluded_exact), 0)
-
         selected = self.run_harness(
             "-v",
             "-k",
@@ -200,6 +168,44 @@ class BenchmarkDriverTests(unittest.TestCase):
         self.assertEqual(selected.returncode, 0, selected.stderr)
         self.assertEqual(ran_count(selected), 1)
         self.assertIn("test_statistics_use_nearest_rank_p95", f"{selected.stderr}\n{selected.stdout}")
+
+    def test_explicit_selectors_override_automatic_grouping(self) -> None:
+        process_without_flag = self.run_harness(
+            "-v",
+            "BenchmarkHarnessTests.test_process_schema_preserves_order_raw_correlation_and_metric_statistics",
+            script=SCRIPT_PATH,
+        )
+        self.assertEqual(process_without_flag.returncode, 0, process_without_flag.stderr)
+        self.assertEqual(ran_count(process_without_flag), 1)
+        self.assertIn(
+            "test_process_schema_preserves_order_raw_correlation_and_metric_statistics",
+            f"{process_without_flag.stderr}\n{process_without_flag.stdout}",
+        )
+
+        general_with_flag = self.run_harness(
+            "--process-tests",
+            "-v",
+            "BenchmarkHarnessTests.test_statistics_use_nearest_rank_p95",
+            script=SCRIPT_PATH,
+        )
+        self.assertEqual(general_with_flag.returncode, 0, general_with_flag.stderr)
+        self.assertEqual(ran_count(general_with_flag), 1)
+        self.assertIn(
+            "test_statistics_use_nearest_rank_p95",
+            f"{general_with_flag.stderr}\n{general_with_flag.stdout}",
+        )
+
+    def test_invalid_selectors_fail_nonzero(self) -> None:
+        for selector in (
+            "BenchmarkHarnessTests.test_does_not_exist",
+            "NoSuchBenchmarkModule",
+            "BenchmarkHarnessTests.script",
+        ):
+            with self.subTest(selector=selector):
+                completed = self.run_harness(selector)
+                output = f"{completed.stderr}\n{completed.stdout}"
+                self.assertNotEqual(completed.returncode, 0, output)
+                self.assertIsNone(re.search(r"Ran 0 tests?\b", output))
 
     def test_sanitize_strips_terminal_controls_and_bounds_output(self) -> None:
         payload = "\x1b[31msecret=value\x1b[0m\x07" + ("x" * 5000)

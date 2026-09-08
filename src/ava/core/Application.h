@@ -1,5 +1,7 @@
 #pragma once
 
+#include "memory/MemoryPagePool.h"
+#include "memory/VectorAllocator.h"
 #include <string_view>
 #include "debug.h"
 
@@ -9,6 +11,13 @@ namespace ava::core {
 class Application
 {
  public:
+  using Vec8Alloc = memory::VectorAllocator<char>;
+
+ private:
+  memory::MemoryPagePool mpp_;          // Pool using the default block size (32 KiB); its first growth allocates at least two blocks (64 KiB).
+  Vec8Alloc vec8alloc_;                 // A geometric allocator for sizes 8, 16, 32, 64, ...
+
+ public:
   Application();
   Application(Application const&) = delete;
   Application& operator=(Application const&) = delete;
@@ -17,11 +26,13 @@ class Application
   virtual ~Application() noexcept;
 
   void initialize(int argc, char** argv);
+  Vec8Alloc vec8alloc() const { return vec8alloc_; }
 
   [[nodiscard]] static Application const& instance();
   [[nodiscard]] virtual std::string_view application_name() const noexcept = 0;
 
-  AVA_DEBUG_PRINT_MEMBERS_ON
+  // Can't print mpp_.
+  AVA_DEBUG_PRINT_MEMBERS_OPT_OUT
 
  private:
   bool initialized_ = false;

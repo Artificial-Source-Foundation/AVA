@@ -189,7 +189,8 @@ GraphemeSpan::GraphemeSpan(TextSpan const& source, columns_t max_columns, Horizo
       alignment_(alignment),
       right_align_excluding_trailing_whitespace_(false),
       columns_(0),
-      columns_excluding_trailing_whitespace_(0)
+      columns_excluding_trailing_whitespace_(0),
+      grapheme_runs_(core::Application::instance().vec8alloc())
 {
   try
   {

@@ -103,7 +103,7 @@ void test_paragraph_wrap_comment_example()
   std::wstring concatenated;
   for (auto row = rows.ibegin(); row != rows.iend() && row != expected.iend(); ++row)
   {
-    std::vector<terminal::GraphemeRun> const& grapheme_runs = rows[row].grapheme_runs();
+    auto const& grapheme_runs = rows[row].grapheme_runs();
 
     expect(rows[row].columns() == expected[row].columns, "row " + utils::to_string(row) + " must occupy " + std::to_string(expected[row].columns) +
                                                              " terminal columns, got " + std::to_string(rows[row].columns()));
@@ -325,16 +325,16 @@ void test_text_span_compact_cluster_metadata()
 //
 // Also checks the first row width against `expected_first_row_columns` so a cluster that straddles the boundary cannot merely
 // be split into two fragments that happen to remain on the same logical row.
-void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t columns, std::size_t expected_first_row_columns, std::string_view name)
+void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t columns, std::size_t expected_first_row_columns, std::string name)
 {
   auto paragraph = terminal::Paragraph::create({});
   paragraph->append(terminal::TextSpan::create(text));
   paragraph->initialize_cached_natural_width();
 
   terminal::GraphemeBlock const rows = paragraph->create_grapheme_block(columns);
-  expect(!rows.empty(), std::string{name} + " must produce at least one wrapped row");
+  expect(!rows.empty(), name + " must produce at least one wrapped row");
   if (!rows.empty())
-    expect(rows.front().columns() == expected_first_row_columns, std::string{name} + " first row must occupy " + std::to_string(expected_first_row_columns) +
+    expect(rows.front().columns() == expected_first_row_columns, name + " first row must occupy " + std::to_string(expected_first_row_columns) +
                                                                      " columns, got " + std::to_string(rows.front().columns()));
 
   for (auto row = rows.ibegin(); row != rows.iend(); ++row)
@@ -343,7 +343,7 @@ void expect_compact_clusters_stay_whole(std::u8string const& text, uint32_t colu
     {
       auto const& metadata = grapheme_run.metadata();
       expect(metadata.empty() || !metadata.front().combining,
-             std::string{name} + " row " + utils::to_string(row) + " must not begin a GraphemeRun inside a compact grapheme cluster");
+             name + " row " + utils::to_string(row) + " must not begin a GraphemeRun inside a compact grapheme cluster");
     }
   }
 }

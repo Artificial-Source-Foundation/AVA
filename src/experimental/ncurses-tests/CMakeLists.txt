@@ -1,11 +1,6 @@
 # CURSES_NEED_WIDE was added to 3.10
 cmake_minimum_required(VERSION 3.10...4.3.2)
 
-# Compile all subdirectories with the same standard.
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED OFF)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 project(ava-ncurses-tests
         VERSION 0.0
         DESCRIPTION "Tests to see if the fundamentals required for a TUI work on all platforms."

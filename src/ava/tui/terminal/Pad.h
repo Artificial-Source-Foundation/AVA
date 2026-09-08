@@ -23,7 +23,9 @@ class GraphemeSurface;
 class Pad
 {
  private:
-  std::vector<HorizontalLayout> horizontal_layouts_;    // The HorizontalLayout's that make up the content of this pad, in order.
+  using horizontal_layouts_type = std::vector<HorizontalLayout, core::Application::Vec8Alloc::rebind<HorizontalLayout>::other>;
+
+  horizontal_layouts_type horizontal_layouts_;          // The HorizontalLayout's that make up the content of this pad, in order.
   std::optional<BasicWindow> pad_;                      // The ncurses pad created by the last generate() call, if any.
 
  private:
@@ -34,7 +36,7 @@ class Pad
   GraphemeSurface generate_grapheme_surface(columns_t columns);
 
  public:
-  Pad() = default;
+  Pad() : horizontal_layouts_(core::Application::instance().vec8alloc()) { }
 
   // Append `horizontal_layout` to the end of the content of this pad.
   void append(HorizontalLayout&& horizontal_layout) { horizontal_layouts_.push_back(std::move(horizontal_layout)); }
@@ -64,7 +66,7 @@ class Pad
   void prefresh(Position pad_pos, Position screen_pos, Dimension screen_size);
 
   // Accessor.
-  std::vector<HorizontalLayout> const& horizontal_layouts() const { return horizontal_layouts_; }
+  horizontal_layouts_type const& horizontal_layouts() const { return horizontal_layouts_; }
 
   // Return the dimensions of the generated ncurses pad.
   Dimension dimension() const;

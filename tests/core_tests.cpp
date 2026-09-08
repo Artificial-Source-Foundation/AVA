@@ -1,5 +1,6 @@
 #include "sys.h"
 #include "tests/support/test_harness.h"
+#include "ava/app/Application.h"
 #include "ava/app/ava_debug.h"
 #include "ava/core/path.h"
 #include "ava/core/trusted_home.h"
@@ -14,6 +15,7 @@
 #include <array>
 #include <cstdlib>
 #include <iostream>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <unistd.h>
@@ -201,6 +203,15 @@ void run_suite(TestSuite const& suite)
   }
 }
 
+// Initialize the process-wide test Application with a minimal synthetic
+// command line so test-runner suite arguments never become application input.
+void initialize_test_process_application(ava::app::Application& application)
+{
+  char executable[] = "ava_tests";
+  char* application_argv[] = {executable, nullptr};
+  application.initialize(1, application_argv);
+}
+
 int print_failures()
 {
   int const failures = ava::tests::failures();
@@ -270,6 +281,12 @@ int main(int argc, char** argv)
   if (auto result = ava::core::load_account_once_and_freeze(); !result)
     std::cerr << "warning: failed to load trusted account: " << result.error().format() << '\n';
 
+  // Give every ordinary test suite the same process-lifetime Application that
+  // production constructs before entering app::run. The core_mode suite owns
+  // temporary Application instances in order to test the lifecycle contract,
+  // so it must run before this process-wide instance is published.
+  std::optional<ava::app::Application> application;
+
   if (argc == 2)
   {
     std::string_view const requested_suite = argv[1];
@@ -277,6 +294,11 @@ int main(int argc, char** argv)
     {
       if (suite.name == requested_suite)
       {
+        if (suite.name != "core_mode")
+        {
+          application.emplace();
+          initialize_test_process_application(*application);
+        }
         run_suite(suite);
         if (ava::tests::failures() == 0 && ava::tests::skip_requested())
           return 77;
@@ -296,6 +318,15 @@ int main(int argc, char** argv)
 
   for (auto const& suite : kTestSuites)
   {
+    if (suite.name == "core_mode")
+      suite.run();
+  }
+  application.emplace();
+  initialize_test_process_application(*application);
+  for (auto const& suite : kTestSuites)
+  {
+    if (suite.name == "core_mode")
+      continue;
     suite.run();
   }
 

@@ -29,65 +29,11 @@ def load_module(path: pathlib.Path):
     return module
 
 
-GENERAL_CASE_NAMES = frozenset(
-    {
-        "test_statistics_use_nearest_rank_p95",
-        "test_argument_validation_requires_positive_runs_and_ava",
-        "test_smoke_without_benchmark_helper_fails_before_execution",
-        "test_smoke_rejects_non_executable_helper_but_baseline_may_omit_it",
-        "test_environment_is_a_fixed_allowlist",
-        "test_idle_memory_uses_run_maximum_and_retains_raw_snapshots",
-        "test_run_helper_rejects_zero_runtime_samples_without_assert",
-        "test_file_identity_hashes_bytes_with_python_stdlib",
-        "test_schema_requires_every_family_and_source_build_identity",
-        "test_schema_requires_artifact_hashes_and_plugin_entrypoint_identity",
-        "test_schema_requires_real_native_registry_lookup_identity",
-        "test_measured_schema_rejects_missing_statistics",
-        "test_required_smoke_seams_fail_when_unsupported",
-        "test_historical_v2_artifact_still_validates",
-    }
-)
-_SELECTED_TEST_GROUP = "general"
 _FIXTURE_GIT_OUTPUT_LIMIT = 2048
 _FIXTURE_GIT_ISOLATION = None
 _TERMINAL_CONTROL_RE = re.compile(
     r"\x1b(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~]|].*?(?:\x07|\x1b\\))"
 )
-
-
-def set_selected_test_group(group: str) -> None:
-    global _SELECTED_TEST_GROUP
-    if group not in ("general", "process"):
-        raise ValueError(f"unknown benchmark self-test group: {group}")
-    _SELECTED_TEST_GROUP = group
-
-
-def case_name_group(name: str) -> str:
-    return "general" if name in GENERAL_CASE_NAMES else "process"
-
-
-def _iter_tests(suite):
-    for item in suite:
-        if isinstance(item, unittest.TestSuite):
-            yield from _iter_tests(item)
-        else:
-            yield item
-
-
-def _case_name(test: unittest.TestCase) -> str:
-    return test.id().rsplit(".", 1)[-1]
-
-
-def filter_discovered_tests(standard_tests):
-    suite = unittest.TestSuite()
-    for test in _iter_tests(standard_tests):
-        if case_name_group(_case_name(test)) == _SELECTED_TEST_GROUP:
-            suite.addTest(test)
-    return suite
-
-
-def load_tests(loader, standard_tests, pattern):
-    return filter_discovered_tests(standard_tests)
 
 
 def sanitize_fixture_git_output(text: str, *, limit: int = _FIXTURE_GIT_OUTPUT_LIMIT) -> str:
@@ -939,7 +885,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "non-negative"):
             self.module.validate_process_document(document)
 
-    def test_helper_v2_preserves_observations_and_accepts_static_unsupported(self) -> None:
+    def test_process_helper_v2_preserves_observations_and_accepts_static_unsupported(self) -> None:
         measured = {
             "helper_schema_version": self.module.PROCESS_HELPER_SCHEMA_VERSION,
             "case": "process-first-spawn",
@@ -1052,7 +998,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "not executable"):
                 self.module.validate_arguments(args)
 
-    def test_measured_source_root_validation_is_process_only_and_precedes_execution(self) -> None:
+    def test_process_measured_source_root_validation_precedes_execution(self) -> None:
         repository = pathlib.Path(self.script).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -1086,7 +1032,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                     self.assertFalse(output.exists())
                     execute_process.assert_not_called()
 
-    def test_default_process_source_root_retains_script_repository_identity(self) -> None:
+    def test_process_default_source_root_retains_script_repository_identity(self) -> None:
         repository = pathlib.Path(self.script).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             args = self.module.build_parser().parse_args(
@@ -1109,7 +1055,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.module.validate_arguments(non_process)
         self.assertIsNone(non_process.measured_source_root)
 
-    def test_git_status_failures_remain_unresolved_not_false_clean(self) -> None:
+    def test_process_git_status_failures_remain_unresolved_not_false_clean(self) -> None:
         def git_identity_run(command, **_kwargs):
             if "status" in command:
                 return subprocess.CompletedProcess(command, 2, "", "status failed")
@@ -1147,7 +1093,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
             provenance = self.module.process_source_provenance(repository, repository, "HEAD")
         self.assertIsNone(provenance["runtime_reference"]["measured_production_paths_dirty"])
 
-    def test_explicit_measured_source_root_is_retained_in_exact_command_and_build_match(self) -> None:
+    def test_process_explicit_measured_source_root_is_retained_in_exact_command_and_build_match(self) -> None:
         repository = pathlib.Path(self.script).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -1182,7 +1128,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.assertIs(matching["provenance"]["cmake_source_root_matches_recorded_source"], True)
             self.assertIs(nonmatching["provenance"]["cmake_source_root_matches_recorded_source"], False)
 
-    def test_distinct_measured_worktrees_share_one_content_correct_harness(self) -> None:
+    def test_process_distinct_measured_worktrees_share_one_content_correct_harness(self) -> None:
         harness_repository = pathlib.Path(self.script).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -1286,7 +1232,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
             self.assertEqual(comparison["status"], "measured")
             self.assertNotIn("fixture_hashes", comparison.get("mismatches", []))
 
-    def test_git_pathspec_family_scopes_capture_new_split_files(self) -> None:
+    def test_process_git_pathspec_family_scopes_capture_new_split_files(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             repository = pathlib.Path(temporary) / "repository"
             repository.mkdir()
@@ -1342,7 +1288,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                         before[family]["scope_digest_sha256"],
                     )
 
-    def test_exact_plugin_pair_has_isolated_family_and_changed_shared_scopes(self) -> None:
+    def test_process_exact_plugin_pair_has_isolated_family_and_changed_shared_scopes(self) -> None:
         repository = pathlib.Path(self.script).resolve().parents[1]
         before_revision = "13fb0cef5925368fa12f8bcf693235281bce099f"
         after_revision = "2a30f40ec562b49915c3b09369cf4e6897de3d4d"
@@ -1385,7 +1331,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 },
             )
 
-    def test_force_removes_linked_worktree_with_initialized_submodule_without_deinit(self) -> None:
+    def test_process_force_removes_linked_worktree_with_initialized_submodule_without_deinit(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             submodule = root / "submodule"
@@ -1461,13 +1407,13 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "split fields must be present atomically"):
                     self.module.validate_process_document(document)
 
-    def test_historical_v3_without_helper_build_binding_still_validates(self) -> None:
+    def test_process_historical_v3_without_helper_build_binding_still_validates(self) -> None:
         document = self.valid_process_document()
         for field in ("family_authorities", "benchmark_helper_build", "binary_build_binding"):
             del document["provenance"][field]
         self.module.validate_process_document(document)
 
-    def test_historical_v3_source_identity_format_validates_but_cannot_compare(self) -> None:
+    def test_process_historical_v3_source_identity_format_validates_but_cannot_compare(self) -> None:
         before, after = self.comparison_documents()
         before["provenance"]["family_sources"] = {
             family: {
@@ -1484,7 +1430,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.assertEqual(comparison["reason_code"], "comparison_provenance_required")
         self.assertEqual(comparison["mismatches"], ["before.source_ownership_scopes"])
 
-    def test_historical_v3_without_provenance_split_validates_but_cannot_compare(self) -> None:
+    def test_process_historical_v3_without_provenance_split_validates_but_cannot_compare(self) -> None:
         for measured_repository_present in (False, True):
             with self.subTest(measured_repository_present=measured_repository_present):
                 before, after = self.comparison_documents()
@@ -1500,7 +1446,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                 self.assertEqual(comparison["reason_code"], "provenance_split_required")
                 self.assertEqual(comparison["mismatches"], ["before.provenance_split"])
 
-    def test_standalone_process_document_allows_dirty_source_and_harness(self) -> None:
+    def test_process_standalone_document_allows_dirty_source_and_harness(self) -> None:
         document = self.valid_process_document()
         document["provenance"]["measured_checkout"]["dirty"] = True
         document["provenance"]["runtime_reference"]["measured_production_paths_dirty"] = True
@@ -2054,7 +2000,7 @@ class BenchmarkHarnessTests(unittest.TestCase):
                     comparison["mismatches"],
                 )
 
-    def test_wrong_but_valid_measured_root_is_structured_unsupported(self) -> None:
+    def test_process_wrong_but_valid_measured_root_is_structured_unsupported(self) -> None:
         before, after = self.comparison_documents()
         before["provenance"]["build"]["best_effort_provenance"][
             "cmake_source_root_matches_recorded_source"
@@ -2301,14 +2247,38 @@ class BenchmarkHarnessTests(unittest.TestCase):
         self.module.validate_document(document)
 
 
+class BenchmarkTestLoader(unittest.TestLoader):
+    """Discover exactly one benchmark family selected by process_tests.
+
+    Process tests use the test_process_ or test_comparison_ prefix. All other
+    methods belong to the original backend harness partition.
+    """
+
+    def __init__(self, process_tests: bool) -> None:
+        super().__init__()
+        self.process_tests = process_tests
+
+    def getTestCaseNames(self, test_case_class: type[unittest.TestCase]) -> list[str]:
+        names = super().getTestCaseNames(test_case_class)
+        return [name for name in names if self.is_process_test(name) == self.process_tests]
+
+    @staticmethod
+    def is_process_test(name: str) -> bool:
+        return name.startswith(("test_process_", "test_comparison_"))
+
+
 def main() -> int:
+    """Run either the backend or process benchmark self-test partition."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--script", required=True)
     parser.add_argument("--process-tests", action="store_true", help=argparse.SUPPRESS)
     arguments, remaining = parser.parse_known_args()
     BenchmarkHarnessTests.script = arguments.script
-    set_selected_test_group("process" if arguments.process_tests else "general")
-    program = unittest.main(argv=[sys.argv[0], *remaining], exit=False)
+    program = unittest.main(
+        argv=[sys.argv[0], *remaining],
+        exit=False,
+        testLoader=BenchmarkTestLoader(arguments.process_tests),
+    )
     return 0 if program.result.wasSuccessful() else 1
 
 

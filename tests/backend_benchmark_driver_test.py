@@ -30,8 +30,21 @@ def discovered_method_names() -> list[str]:
     ]
 
 
+def iter_suite_tests(suite):
+    for item in suite:
+        if isinstance(item, unittest.TestSuite):
+            yield from iter_suite_tests(item)
+        else:
+            yield item
+
+
 def suite_case_names(suite) -> set[str]:
-    return {harness._case_name(test) for test in harness._iter_tests(suite)}
+    return {test.id().rsplit(".", 1)[-1] for test in iter_suite_tests(suite)}
+
+
+def expected_general_method_names() -> frozenset[str]:
+    names = discovered_method_names()
+    return frozenset([*names[:13], "test_historical_v2_artifact_still_validates"])
 
 
 def ran_count(completed: subprocess.CompletedProcess[str]) -> int | None:
@@ -55,15 +68,17 @@ def write_canary(path: pathlib.Path, marker: pathlib.Path, code: int = 42) -> No
 
 
 class BenchmarkDriverTests(unittest.TestCase):
-    def setUp(self) -> None:
-        self._previous_group = harness._SELECTED_TEST_GROUP
-        self.addCleanup(lambda: harness.set_selected_test_group(self._previous_group))
-
-    def load_group(self, group: str, patterns: list[str] | None = None):
-        harness.set_selected_test_group(group)
-        loader = unittest.TestLoader()
+    def load_group(
+        self,
+        process_tests: bool,
+        patterns: list[str] | None = None,
+        selector: str | None = None,
+    ):
+        loader = harness.BenchmarkTestLoader(process_tests)
         if patterns is not None:
             loader.testNamePatterns = patterns
+        if selector is not None:
+            return loader.loadTestsFromName(selector, harness)
         return loader.loadTestsFromModule(harness)
 
     def run_harness(self, *args: str, script: pathlib.Path | str | None = None, timeout: int = 10):
@@ -86,19 +101,19 @@ class BenchmarkDriverTests(unittest.TestCase):
             check=False,
         )
 
-    def test_general_metadata_matches_first_thirteen_plus_historical_v2(self) -> None:
+    def test_loader_classification_matches_first_thirteen_plus_historical_v2(self) -> None:
         names = discovered_method_names()
-        expected_general = frozenset([*names[:13], "test_historical_v2_artifact_still_validates"])
-        process_names = frozenset(names) - expected_general
+        expected_general = expected_general_method_names()
+        classified_general = frozenset(
+            name for name in names if not harness.BenchmarkTestLoader.is_process_test(name)
+        )
+        process_names = frozenset(names) - classified_general
         self.assertEqual(len(names), 70)
-        self.assertEqual(harness.GENERAL_CASE_NAMES, expected_general)
-        self.assertEqual(len(harness.GENERAL_CASE_NAMES), 14)
+        self.assertEqual(classified_general, expected_general)
+        self.assertEqual(len(classified_general), 14)
         self.assertEqual(len(process_names), 56)
-        self.assertTrue(harness.GENERAL_CASE_NAMES.isdisjoint(process_names))
-        self.assertEqual(harness.GENERAL_CASE_NAMES | process_names, frozenset(names))
-        self.assertTrue(harness.GENERAL_CASE_NAMES)
-        self.assertTrue(process_names)
-        self.assertTrue(harness.GENERAL_CASE_NAMES.issubset(names))
+        self.assertTrue(classified_general.isdisjoint(process_names))
+        self.assertEqual(classified_general | process_names, frozenset(names))
 
     def test_ctest_entries_preserve_both_names_and_timeouts(self) -> None:
         cmake = (TESTS_DIR / "CMakeLists.txt").read_text(encoding="utf-8")
@@ -113,29 +128,38 @@ class BenchmarkDriverTests(unittest.TestCase):
             cmake,
             r"set_tests_properties\(ava_benchmark\.process_harness_self_test PROPERTIES\s+TIMEOUT 30",
         )
+        self.assertRegex(
+            cmake,
+            r"set_tests_properties\(ava_tests\.model_selector_wait PROPERTIES TIMEOUT 15",
+        )
+        self.assertRegex(
+            cmake,
+            r"set_tests_properties\(ava_tests\.benchmark_driver PROPERTIES TIMEOUT 15",
+        )
 
-    def test_load_tests_groups_are_disjoint_and_complete(self) -> None:
+    def test_loader_groups_are_disjoint_and_complete(self) -> None:
         names = frozenset(discovered_method_names())
-        general = suite_case_names(self.load_group("general"))
-        process = suite_case_names(self.load_group("process"))
-        self.assertEqual(general, harness.GENERAL_CASE_NAMES)
-        self.assertEqual(process, names - harness.GENERAL_CASE_NAMES)
+        expected_general = expected_general_method_names()
+        general = suite_case_names(self.load_group(False))
+        process = suite_case_names(self.load_group(True))
+        self.assertEqual(general, expected_general)
+        self.assertEqual(process, names - expected_general)
+        self.assertEqual(len(general), 14)
+        self.assertEqual(len(process), 56)
         self.assertFalse(general & process)
         self.assertEqual(general | process, names)
-        self.assertTrue(general)
-        self.assertTrue(process)
 
     def test_k_filter_stays_inside_selected_group(self) -> None:
-        general_k = suite_case_names(self.load_group("general", ["*statistics_use_nearest*"]))
-        process_k = suite_case_names(self.load_group("process", ["*statistics_use_nearest*"]))
+        general_k = suite_case_names(self.load_group(False, ["*statistics_use_nearest*"]))
+        process_k = suite_case_names(self.load_group(True, ["*statistics_use_nearest*"]))
         self.assertEqual(general_k, {"test_statistics_use_nearest_rank_p95"})
         self.assertEqual(process_k, set())
 
         process_schema = suite_case_names(
-            self.load_group("process", ["*process_schema_preserves_order*"])
+            self.load_group(True, ["*process_schema_preserves_order*"])
         )
         general_schema = suite_case_names(
-            self.load_group("general", ["*process_schema_preserves_order*"])
+            self.load_group(False, ["*process_schema_preserves_order*"])
         )
         self.assertEqual(
             process_schema,
@@ -170,6 +194,15 @@ class BenchmarkDriverTests(unittest.TestCase):
         self.assertIn("test_statistics_use_nearest_rank_p95", f"{selected.stderr}\n{selected.stdout}")
 
     def test_explicit_selectors_override_automatic_grouping(self) -> None:
+        general_class = suite_case_names(
+            self.load_group(False, selector="BenchmarkHarnessTests")
+        )
+        process_class = suite_case_names(
+            self.load_group(True, selector="BenchmarkHarnessTests")
+        )
+        self.assertEqual(len(general_class), 14)
+        self.assertEqual(len(process_class), 56)
+
         process_without_flag = self.run_harness(
             "-v",
             "BenchmarkHarnessTests.test_process_schema_preserves_order_raw_correlation_and_metric_statistics",

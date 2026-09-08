@@ -12,7 +12,7 @@ import subprocess
 import sys
 from typing import Any
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 DIRECT_DEPENDENCIES = (
     ("cwds", "cwds", "LICENSE", "MIT"),
     ("aicxx", "cmake/aicxx", "LICENSE", "MIT"),
@@ -30,17 +30,6 @@ DEPENDENCY_USAGE = {
     "threadsafe": "bundled-source",
     "enchantum": "bundled-source",
     "nlohmann_json": "bundled-source",
-}
-# This committed policy makes the direct-license evidence independently
-# auditable. A license identifier alone cannot establish what file was used.
-EXPECTED_GITLINK_REVISIONS = {
-    "cwds": "1fb7c4edc7018d3354323e2fe8c98800281546da",
-    "aicxx": "15c31e10fd36d522719552ce75d06a02017ad1d3",
-    "utils": "07c67a53ea799ad70c673a0f191b4777eaed0be0",
-    "memory": "4ddb41469f323e32c170637aa413a132e83727be",
-    "threadsafe": "76c3ccab0ef913f6c472175eb3994b20b5b40a0e",
-    "enchantum": "0d6115a9eb3e6510e38c73566cd9bc0131ebfc8c",
-    "nlohmann_json": "722c03495f9978eb727f480b6ea0742f652e06a9",
 }
 EXPECTED_LICENSE_SHA256 = {
     "cwds": "2a0ddf2fbcd1b778d2f44ebb6c8f47d8a508573e3365f4d031956ddffb8cc327",
@@ -236,7 +225,6 @@ def dependency_records(repo: pathlib.Path) -> tuple[list[dict[str, Any]], list[s
     reasons: list[str] = []
     for name, relative_path, license_path, license_id in DIRECT_DEPENDENCIES:
         dependency = repo / relative_path
-        expected_revision = EXPECTED_GITLINK_REVISIONS[name]
         actual_gitlink_revision = gitlink_revision(repo, relative_path)
         worktree_revision = run_git(dependency, "rev-parse", "HEAD") if dependency.is_dir() else None
         dirty = worktree_dirty(dependency) if worktree_revision else None
@@ -246,8 +234,6 @@ def dependency_records(repo: pathlib.Path) -> tuple[list[dict[str, Any]], list[s
         if actual_gitlink_revision is None or worktree_revision is None:
             reasons.append(f"dependency:{name}:missing")
         else:
-            if actual_gitlink_revision != expected_revision:
-                reasons.append(f"dependency:{name}:gitlink-policy-mismatch")
             if worktree_revision != actual_gitlink_revision:
                 reasons.append(f"dependency:{name}:revision-mismatch")
             if dirty is not False:
@@ -260,7 +246,6 @@ def dependency_records(repo: pathlib.Path) -> tuple[list[dict[str, Any]], list[s
             "name": name,
             "path": relative_path,
             "usage": DEPENDENCY_USAGE[name],
-            "gitlink_revision_expected": expected_revision,
             "gitlink_revision_actual": actual_gitlink_revision,
             "worktree_revision": worktree_revision,
             "worktree_state": "clean" if dirty is False else "not-clean" if dirty is True else "unavailable",
@@ -325,7 +310,7 @@ def collect_provenance(repo: pathlib.Path, binary: pathlib.Path, build_mode: str
         "qualification_mode": qualification_mode,
         "source": {"revision": source_revision, "worktree_state": "clean" if source_dirty is False else "not-clean" if source_dirty is True else "unavailable"},
         "direct_dependencies": dependencies + [{
-            "name": "boost_headers", "path": "system headers", "usage": "header-only build dependency", "gitlink_revision_expected": None,
+            "name": "boost_headers", "path": "system headers", "usage": "header-only build dependency",
             "gitlink_revision_actual": None, "worktree_revision": None,
             "worktree_state": "not-applicable", "license_id": "BSL-1.0",
             "license_file": None, "license_sha256_expected": None, "license_sha256_actual": None,

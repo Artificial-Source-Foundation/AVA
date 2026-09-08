@@ -72,7 +72,7 @@ GraphemeBlock TextSpan::create_grapheme_block() const
 {
   columns_t const width = assigned_width().columns();
   GraphemeSpan row{*this, width, horizontal_alignment()};
-  GraphemeBlock block;
+  GraphemeBlock block(core::Application::instance().vec8alloc());
   block.emplace_back(std::move(row));
   return block;
 }

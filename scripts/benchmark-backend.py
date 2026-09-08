@@ -2872,21 +2872,41 @@ def _resolved_artifact_identity(identity: Any) -> bool:
     )
 
 
-def _resolved_paths_equal(first: Any, second: Any) -> bool:
-    if not _is_resolved_text(first) or not _is_resolved_text(second):
-        return False
+def _resolve_recorded_path(value: Any) -> Path | None:
+    """Resolve a recorded path while rejecting loops on every supported Python.
+
+    Missing synthetic paths remain comparable for offline document validation.
+    Other resolution failures, including symlink loops, fail closed.
+    """
+    if not _is_resolved_text(value):
+        return None
     try:
-        return Path(first).resolve() == Path(second).resolve()
+        return Path(value).resolve(strict=True)
+    except FileNotFoundError:
+        try:
+            return Path(value).resolve(strict=False)
+        except (OSError, RuntimeError, ValueError):
+            return None
     except (OSError, RuntimeError, ValueError):
+        return None
+
+
+def _resolved_paths_equal(first: Any, second: Any) -> bool:
+    first_path = _resolve_recorded_path(first)
+    second_path = _resolve_recorded_path(second)
+    if first_path is None or second_path is None:
         return False
+    return first_path == second_path
 
 
 def _path_is_within(path: Any, directory: Any) -> bool:
-    if not _is_resolved_text(path) or not _is_resolved_text(directory):
+    resolved_path = _resolve_recorded_path(path)
+    resolved_directory = _resolve_recorded_path(directory)
+    if resolved_path is None or resolved_directory is None:
         return False
     try:
-        Path(path).resolve().relative_to(Path(directory).resolve())
-    except (OSError, RuntimeError, ValueError):
+        resolved_path.relative_to(resolved_directory)
+    except ValueError:
         return False
     return True
 

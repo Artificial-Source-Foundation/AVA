@@ -100,7 +100,7 @@ class CompactClusterState
 
 } // namespace
 
-GraphemeRun::GraphemeRun(TextSpan const& text_span, columns_t max_columns) : text_span_(&text_span)
+GraphemeRun::GraphemeRun(TextSpan const& text_span, columns_t max_columns) : text_span_(&text_span), metadata_(core::Application::instance().vec8alloc())
 {
   // Do not try to construct a GrapheRun clipped to zero columns.
   ASSERT(max_columns > 0);

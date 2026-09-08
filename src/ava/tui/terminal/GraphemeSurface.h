@@ -13,13 +13,18 @@ namespace ava::tui::terminal {
 class GraphemeSurface
 {
  private:
-  std::vector<GraphemeBlockRow> blocks_rows_;
+  using blocks_rows_type = std::vector<GraphemeBlockRow, core::Application::Vec8Alloc::rebind<GraphemeBlockRow>::other>;
+
+  blocks_rows_type blocks_rows_;
   uint32_t height_{};                           // The height of the surface, in terminal rows.
   columns_t width_{};                           // The width of the widest block row, in terminal columns.
 
  public:
   // Construct an empty GraphemeSurface pre-allocating a capacity of `reserve_blocks` GraphemeBlockRow's.
-  GraphemeSurface(std::size_t reserve_blocks) { blocks_rows_.reserve(reserve_blocks); }
+  GraphemeSurface(std::size_t reserve_blocks) : blocks_rows_(core::Application::instance().vec8alloc())
+  {
+    blocks_rows_.reserve(core::Application::Vec8Alloc::optimal_capacity(reserve_blocks));
+  }
 
   void append(GraphemeBlockRow&& block_row)
   {
@@ -30,7 +35,7 @@ class GraphemeSurface
 
   // Accessors
 
-  std::vector<GraphemeBlockRow> const& blocks_rows() const { return blocks_rows_; }
+  blocks_rows_type const& blocks_rows() const { return blocks_rows_; }
   uint32_t height() const { return height_; }
   columns_t width() const { return width_; }
 

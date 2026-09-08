@@ -65,7 +65,7 @@ GraphemeBlock Paragraph::create_grapheme_block(columns_t columns) const
   // The algorithm requires at least one terminal column so wrapping can always make progress.
   ASSERT(columns > 0);
 
-  GraphemeBlock grapheme_block;
+  GraphemeBlock grapheme_block(core::Application::instance().vec8alloc());
   GraphemeSpan grapheme_span{columns, horizontal_alignment()};
 
   for (std::unique_ptr<TextSpan> const& text_span : text_spans_)

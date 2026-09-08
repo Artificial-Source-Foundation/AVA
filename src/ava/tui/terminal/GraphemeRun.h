@@ -1,5 +1,6 @@
 #pragma once
 
+#include "ava/core/Application.h"
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -50,11 +51,12 @@ class GraphemeRun
   };
 
  private:
+  using metadata_type = std::vector<Metadata, core::Application::Vec8Alloc::rebind<Metadata>::other>;
   friend class GraphemeSpan;
 
   TextSpan const* text_span_;           // The source.
   std::wstring str_;                    // The wide characters of a run of grapheme clusters.
-  std::vector<Metadata> metadata_;      // The meta data of the characters in str_.
+  metadata_type metadata_;              // The meta data of the characters in str_.
 
  private:
   void copy_prefix(GraphemeRun const& source, std::size_t size)
@@ -111,13 +113,13 @@ class GraphemeRun
  public:
   // Accessors.
   std::wstring const& str() const { return str_; }
-  std::vector<Metadata> const& metadata() const { return metadata_; }
+  metadata_type const& metadata() const { return metadata_; }
 
   bool empty() const { return str_.empty(); }
   std::pair<columns_t, columns_t> get_columns() const;
 
   // Construct an empty GraphemeRun.
-  GraphemeRun() : text_span_(nullptr) { }
+  GraphemeRun() : text_span_(nullptr), metadata_(core::Application::instance().vec8alloc()) { }
 
   // Construct a GraphemeRun from `parent`, clipping before the first whole cluster that would exceed `max_columns`.
   //

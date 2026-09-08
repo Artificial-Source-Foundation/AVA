@@ -838,6 +838,12 @@ if(Python3_Interpreter_FOUND)
     LABELS "benchmark;process;offline;self-test"
     ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
 
+  add_test(
+    NAME ava_tests.benchmark_driver
+    COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_CURRENT_SOURCE_DIR}/backend_benchmark_driver_test.py)
+  set_tests_properties(ava_tests.benchmark_driver PROPERTIES TIMEOUT 15 ENVIRONMENT "PYTHONDONTWRITEBYTECODE=1")
+
   set(AVA_BENCHMARK_PROCESS_FIXTURE_ARGS)
   if(TARGET ava_fake_process_child)
     list(APPEND AVA_BENCHMARK_PROCESS_FIXTURE_ARGS --fake-process-child $<TARGET_FILE:ava_fake_process_child>)
